@@ -4,7 +4,7 @@ import { PageContainer, ProLayout } from '@ant-design/pro-components'
 import { RouteType, router } from '@config/routes'
 import { useAsyncEffect } from 'ahooks'
 import { Dropdown, MenuProps } from 'antd'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Outlet, matchRoutes, useLocation, useNavigate } from 'react-router-dom'
 import defaultProps from '@/_defaultProps'
 import Settings from '@config/defaultSettings'
@@ -23,12 +23,13 @@ export const GlobalUserInfo = React.createContext<Partial<User.UserEntity>>({})
 
 const BasicLayout: React.FC = props => {
   const { t } = useTranslation()
-  const [pathname, setPathname] = useState(window.location.hash.replace('#', ''))
   const navigate = useNavigate()
   const location = useLocation()
   const matchRoute = matchRoutes(routers, location)
 
-  const [showLayout, setShowLayout] = useState(false)
+  // 💡 使用派生状态（Derived State），直接在渲染期计算，避免无限循环
+  const pathname = location.hash.replace('#', '')
+  const showLayout = !matchRoute?.[matchRoute?.length - 1]?.route?.hideLayout
 
   /** 处理菜单权限隐藏菜单 */
   const reduceRouter = (routers: RouteType[]): RouteType[] => {
@@ -71,11 +72,6 @@ const BasicLayout: React.FC = props => {
       }
     }) as any
   }
-
-  useEffect(() => {
-    setPathname(window.location.hash.replace('#', ''))
-    setShowLayout(!matchRoute?.[matchRoute?.length - 1]?.route?.hideLayout)
-  }, [window.location.hash])
 
   useAsyncEffect(async () => {
     if (pathname !== '/login') {

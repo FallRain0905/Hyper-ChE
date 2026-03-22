@@ -5,6 +5,8 @@ class GlobalUser {
   userInfo: Partial<User.UserEntity> = {}
   selectedDatabase: string = ''
   availableDatabases: Array<{ name: string; description: string }> = []
+  private isLoadingDatabases: boolean = false
+  private lastSetDbValue: string = ''
 
   constructor() {
     makeAutoObservable(this)
@@ -36,51 +38,48 @@ class GlobalUser {
 
   // 设置当前选中的数据库
   setSelectedDatabase(database: string) {
+    console.log('[GlobalUser] setSelectedDatabase 被调用:', database, '当前 lastSetDbValue:', this.lastSetDbValue);
+    // 防止重复设置相同值
+    if (this.lastSetDbValue === database) {
+      console.log('[GlobalUser] 跳过重复设置');
+      return;
+    }
+    this.lastSetDbValue = database;
     this.selectedDatabase = database
     // 保存到localStorage
     localStorage.setItem('selectedDatabase', database)
+    console.log('[GlobalUser] selectedDatabase 已更新为:', database);
   }
 
   // 设置可用数据库列表
   setAvailableDatabases(databases: Array<{ name: string; description: string }>) {
+    console.log('[GlobalUser] setAvailableDatabases 被调用，数据库数量:', databases.length);
     this.availableDatabases = databases
-    // 只在当前没有选中数据库时才自动选择第一个数据库
-    // 避免循环：不主动调用 setSelectedDatabase，只更新 selectedDatabase 状态
-    if (!this.selectedDatabase && databases.length > 0) {
-      this.selectedDatabase = databases[0].name
-      localStorage.setItem('selectedDatabase', databases[0].name)
-    }
-
-    // 如果当前选中的数据库不在可用列表中，更新为第一个可用数据库
-    if (this.selectedDatabase && databases.length > 0) {
-      const existsInAvailable = databases.some(db => db.name === this.selectedDatabase)
-      if (!existsInAvailable) {
-        this.selectedDatabase = databases[0].name
-        localStorage.setItem('selectedDatabase', databases[0].name)
-      }
-    }
+    // 注意：不再自动修改 selectedDatabase，让用户自己选择
+    // 避免循环：不主动调用 setSelectedDatabase，只更新 availableDatabases 状态
   }
 
   // 从localStorage恢复选中的数据库
   restoreSelectedDatabase() {
     const saved = localStorage.getItem('selectedDatabase')
-    if (saved) {
-      // 如果已加载可用数据库，则进行校验；否则先恢复，待可用数据库加载后再由 setAvailableDatabases 校验
-      if (this.availableDatabases.length > 0) {
-        const existsInAvailable = this.availableDatabases.some(db => db.name === saved)
-        if (existsInAvailable) {
-          this.selectedDatabase = saved
-        } else if (this.availableDatabases.length > 0) {
-          this.setSelectedDatabase(this.availableDatabases[0].name)
-        }
-      } else {
-        this.selectedDatabase = saved
-      }
+    console.log('[GlobalUser] restoreSelectedDatabase 被调用, saved:', saved, '当前 selectedDatabase:', this.selectedDatabase);
+    if (saved && !this.selectedDatabase) {
+      // 只在没有选中数据库时才恢复
+      this.selectedDatabase = saved
+      this.lastSetDbValue = saved;  // 同时更新 lastSetDbValue 防止被 setSelectedDatabase 阻止
+      console.log('[GlobalUser] 已从 localStorage 恢复数据库:', saved);
     }
   }
 
   // 获取数据库列表
   async loadDatabases() {
+    // 防止重复调用
+    if (this.isLoadingDatabases) {
+      return [];
+    }
+
+    this.isLoadingDatabases = true;
+
     try {
       const response = await fetch(`${SERVER_URL}/databases`)
       if (response.ok) {
@@ -90,7 +89,10 @@ class GlobalUser {
       }
     } catch (error) {
       console.error('加载数据库列表失败:', error)
+    } finally {
+      this.isLoadingDatabases = false;
     }
+
     return []
   }
 }

@@ -1,11 +1,52 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Card, Spin, Button, Statistic, message, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
+import { observer } from 'mobx-react';
 import { storeGlobalUser } from '../../../store/globalUser';
 import DatabaseSelector from '../../../components/DatabaseSelector';
 import { DatabaseOutlined, DownloadOutlined, SyncOutlined } from '@ant-design/icons';
 import { SERVER_URL } from '../../../utils';
 import { Graphin } from '@antv/graphin';
+
+// 节点颜色数组
+const nodeColors = [
+  '#F6BD16',
+  '#00C9C9',
+  '#F08F56',
+  '#FFA726',
+  '#FA8C16',
+  '#722ED1',
+  '#a680ff',
+  '#c8ff00',
+  '#ffeb3b',
+  '#ff6b6b',
+  '#6366f1'
+];
+
+// 超边颜色数组
+const bubbleSetColors = [
+  '#F6BD16',
+  '#00C9C9',
+  '#F08F56',
+  '#FFA726',
+  '#FA8C16',
+  '#722ED1',
+  '#a680ff',
+  '#c8ff00',
+  '#ffeb3b',
+  '#ff6b6b',
+  '#6366f1'
+];
+
+// 基于名称哈希的颜色分配
+const getNodeColorByName = (name: string): string => {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = ((hash << 5) - hash) + name.charCodeAt(i);
+    hash = hash & hash;
+  }
+  return nodeColors[Math.abs(hash) % nodeColors.length];
+};
 
 const entityTypeColors = {
   'PERSON': '#00C9C9',
@@ -17,62 +58,105 @@ const entityTypeColors = {
   'default': '#8566CC'
 };
 
-const FullGraphPage = () => {
+const FullGraphPage = observer(() => {
   const { t } = useTranslation();
-  const [vertices, setVertices] = useState([]);
-  const [hyperedges, setHyperedges] = useState([]);
+  const [vertices, setVertices] = useState<any[]>([]);
+  const [hyperedges, setHyperedges] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [graphMode, setGraphMode] = useState('entities');
+  const [error, setError] = useState<string | null>(null);
+  const [graphMode, setGraphMode] = useState('hyperedges');
+  const isMountedRef = useRef(true);
+  const loadingRef = useRef(false);
+  const lastLoadedDbRef = useRef<string | null>(null);
 
-  // 简化加载逻辑 - 移除复杂的状态检查
-  const loadFullGraph = async () => {
-    const currentDb = storeGlobalUser.selectedDatabase;
+  const loadData = async (dbName: string) => {
+    console.log('[FullGraph] loadData 被调用, dbName:', dbName);
 
-    if (!currentDb) {
+    if (!isMountedRef.current || !dbName) {
+      console.log('[FullGraph] loadData 被跳过 - isMountedRef:', isMountedRef.current, ', dbName:', dbName);
       return;
     }
 
-    if (loading) {
+    // 防止重复加载同一个数据库（正在加载）
+    if (loadingRef.current) {
+      console.log('[FullGraph] 跳过重复加载（正在加载）:', dbName);
       return;
     }
 
+    console.log('[FullGraph] 开始加载数据:', dbName);
+    // 在开始加载时立即设置标志，防止 useEffect 在加载期间再次触发
+    lastLoadedDbRef.current = dbName;
+    loadingRef.current = true;
     setLoading(true);
     setError(null);
-    setVertices([]);
-    setHyperedges([]);
 
     try {
-      const verticesUrl = `${SERVER_URL}/db/vertices?database=${encodeURIComponent(currentDb)}&page=1&page_size=1000`;
-      const verticesRes = await fetch(verticesUrl);
+      const verticesUrl = `${SERVER_URL}/db/vertices?database=${encodeURIComponent(dbName)}&page=1&page_size=1000`;
+      const hyperedgesUrl = `${SERVER_URL}/db/hyperedges?database=${encodeURIComponent(dbName)}&page=1&page_size=1000`;
+
+      console.log('[FullGraph] 请求 URL:', { verticesUrl, hyperedgesUrl });
+
+      const [verticesRes, hyperedgesRes] = await Promise.all([
+        fetch(verticesUrl),
+        fetch(hyperedgesUrl)
+      ]);
+
+      console.log('[FullGraph] API 响应状态:', { vertices: verticesRes.status, hyperedges: hyperedgesRes.status });
+
       const verticesData = await verticesRes.json();
-      const verticesList = verticesData.data || verticesData || [];
-
-      const hyperedgesUrl = `${SERVER_URL}/db/hyperedges?database=${encodeURIComponent(currentDb)}&page=1&page_size=1000`;
-      const hyperedgesRes = await fetch(hyperedgesUrl);
       const hyperedgesData = await hyperedgesRes.json();
-      const hyperedgesList = hyperedgesData.data || hyperedgesData || [];
 
-      setVertices(verticesList);
-      setHyperedges(hyperedgesList);
-      message.success(`成功加载: ${verticesList.length} 个顶点, ${hyperedgesList.length} 条超边`);
+      console.log('[FullGraph] API 返回数据:', { vertices: verticesData, hyperedges: hyperedgesData });
+
+      if (isMountedRef.current) {
+        const verticesList = verticesData.data || verticesData || [];
+        const hyperedgesList = hyperedgesData.data || hyperedgesData || [];
+        setVertices(verticesList);
+        setHyperedges(hyperedgesList);
+        console.log('[FullGraph] 数据已更新:', { verticesCount: verticesList.length, hyperedgesCount: hyperedgesList.length });
+        message.success(`成功加载: ${verticesList.length} 个顶点, ${hyperedgesList.length} 条超边`);
+      }
     } catch (err: any) {
-      setError(t('graph.load_failed') + ': ' + err.message);
-      message.error(t('graph.load_failed'));
+      console.error('[FullGraph] 加载失败:', err);
+      if (isMountedRef.current) {
+        setError(t('graph.load_failed') + ': ' + err.message);
+        message.error(t('graph.load_failed'));
+        // 出错时清空 lastLoadedDbRef，允许重试
+        lastLoadedDbRef.current = null;
+      }
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        loadingRef.current = false;
+        setLoading(false);
+        console.log('[FullGraph] 加载完成，loadingRef 已重置');
+      }
     }
   };
 
-  // 直接响应 selectedDatabase 变化
+  // 监听 MobX 状态变化
   useEffect(() => {
-    if (storeGlobalUser.selectedDatabase) {
-      loadFullGraph();
-    } else {
+    const dbName = storeGlobalUser.selectedDatabase || '';
+
+    if (!dbName) {
+      // 数据库清空时也清空数据
       setVertices([]);
       setHyperedges([]);
+      setError(null);
+      lastLoadedDbRef.current = null;
+    } else if (lastLoadedDbRef.current !== dbName) {
+      // 数据库变化时加载数据
+      console.log('数据库变化:', lastLoadedDbRef.current, '->', dbName, '，开始加载数据');
+      loadData(dbName);
     }
   }, [storeGlobalUser.selectedDatabase]);
+
+  // 组件卸载时清理
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      loadingRef.current = false;
+    };
+  }, []);
 
   const downloadGraphData = () => {
     const data = {
@@ -96,54 +180,87 @@ const FullGraphPage = () => {
     return entityTypeColors[type] || entityTypeColors.default;
   };
 
-  // 使用 useMemo 优化 graphOptions
   const graphOptions = useMemo(() => {
-    const hyperData = {
-      nodes: vertices.map((v: any) => ({
-        id: v.vertex_id,
-        label: v.entity_name || v.vertex_id,
-        entity_type: v.entity_type,
-        description: v.description,
-        properties: (v.additional_properties || '').split('<SEP>').filter((p: string) => p),
-        data: {
-          label: v.entity_name || v.vertex_id,
-          type: v.entity_type || 'default',
-          description: v.description || ''
-        }
-      })),
-      edges: []
-    };
+    console.log('[FullGraph] 构建图数据，vertices:', vertices);
+    console.log('[FullGraph] hyperedges:', hyperedges);
 
+    // 构建节点：vertices 是字符串数组（顶点名称）
+    const nodes = vertices.map((v: any, index: number) => {
+      // 使用顶点名称作为节点 ID 和 label（这样能与超边数据匹配）
+      const nodeName = typeof v === 'string' ? v : String(v);
+      const entityType = typeof v === 'string' ? 'default' : (v.entity_type || v.type || 'default');
+      const nodeColor = getNodeColorByName(nodeName);
+
+      return {
+        id: nodeName,
+        label: nodeName,
+        entity_type: entityType,
+        color: nodeColor, // 添加颜色
+        description: typeof v === 'string' ? '' : (v.description || ''),
+        properties: typeof v === 'string' ? [] : ((v.additional_properties || '').split('<SEP>').filter((p: string) => p)),
+        data: {
+          label: nodeName,
+          type: entityType,
+          color: nodeColor,
+          description: typeof v === 'string' ? '' : (v.description || '')
+        }
+      };
+    }).filter((n: any) => n.id !== '');
+
+    console.log('[FullGraph] 节点 ID 列表:', nodes.map(n => n.id).slice(0, 10));
+
+    // 构建边（超边可视化）
+    const edges: any[] = [];
     const plugins: any[] = [];
 
-    if (graphMode === 'hyperedges') {
-      hyperedges.forEach((he: any, index: number) => {
-        const nodes = he.vertices || [];
-        if (nodes.length > 0) {
-          plugins.push({
-            key: `bubble-sets-${index}`,
-            type: 'bubble-sets',
-            members: nodes,
-            labelText: he.keywords || he.summary || `Hyperedge ${index + 1}`,
-            ...{
-              maxRoutingIterations: 100,
-              maxMarchingIterations: 20,
-              pixelGroup: 4,
-              edgeR0: 10,
-              edgeR1: 60,
-              nodeR0: 15,
-              nodeR1: 50,
-              morphBuffer: 10,
-              threshold: 4,
-              memberInfluenceFactor: 1,
-              edgeInfluenceFactor: 4,
-              nonMemberInfluenceFactor: -0.8,
-              virtualEdges: true,
-            }
-          });
-        }
-      });
-    }
+    // 创建bubble-sets样式配置（参考RetrievalHyperGraph）
+    const createBubbleSetStyle = (baseColor: string) => ({
+      fill: baseColor,
+      stroke: baseColor,
+      labelFill: '#fff',
+      labelPadding: 2,
+      labelBackgroundFill: baseColor,
+      labelBackgroundRadius: 5,
+      labelPlacement: 'center',
+      labelAutoRotate: false,
+      maxRoutingIterations: 100,
+      maxMarchingIterations: 20,
+      pixelGroup: 4,
+      edgeR0: 10,
+      edgeR1: 60,
+      nodeR0: 15,
+      nodeR1: 50,
+      morphBuffer: 10,
+      threshold: 4,
+      memberInfluenceFactor: 1,
+      edgeInfluenceFactor: 4,
+      nonMemberInfluenceFactor: -0.8,
+      virtualEdges: true
+    });
+
+    // 添加超边bubble-sets（始终显示，展示完整超图）
+    console.log('[FullGraph] 开始处理超边，数量:', hyperedges.length);
+    hyperedges.forEach((he: any, index: number) => {
+      const verticesList = he.vertices || [];
+      console.log(`[FullGraph] 超边 ${index}:`, he);
+      console.log(`[FullGraph] 超边 ${index} vertices:`, verticesList);
+
+      // 将顶点名称转换为节点 ID
+      const nodeIds = verticesList.filter((vName: string) => vName && nodes.find((n: any) => n.id === vName));
+      console.log(`[FullGraph] 超边 ${index} 匹配的节点IDs:`, nodeIds);
+
+      if (nodeIds.length > 0) {
+        plugins.push({
+          key: `bubble-sets-${index}`,
+          type: 'bubble-sets',
+          members: nodeIds,
+          labelText: graphMode === 'hyperedges' ? (he.keywords || he.summary || `Hyperedge ${index + 1}`) : '',
+          ...createBubbleSetStyle(bubbleSetColors[index % bubbleSetColors.length])
+        });
+      }
+    });
+    console.log('[FullGraph] 最终插件数量:', plugins.length);
+    console.log('[FullGraph] 插件数组:', plugins);
 
     plugins.push({
       type: 'tooltip',
@@ -163,17 +280,15 @@ const FullGraphPage = () => {
       },
     });
 
-    return {
+    const result = {
       autoResize: true,
-      data: hyperData,
+      data: { nodes, edges },
       node: {
         palette: { field: 'entity_type' },
         style: {
           size: 25,
           labelText: (d: any) => d.label,
-          fill: (d: any) => {
-            return getEntityColor(d.entity_type);
-          },
+          fill: (d: any) => d.color || getEntityColor(d.entity_type),
         }
       },
       edge: {
@@ -182,23 +297,30 @@ const FullGraphPage = () => {
         }
       },
       animate: false,
+      layout: {
+        type: 'circular',
+        preventOverlap: true,
+        nodeSpacing: 80,
+        radius: 300,
+      },
       behaviors: [
         'zoom-canvas',
         'drag-canvas',
         'drag-element',
       ],
-      autoFit: { type: 'center' as const },
+      autoFit: { type: 'view' as const },
       layout: {
-        type: 'force',
-        clustering: true,
+        type: 'force-atlas2',
         preventOverlap: true,
-        nodeClusterBy: 'entity_type',
+        kr: 80,
         gravity: 20,
-        linkDistance: 150,
+        linkDistance: 10,
       },
       plugins,
     };
-  }, [vertices, hyperedges, graphMode, t]);
+    console.log('[FullGraph] 完整 Graphin options:', JSON.stringify(result, null, 2));
+    return result;
+  }, [vertices, hyperedges, graphMode]);
 
   return (
     <div style={{ padding: '16px' }}>
@@ -257,7 +379,7 @@ const FullGraphPage = () => {
         </Card>
       )}
 
-      {!loading && vertices.length > 0 && (
+      {vertices.length > 0 && (
         <Card
           title={
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -267,35 +389,43 @@ const FullGraphPage = () => {
                 style={{ width: 150 }}
                 onChange={setGraphMode}
                 options={[
-                  { label: t('graph.mode_entities'), value: 'entities' },
-                  { label: t('graph.mode_hyperedges'), value: 'hyperedges' }
+                  { label: '无标签', value: 'entities' },
+                  { label: '显示标签', value: 'hyperedges' }
                 ]}
               />
             </div>
           }
           style={{ marginBottom: 0 }}
         >
-          <div style={{ height: 'calc(100vh - 250px)', minHeight: 600 }}>
-            <Graphin
-              options={graphOptions}
-              id="full-graph-viewer"
-              style={{ width: '100%', height: '100%' }}
-            />
-          </div>
+          <Spin spinning={loading}>
+            <div style={{ height: 'calc(100vh - 250px)', minHeight: 600 }}>
+              {graphOptions.data.nodes.length > 0 ? (
+                <Graphin
+                  options={graphOptions}
+                  id="full-graph-viewer"
+                  style={{ width: '100%', height: '100%' }}
+                />
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999' }}>
+                  暂无有效节点数据
+                </div>
+              )}
+            </div>
+          </Spin>
         </Card>
       )}
 
-      {!loading && vertices.length === 0 && !error && storeGlobalUser.selectedDatabase && (
+      {vertices.length === 0 && !error && storeGlobalUser.selectedDatabase && (
         <Card style={{ textAlign: 'center', padding: '48px' }}>
           <DatabaseOutlined style={{ fontSize: 64, color: '#d9d9d9', marginBottom: 16 }} />
           <p style={{ color: '#999', margin: 0 }}>{t('graph.no_graph_data')}</p>
-          <Button type="primary" onClick={loadFullGraph} style={{ marginTop: 16 }}>
+          <Button type="primary" onClick={() => loadData(storeGlobalUser.selectedDatabase)} style={{ marginTop: 16 }}>
             {t('graph.refresh_data')}
           </Button>
         </Card>
       )}
     </div>
   );
-};
+});
 
 export default FullGraphPage;

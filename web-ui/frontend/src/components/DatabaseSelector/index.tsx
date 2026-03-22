@@ -31,7 +31,6 @@ interface DatabaseSelectorProps {
  */
 const DatabaseSelector: React.FC<DatabaseSelectorProps> = ({
     mode = 'select',
-    showCurrent = true,
     showRefresh = false,
     placeholder,
     style = {},
@@ -49,6 +48,10 @@ const DatabaseSelector: React.FC<DatabaseSelectorProps> = ({
     if (!hasRestoredRef.current) {
       hasRestoredRef.current = true;
 
+      console.log('[DatabaseSelector] 首次挂载，开始初始化');
+      console.log('[DatabaseSelector] 当前 selectedDatabase:', storeGlobalUser.selectedDatabase);
+      console.log('[DatabaseSelector] 当前 availableDatabases 数量:', storeGlobalUser.availableDatabases.length);
+
       if (!storeGlobalUser.selectedDatabase) {
         storeGlobalUser.restoreSelectedDatabase();
       }
@@ -61,6 +64,7 @@ const DatabaseSelector: React.FC<DatabaseSelectorProps> = ({
 
   // 处理数据库变更
   const handleDatabaseChange = (value: string) => {
+    console.log('[DatabaseSelector] handleDatabaseChange 被调用, value:', value);
     storeGlobalUser.setSelectedDatabase(value);
     onChange?.(value);
   };
