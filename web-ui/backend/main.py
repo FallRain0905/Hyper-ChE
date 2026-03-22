@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+import sys
+import io
+
+# Fix Windows encoding issue
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from db import get_hypergraph, getFrequentVertices, get_vertices, get_hyperedges, get_vertice, get_vertice_neighbor, get_hyperedge_neighbor_server, add_vertex, add_hyperedge, delete_vertex, delete_hyperedge, update_vertex, update_hyperedge, get_hyperedge_detail, db_manager
@@ -7,7 +16,6 @@ import os
 import asyncio
 import numpy as np
 import logging
-import sys
 import importlib.util
 from pathlib import Path
 from pydantic import BaseModel

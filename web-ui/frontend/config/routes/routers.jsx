@@ -4,10 +4,11 @@ import ErrorPage from '@/ErrorPage'
 import Home from '@/pages/Home'
 import Files from '@/pages/Hyper/Files'
 import Graph from '@/pages/Hyper/Graph'
+import FullGraph from '@/pages/Hyper/FullGraph'
 import HyperDB from '@/pages/Hyper/DB'
 import Setting from '@/pages/Setting'
 import APIPage from '@/pages/API'
-import { HomeFilled, SmileFilled, FileAddOutlined, QuestionCircleOutlined, DeploymentUnitOutlined, DatabaseOutlined, SettingOutlined, ApiOutlined } from '@ant-design/icons'
+import { HomeFilled, SmileFilled, FileAddOutlined, QuestionCircleOutlined, DeploymentUnitOutlined, DatabaseOutlined, SettingOutlined, ApiOutlined, ProjectOutlined } from '@ant-design/icons'
 import { Navigate } from 'react-router-dom'
 
 export const routers = [
@@ -41,6 +42,12 @@ export const routers = [
         icon: <DatabaseOutlined />,
         // permissionObj: true,
         element: <HyperDB />
+      },
+      {
+        path: '/Hyper/FullGraph',
+        name: 'FullGraph',
+        icon: <ProjectOutlined />,
+        element: <FullGraph />
       },
       {
         path: '/Hyper/files',

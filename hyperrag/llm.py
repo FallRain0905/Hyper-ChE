@@ -324,7 +324,7 @@ async def bedrock_complete(
     )
 
 
-@wrap_embedding_func_with_attrs(embedding_dim=1536, max_token_size=8192)
+@wrap_embedding_func_with_attrs(embedding_dim=2048, max_token_size=8192)
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=60),
@@ -332,7 +332,7 @@ async def bedrock_complete(
 )
 async def openai_embedding(
     texts: list[str],
-    model: str = "text-embedding-3-small",
+    model: str = "embedding-3",
     base_url: str = None,
     api_key: str = None,
 ) -> np.ndarray:
@@ -348,7 +348,7 @@ async def openai_embedding(
     return np.array([dp.embedding for dp in response.data])
 
 
-@wrap_embedding_func_with_attrs(embedding_dim=1536, max_token_size=8192)
+@wrap_embedding_func_with_attrs(embedding_dim=2048, max_token_size=8192)
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -356,7 +356,7 @@ async def openai_embedding(
 )
 async def azure_openai_embedding(
     texts: list[str],
-    model: str = "text-embedding-3-small",
+    model: str = "embedding-3",
     base_url: str = None,
     api_key: str = None,
 ) -> np.ndarray:

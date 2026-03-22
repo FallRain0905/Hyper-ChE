@@ -6,6 +6,7 @@
     "files": "File Parsing",
     "api": "API",
     "graph": "Graph Display",
+    "full_graph": "Full Graph",
     "save": "Save",
     "cancel": "Cancel",
     "confirm": "Confirm",
@@ -27,7 +28,8 @@
     "files": "Upload Documents",
     "graph": "Visualization",
     "api": "API Documentation",
-    "settings": "Settings"
+    "settings": "Settings",
+    "full_graph": "Full Graph"
   },
   "settings": {
     "title": "System Settings",
@@ -207,6 +209,25 @@
     "properties": "Properties",
     "fetch_vertices_failed": "Failed to fetch vertices",
     "fetch_neighbor_data_failed": "Failed to fetch neighbor data"
+  },
+  "graph": {
+    "title": "Knowledge Graph",
+    "description": "View and edit knowledge graphs",
+    "loading_data": "Loading data...",
+    "select_database_first": "Please select a database first",
+    "no_graph_data": "No graph data available",
+    "refresh_data": "Refresh Data",
+    "database_label": "Database:",
+    "full_graph_title": "Full Graph",
+    "graph_visualization": "Graph Visualization",
+    "total_vertices": "Total Vertices",
+    "total_hyperedges": "Total Hyperedges",
+    "total_nodes": "Total Nodes",
+    "download_data": "Download Data",
+    "download_success": "Data downloaded successfully",
+    "load_failed": "Load failed",
+    "mode_entities": "Entities Mode",
+    "mode_hyperedges": "Hyperedges Mode"
   },
   "home": {
     "title": "Welcome to Hyper-RAG",

@@ -6,6 +6,7 @@
     "files": "文件解析",
     "api": "API",
     "graph": "超图展示",
+    "full_graph": "完整超图",
     "save": "保存",
     "cancel": "取消",
     "confirm": "确认",
@@ -26,6 +27,7 @@
     "database": "超图数据库",
     "files": "文件解析",
     "graph": "超图知识可视化",
+    "full_graph": "完整超图",
     "api": "API文档",
     "settings": "系统设置"
   },
@@ -207,6 +209,25 @@
     "properties": "属性",
     "fetch_vertices_failed": "获取vertices失败",
     "fetch_neighbor_data_failed": "获取邻居数据失败"
+  },
+  "graph": {
+    "title": "知识图谱",
+    "description": "查看和编辑知识图谱",
+    "loading_data": "正在加载数据...",
+    "select_database_first": "请先选择一个数据库",
+    "no_graph_data": "暂无图数据",
+    "refresh_data": "刷新数据",
+    "database_label": "数据库：",
+    "full_graph_title": "完整超图",
+    "graph_visualization": "超图可视化",
+    "total_vertices": "总顶点数",
+    "total_hyperedges": "总超边数",
+    "total_nodes": "总节点数",
+    "download_data": "下载数据",
+    "download_success": "数据下载成功",
+    "load_failed": "加载失败",
+    "mode_entities": "实体模式",
+    "mode_hyperedges": "超边模式"
   },
   "home": {
     "title": "欢迎使用 Hyper-RAG",

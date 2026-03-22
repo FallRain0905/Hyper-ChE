@@ -44,17 +44,19 @@ class GlobalUser {
   // 设置可用数据库列表
   setAvailableDatabases(databases: Array<{ name: string; description: string }>) {
     this.availableDatabases = databases
-    // 如果还没有选中数据库且有可用数据库，选择第一个
+    // 只在当前没有选中数据库时才自动选择第一个数据库
+    // 避免循环：不主动调用 setSelectedDatabase，只更新 selectedDatabase 状态
     if (!this.selectedDatabase && databases.length > 0) {
-      this.setSelectedDatabase(databases[0].name)
-      return
+      this.selectedDatabase = databases[0].name
+      localStorage.setItem('selectedDatabase', databases[0].name)
     }
 
-    // 如果当前选中的数据库不在可用列表中，则回退到第一个可用数据库
-    if (this.selectedDatabase) {
+    // 如果当前选中的数据库不在可用列表中，更新为第一个可用数据库
+    if (this.selectedDatabase && databases.length > 0) {
       const existsInAvailable = databases.some(db => db.name === this.selectedDatabase)
-      if (!existsInAvailable && databases.length > 0) {
-        this.setSelectedDatabase(databases[0].name)
+      if (!existsInAvailable) {
+        this.selectedDatabase = databases[0].name
+        localStorage.setItem('selectedDatabase', databases[0].name)
       }
     }
   }
