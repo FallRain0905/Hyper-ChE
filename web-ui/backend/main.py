@@ -476,10 +476,10 @@ async def get_hyperrag_embedding_func(texts: list[str]) -> np.ndarray:
         # 从设置文件读取配置
         with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
             settings = json.load(f)
-        
+
         embedding_model = settings.get("embeddingModel", "text-embedding-3-small")
-        api_key = settings.get("apiKey")
-        base_url = settings.get("baseUrl")
+        api_key = settings.get("embeddingApiKey", settings.get("apiKey"))
+        base_url = settings.get("embeddingBaseUrl", settings.get("baseUrl"))
         
         main_logger.info(f"使用嵌入模型: {embedding_model}")
         
@@ -880,11 +880,22 @@ async def embed_files(request: FileEmbedRequest):
         print(f"{'='*50}")
         
         return {"embedded_files": results}
-        
+
     except Exception as e:
         error_msg = f"批量嵌入失败: {str(e)}"
         print(f"❌ {error_msg}")
         raise HTTPException(status_code=500, detail=error_msg)
+
+@app.post("/cache/clear")
+async def clear_hyperrag_cache():
+    """
+    清除 HyperRAG 实例缓存，强制重新创建实例
+    """
+    global hyperrag_instances
+    cleared_count = len(hyperrag_instances)
+    hyperrag_instances = {}
+    main_logger.info(f"已清除 {cleared_count} 个 HyperRAG 实例缓存")
+    return {"success": True, "message": f"已清除 {cleared_count} 个实例缓存"}
 
 # 自定义日志处理器，将日志通过WebSocket发送
 class WebSocketLogHandler(logging.Handler):

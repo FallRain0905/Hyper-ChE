@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile \"c:/Users/surface/OneDrive/Desktop/Hyer-Gragh/Hyper-RAG/gradio/app.py\")",
+      "Bash(python -m py_compile app.py)"
+    ]
+  }
+}

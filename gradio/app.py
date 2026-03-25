@@ -99,22 +99,41 @@ def get_vertices(vertices: Dict) -> List[str]:
 def create_g6_options(data: Dict, vertex_id: str = None, show_labels: bool = True) -> Dict:
     """
     生成 G6 配置选项
-    完全匹配 Web-UI 的配置逻辑
+    修复 Python JSON 序列化导致的 JS 函数失效问题
+    在 Python 中直接计算节点样式，避免传递 JS 函数
     """
     vertices = data.get('vertices', {})
     hyperedges = data.get('hyperedges', {})
 
-    # 构建节点数据
+    # 构建节点数据 - 在 Python 中直接计算样式
     nodes = []
     for v_id, v_data in vertices.items():
         entity_type = v_data.get('entity_type', 'DEFAULT')
+        label = v_data.get('entity_name', v_id)
+
+        # 在 Python 中直接计算颜色和大小
+        if vertex_id and v_id == vertex_id:
+            node_color = "#000000"  # 高亮选中的节点
+            node_size = 35
+        else:
+            node_color = ENTITY_TYPE_COLORS.get(entity_type, ENTITY_TYPE_COLORS['DEFAULT'])
+            node_size = 25
+
         nodes.append({
             'id': v_id,
             'data': {
-                'label': v_id,
+                'label': label,
                 'entity_type': entity_type,
                 'cluster': entity_type,
                 'description': v_data.get('description', '')
+            },
+            # 直接在节点上绑定计算好的样式
+            'style': {
+                'fill': node_color,
+                'labelText': label,  # 直接赋字符串值
+                'size': node_size,
+                'stroke': '#ffffff',
+                'lineWidth': 1.5,
             }
         })
 
@@ -123,24 +142,23 @@ def create_g6_options(data: Dict, vertex_id: str = None, show_labels: bool = Tru
 
     for idx, (edge_key, edge_data) in enumerate(hyperedges.items()):
         vertices_list = edge_data.get('vertices', [])
-        # 确保 members 是有效的节点 ID 列表
         members = [v for v in vertices_list if v in vertices]
 
         if len(members) < 2:
-            continue  # 至少需要2个节点才能形成超边
+            continue
 
         bubble_color = BUBBLE_COLORS[idx % len(BUBBLE_COLORS)]
         keywords = edge_data.get('keywords', '')
 
-        # G6 BubbleSets 插件配置 - 与 Web-UI 完全一致
+        # G6 BubbleSets 插件配置
         plugin_config = {
             'type': 'bubble-sets',
             'key': f'bubble-sets-{idx}',
             'members': members,
             'fill': bubble_color,
-            'fillOpacity': 0.1,  # 半透明填充
+            'fillOpacity': 0.15,
             'stroke': bubble_color,
-            'strokeOpacity': 1.0,
+            'strokeOpacity': 0.8,
             # BubbleSets 算法参数 - 与 Web-UI 完全一致
             'maxRoutingIterations': 100,
             'maxMarchingIterations': 20,
@@ -157,21 +175,19 @@ def create_g6_options(data: Dict, vertex_id: str = None, show_labels: bool = Tru
             'virtualEdges': True
         }
 
-        # 如果需要显示标签，添加标签配置
+        # 优化超边标签：去掉背景框，使用描边增强可读性
         if show_labels and keywords:
             plugin_config['label'] = True
             plugin_config['labelText'] = keywords
-            plugin_config['labelBackground'] = True
-            plugin_config['labelBackgroundFill'] = bubble_color
-            plugin_config['labelFill'] = '#fff'
-            plugin_config['labelPadding'] = 4
+            plugin_config['labelBackground'] = False  # 关闭背景框
+            plugin_config['labelFill'] = '#333333'    # 深色文字
+            plugin_config['labelFontSize'] = 10
+            plugin_config['labelStroke'] = '#ffffff'  # 白色描边
+            plugin_config['labelLineWidth'] = 2
 
         plugins.append(plugin_config)
 
-    # 构建 G6 完整配置 - 参考 Web-UI
-    current_id_json = json.dumps(vertex_id)
-    colors_json = json.dumps(ENTITY_TYPE_COLORS)
-
+    # G6 配置
     options = {
         'autoFit': 'center',
         'data': {
@@ -179,15 +195,12 @@ def create_g6_options(data: Dict, vertex_id: str = None, show_labels: bool = Tru
             'edges': []
         },
         'node': {
+            'type': 'circle',
             'style': {
-                'size': 25,
-                'labelText': 'd => d.data?.label || d.id',
                 'labelFill': '#333',
-                'labelFontSize': 12,
-                'labelOffsetX': 0,
-                'labelOffsetY': 0,
-                # 顶点颜色逻辑 - 与 Web-UI 完全一致
-                'fill': f'd => {{ const currentId = {current_id_json}; if (d.id === currentId) {{ return "#000000"; }} const entityType = d.data?.entity_type; if (entityType) {{ const colors = {colors_json}; return colors[entityType] || "#8566CC"; }} return "#8566CC"; }}'
+                'labelFontSize': 11,
+                'labelPlacement': 'bottom',  # 文字在节点下方
+                'labelOffsetY': 4,
             }
         },
         'edge': {
