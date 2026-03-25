@@ -175,15 +175,14 @@ def create_g6_options(data: Dict, vertex_id: str = None, show_labels: bool = Tru
             'virtualEdges': True
         }
 
-        # 优化超边标签：去掉背景框，使用描边增强可读性
+        # 超边标签：使用"药丸徽章"样式（与 Web-UI 一致）
         if show_labels and keywords:
             plugin_config['label'] = True
             plugin_config['labelText'] = keywords
-            plugin_config['labelBackground'] = False  # 关闭背景框
-            plugin_config['labelFill'] = '#333333'    # 深色文字
-            plugin_config['labelFontSize'] = 10
-            plugin_config['labelStroke'] = '#ffffff'  # 白色描边
-            plugin_config['labelLineWidth'] = 2
+            plugin_config['labelFill'] = '#fff'              # 白色文字
+            plugin_config['labelBackground'] = True           # 启用背景框
+            plugin_config['labelBackgroundFill'] = bubble_color  # 背景色与气泡一致
+            plugin_config['labelBackgroundRadius'] = 5         # 圆角，形成药丸状
 
         plugins.append(plugin_config)
 
@@ -216,11 +215,11 @@ def create_g6_options(data: Dict, vertex_id: str = None, show_labels: bool = Tru
             'drag-element'
         ],
         'layout': {
-            'type': 'force',
+            'type': 'force-atlas2',    # 使用 ATLAS 布局，同一簇节点聚集
             'preventOverlap': True,
-            'nodeStrength': -300,
-            'linkDistance': 150,
-            'gravity': 20
+            'kr': 80,                # K-means 聚类数
+            'gravity': 20,
+            'linkDistance': 10,      # 簇内连接距离
         },
         'plugins': plugins
     }
