@@ -19,7 +19,7 @@ const colors = [
 const entityTypeColors = {
     'PERSON': '#00C9C9',
     'CONCEPT': '#a68fff',
-    'ORGANIZATION': '#F08F56',  # 修正拼写
+    'ORGANIZATION': '#F08F56',  // 修正拼写
     'LOCATION': '#16f69c',
     'EVENT': '#004ac9',
     'PRODUCT': '#f056d1',

@@ -1,267 +1,336 @@
-<!-- <div align="center" id="top"> 
-  <img src="./assets/hg.svg" alt="Hypergraph" width="100%" />
-</div> -->
-
-<h1 align="center">Hyper-RAG</h1>
-
-<p align="center">
-  <img alt="Github top language" src="https://img.shields.io/github/languages/top/iMoonLab/Hyper-RAG?color=purple">
-
-  <img alt="Github language count" src="https://img.shields.io/github/languages/count/iMoonLab/Hyper-RAG?color=purple">
-
-  <img alt="Repository size" src="https://img.shields.io/github/repo-size/iMoonLab/Hyper-RAG?color=purple">
-
-  <img alt="License" src="https://img.shields.io/github/license/iMoonLab/Hyper-RAG?color=purple">
-
-  <!-- <img alt="Github issues" src="https://img.shields.io/github/issues/iMoonLab/Hyper-RAG?color=purple" /> -->
-
-  <!-- <img alt="Github forks" src="https://img.shields.io/github/forks/iMoonLab/Hyper-RAG?color=purple" /> -->
-
-  <img alt="Github stars" src="https://img.shields.io/github/stars/iMoonLab/Hyper-RAG?color=purple" />
-</p>
-
-<p align="center">
-  <a href="#dart-about">About</a> &#xa0; | &#xa0; 
-  <a href="#sparkles-why-hyper-rag-is-more-powerful">Features</a> &#xa0; | &#xa0;
-  <a href="#rocket-installation">Installation</a> &#xa0; | &#xa0;
-  <a href="#white_check_mark-quick-start">Quick Start</a> &#xa0; | &#xa0;
-  <a href="#whale-docker-deployment">Docker</a> &#xa0; | &#xa0;
-  <a href="#checkered_flag-evaluation">Evaluation</a> &#xa0; | &#xa0;
-  <a href="#memo-license">License</a> &#xa0; | &#xa0;
-  <a href="https://github.com/yifanfeng97" target="_blank">Author</a>
-</p>
-
-<br>
-
+# Hyper-RAG
 
 <div align="center">
-  <img src="./assets/many_llms_all.svg" alt="Overall Performance" width="100%" />
+  <h1>Hyper-RAG</h1>
+  <p><em>Combating LLM Hallucinations using Hypergraph-Driven Retrieval-Augmented Generation</em></p>
 </div>
 
-We show that Hyper-RAG is a powerful RAG that can enhance the performance of various LLMs and outperform other SOTA RAG methods in the NeurologyCorp dataset. **Our paper is available at <a href="https://arxiv.org/abs/2504.08758">here</a>**.
+![Performance](https://img.shields.io/github/languages/top/iMoonLab/Hyper-RAG?color=purple)
+![Size](https://img.shields.io/github/repo-size/iMoonLab/Hyper-RAG?color=purple)
+![License](https://img.shields.io/github/license/iMoonLab/Hyper-RAG?color=purple)
 
-## :dart: About
+---
 
-<details>
-<summary> <b>Abstract</b> </summary>
-Large language models (LLMs) have transformed various sectors, including education, finance, and medicine, by enhancing content generation and decision-making processes. However, their integration into the medical field is cautious due to hallucinations, instances where generated content deviates from factual accuracy, potentially leading to adverse outcomes. To address this, we introduce Hyper-RAG, a hypergraph-driven Retrieval-Augmented Generation method that comprehensively captures both pairwise and beyond-pairwise correlations in domain-specific knowledge, thereby mitigating hallucinations. Experiments on the NeurologyCrop dataset with six prominent LLMs demonstrated that Hyper-RAG improves accuracy by an average of 12.3% over direct LLM use and outperforms Graph RAG and Light RAG by 6.3% and 6.0%, respectively. Additionally, Hyper-RAG maintained stable performance with increasing query complexity, unlike existing methods which declined. Further validation across nine diverse datasets showed a 35.5% performance improvement over Light RAG using a selection-based assessment. The lightweight variant, Hyper-RAG-Lite, achieved twice the retrieval speed and a 3.3\% performance boost compared with Light RAG. These results confirm Hyper-RAG's effectiveness in enhancing LLM reliability and reducing hallucinations, making it a robust solution for high-stakes applications like medical diagnostics.
-</details>
+## 概述 / Overview
 
-<br>
+**Hyper-RAG** 是一个基于超图（Hypergraph）的检索增强生成（RAG）方法，旨在减少大语言模型（LLM）的幻觉问题。
 
-<div align="center">
-  <img src="./assets/fw.svg" alt="Framework" width="100%" />
-</div>
-Schematic diagram of the proposed Hyper-RAG architecture. a, The patient poses a question. b, A knowledge base is constructed from relevant domainspecific corpora. c, Responses are generated directly using LLMs. d, Hyper-RAG generates responses by first retrieving relevant prior knowledge from the knowledge base and then inputting this knowledge, along with the patient’s question, into the LLMs to formulate the reply.
+Hyper-RAG 通过以下方式增强 RAG：
+- **超图建模**：能够建模超越成对关系的复杂实体关联
+- **原生超图数据库**：使用 [Hypergraph-DB](https://github.com/iMoonLab/Hypergraph-DB) 作为基础
+- **多层级关系**：同时捕获低阶和高阶关联
+- **性能优化**：在多个数据集上超越传统 RAG 方法
 
-<br>
-<br>
+### 核心特性
 
-<details>
-<summary> <b>More details about hypergraph modeling</b> </summary>
-<div align="center"> 
-  <img src="./assets/hg.svg" alt="Hypergraph" width="100%" />
-Example of hypergraph modeling for entity space. Hypergraph can model the beyond-pairwise relationship among entities, which is more powerful than the pairwise relationship in traditional graph modeling. With hypergraphs, we can avoid the information loss caused by the pairwise relationship.
-</div>
-<br>
-<div align="center"> 
-  <img src="./assets/extract.svg" alt="Extract Hypergraph" width="100%" />
-  Illustration of Entity and Correlation Extraction from Raw Corpus: Dark brown boxes represent entities, blue arrows denote low-order correlations between entities, and red arrows indicate high-order correlations. Yellow boxes contain the original descriptions of the respective entities or their correlations.
-</div>
-</details>
+| 特性 | 说明 |
+|------|------|
+| :heavy_check_mark: **超图知识建模** | 使用超图全面建模领域特定知识中的关联，比传统图数据组织更复杂 |
+| :heavy_check_mark: **原生 Hypergraph-DB 集成** | 基于 Hypergraph-DB 构建，支持快速检索高阶关联 |
+| :heavy_check_mark: **卓越性能** | 在 NeurologyCorp 数据集上比直接 LLM 使用平均提升 12.3%，超越 Graph RAG 和 Light RAG |
+| :heavy_check_mark: **广泛验证** | 在九个多样化数据集上比 Light RAG 提升 35.5% |
+| :heavy_check_mark: **高效检索** | 轻量级变体 Hyper-RAG-Lite 检索速度提升 2 倍 |
 
-<br>
+---
 
-## :sparkles: Why Hyper-RAG is More Powerful
+## 项目结构 / Project Structure
 
-:heavy_check_mark: **Comprehensive Relationship Modeling with Hypergraphs**: Utilizes hypergraphs to thoroughly model the associations within the raw corpus data, providing more complex relationships compared to traditional graph-based data organization.;\
-:heavy_check_mark: **Native Hypergraph-DB Integration**: Employs the native hypergraph database, <a href="https://github.com/iMoonLab/Hypergraph-DB">Hypergraph-DB</a>, as the foundation, supporting rapid retrieval of higher-order associations.;\
-:heavy_check_mark: **Superior Performance**: Hyper-RAG outperforms Graph RAG and Light RAG by 6.3% and 6.0% respectively.;\
-:heavy_check_mark: **Broad Validation**: Across nine diverse datasets, Hyper-RAG shows a 35.5% performance improvement over Light RAG based on a selection-based assessment.;\
-:heavy_check_mark: **Efficiency**: The lightweight variant, Hyper-RAG-Lite, achieves twice the retrieval speed and a 3.3% performance boost compared to Light RAG.;
+```
+Hyper-RAG/
+├── hyperrag/              # 核心超图 RAG 库
+├── web-ui/               # Web 界面（React + FastAPI）
+├── gradio/               # Gradio 界面
+├── streamlit/            # Streamlit 界面
+└── reproduce/             # 论文复现代码
+```
 
-## :rocket: Installation
+---
 
+## 用户界面 / User Interfaces
+
+本项目提供三种用户界面：
+
+### 1. Web-UI (React + FastAPI)
+
+功能完整的 Web 应用，支持超图可视化和文档处理。
+
+**特性：**
+- 完整超图可视化（Full Graph）
+- 顶点详情查看（Vertex Details）
+- 文档上传和处理
+- 实时处理进度显示
+- 支持多种 LLM 提供商
+
+**启动方式：**
 
 ```bash
-# Clone this project
-git clone https://github.com/iMoonLab/Hyper-RAG.git
+cd web-ui
 
-# Access
+# 方式 1: 直接启动（开发环境）
+npm install                # 安装前端依赖
+pip install -r requirements.txt
+python main.py             # 启动后端
+# 前端访问 http://localhost:3000
+# 后端访问 http://localhost:8000
+
+# 方式 2: Docker 部署
+docker-compose up
+# 访问 http://localhost:5000
+```
+
+**详细文档：** [Web-UI README](web-ui/README.md)
+
+---
+
+### 2. Gradio
+
+轻量级 Web 界面，使用 AntV G6 进行超图可视化，支持文档嵌入处理。
+
+**特性：**
+- 超图视图（G6 + BubbleSets）
+- 顶点详情视图
+- 文档模式 - 使用真实 HyperRAG LLM 进行实体提取
+- 支持文档分块、实体提取、超边构建
+
+**启动方式：**
+
+```bash
+cd gradio
+
+# 配置 LLM API（在 settings.json 中设置 API Key）
+# 或运行后按界面提示配置
+
+pip install -r requirements.txt
+python app.py
+# 访问 http://localhost:7860
+```
+
+**配置文件示例 (settings.json)：**
+
+```json
+{
+  "apiKey": "your-api-key-here",
+  "modelProvider": "openai",
+  "modelName": "gpt-4o-mini",
+  "baseUrl": "https://api.openai.com/v1",
+  "embeddingModel": "text-embedding-3-small",
+  "embeddingDim": 1536,
+  "maxTokens": 2000,
+  "temperature": 0.7
+}
+```
+
+---
+
+### 3. Streamlit
+
+基于 Streamlit 的界面，提供交互式超图查询和可视化。
+
+**启动方式：**
+
+```bash
+cd streamlit
+
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+---
+
+## 安装 / Installation
+
+### 环境要求
+
+- Python 3.8+
+- Node.js 18+ (仅 Web-UI)
+- Docker & Docker Compose (可选，用于部署)
+
+### 标准安装
+
+```bash
+# 克隆项目
+git clone https://github.com/iMoonLab/Hyper-RAG.git
 cd Hyper-RAG
 
-# Install dependencies
+# 安装依赖
 pip install -r requirements.txt
 ```
 
-## :white_check_mark: Quick Start
+### Docker 安装
 
-### Configure your LLM API
-Copy the `config_temp.py` file to `my_config.py` in the root folder and set your LLM `URL` and `KEY`.
+```bash
+# 使用 Docker Compose 启动
+cd web-ui
+docker-compose up
+
+# 或手动构建并运行
+docker build -t hyper-rag .
+docker run -p 5000:5000 hyper-rag
+```
+
+---
+
+## 快速开始 / Quick Start
+
+### 1. 配置 LLM API
+
+编辑或创建 `my_config.py` 文件：
 
 ```python
-LLM_BASE_URL = "Yours xxx"
-LLM_API_KEY = "Yours xxx"
-LLM_MODEL = "gpt-4o-mini"
+LLM_BASE_URL = "your-llm-url"      # 例如: https://api.openai.com/v1
+LLM_API_KEY = "your-api-key"
+LLM_MODEL = "gpt-4o-mini"         # 或其他支持的模型
 
-EMB_BASE_URL = "Yours xxx"
-EMB_API_KEY = "Yours xxx"
+EMB_BASE_URL = "your-embedding-url"
+EMB_API_KEY = "your-api-key"
 EMB_MODEL = "text-embedding-3-small"
-EMB_DIM = 1536
+EMB_DIM = 1536                     # 嵌入维度
 ```
 
-### Run the toy example
+### 2. 运行 Demo
 
 ```bash
+# 运行示例
 python examples/hyperrag_demo.py
-```
 
-### Or Run by Steps
-
-1. Prepare the data. You can download the dataset from Google Drive <a href="https://drive.google.com/drive/folders/1JxXXUR4Jx-2IKn4VGpDeH4xb4-nYEWBx?usp=sharing">here</a>, or Baidu Cloud <a href="https://pan.baidu.com/s/1mrDJVpMW59gLtRRSXafXdw?pwd=w642">here</a>. Put the dataset in the root direction. Then run the following command to preprocess the data.
-
-```bash
+# 或按步骤运行完整流程
+# 1. 预处理数据
 python reproduce/Step_0.py
-```
 
-2. Build the knowledge hypergraphs, and entity and relation vector database with following command.
-
-```bash
+# 2. 构建超图
 python reproduce/Step_1.py
-```
 
-3. Extract questions from the orignial datasets with following command.
-
-```bash
+# 3. 提取问题
 python reproduce/Step_2_extract_question.py
-```
 
-Those questions are saved in the `cache/{{data_name}}/questions` folder. 
-
-4. Run the Hyper-RAG to response those questions with following command.
-
-```bash
+# 4. 回答问题
 python reproduce/Step_3_response_question.py
 ```
 
-Those response are saved in the `cache/{{data_name}}/response` folder.
+### 3. 查询模式
 
-You can also change the `mode` parameter to `hyper` or `hyper-lite` to run the Hyper-RAG or Hyper-RAG-Lite.
+支持多种查询模式：
 
+```python
+from hyperrag import HyperRAG, QueryParam
 
-### Hypergraph Visualization
-We provide a web-based visualization tool for hypergraphs and lightweight Hyper-RAG QA system. For more information, please refer to [Hyper-RAG Web-UI](./web-ui/README.md).
+# 初始化 HyperRAG
+rag = HyperRAG(
+    working_dir="./cache",
+    llm_model_func=your_llm_func,
+    embedding_func=your_embedding_func
+)
 
-*Note: We welcome any contributions to improve it.*
-![vis-qa](./assets/vis-QA.png)
-![vis-hg](./assets/vis-hg.png)
+# 插入文档
+rag.ainsert("你的文档内容...")
 
-## :whale: Docker Deployment
+# 查询
+param = QueryParam(
+    mode="hyper",              # hyper, hyper-lite, naive, graph, llm
+    top_k=60,
+    max_token_for_text_unit=1600,
+    max_token_for_entity_context=300,
+    max_token_for_relation_context=1600,
+    response_type="Multiple Paragraphs"
+)
 
-We provide Docker support for easy deployment of the Hyper-RAG Web UI. Docker deployment includes both frontend and backend services with optional Nginx reverse proxy.
-
-### Quick Start with Docker
-
-1. **Prerequisites**: Ensure Docker and Docker Compose are installed on your system.
-
-2. **Navigate to web-ui directory**:
-```bash
-cd web-ui
+result = rag.aquery("你的问题...", param)
 ```
 
-3. **Start with Docker Compose**:
-```bash
-docker-compose up 
-```
+**查询模式说明：**
 
-4. **Access the application**:
-   - Application at http://localhost:5000
+| 模式 | 说明 |
+|------|------|
+| `hyper` | 完整超图模式，使用实体和超边检索 |
+| `hyper-lite` | 轻量级模式，仅使用实体检索 |
+| `naive` | 朴素 RAG，直接检索文本块 |
+| `graph` | 图模式，二元关系检索 |
+| `llm` | 纯 LLM，不检索 |
 
-### Detailed Documentation
+---
 
-For comprehensive Docker deployment instructions, configuration options, troubleshooting, and production deployment guidelines, please refer to our detailed [Docker Deployment Guide](./web-ui/DOCKER.md).
+## 评估 / Evaluation
 
-## :bulb: Simple Test Demo
+本项目提供两种评估方法：
 
-1. Run by steps
-```bash
-conda activate rag
-cd Hyper_RAG/reproduce
-python reproduce/Step_0.py
-python reproduce/Step_1.py
+### Scoring-based 评估
 
-cd Hyper-RAG
-python -m uvicorn service_api:app --app-dir . --host 0.0.0.0 --port 8000
-```
-2. Open `testHTML_light.html` in your web browser.
-3. Selecting the model (`hyper`,`hyper-lite`,`naive`) and whether to output in streaming mode
-
-<div align="center">
-  <img src="./assets/hyperrag-streaming.gif" alt="Efficiency analysis" width="80%" />
-</div>
-
-## :checkered_flag: Evaluation
-In this work, we propose two evaluation strategys: the **selection-based** and **scoring-based** evaluation. 
-
-### Scoring-based evaluation
-Scoring-Based Assessment is designed to facilitate the comparative evaluation of multiple model outputs by quantifying their performance across various dimensions. This approach allows for a nuanced assessment of model capabilities by providing scores on several key metrics. However, a notable limitation is its reliance on reference answers. In our preprocessing steps, we leverage the source chunks from which each question is derived as reference answers.
-
-You can use the following command to use this evaluation method.
+基于评分的评估方法，允许对多个模型输出进行量化比较。
 
 ```bash
 python evaluate/evaluate_by_scoring.py
 ```
-The results of this evaluation are shown in the following figure.
-<div align="center">
-  <img src="./assets/many_llms_sp.svg" alt="Scoring-based evaluation" width="90%" />
-</div>
 
+### Selection-based 评估
 
-### Selection-based evaluation
-Selection-Based Assessment is tailored for scenarios where preliminary candidate models are available, enabling a comparative evaluation through a binary choice mechanism. This method does not require reference answers, making it suitable for diverse and open-ended questions. However, its limitation lies in its comparative nature, as it only allows for the evaluation of two models at a time.
-
-You can use the following command to use this evaluation method.
+基于选择的评估方法，适用于预选候选模型的场景。
 
 ```bash
 python evaluate/evaluate_by_selection.py
 ```
-The results of this evaluation are shown in the following figure.
-<div align="center">
-  <img src="./assets/multi_domain.svg" alt="Selection-based evaluation" width="90%" />
-</div>
 
+---
 
-### Efficiency Analysis
-We conducted an efficiency analysis of our Hyper-RAG method using GPT-4o mini on the NeurologyCrop dataset, comparing it with standard RAG, Graph RAG, and Light RAG. To ensure fairness by excluding network latency, we measured only the local retrieval time for relevant knowledge and the construction of the prior knowledge prompt. While standard RAG focuses on the direct retrieval of chunk embeddings, Graph RAG, Light RAG, and Hyper-RAG also include retrieval from node and correlation vector databases and the time for one layer of graph or hypergraph information diffusion. We averaged the response times over 50 questions from the dataset for each method. The results are shown in the following figure.
+## 性能基准 / Benchmarks
 
-<div align="center">
-  <img src="./assets/speed_all.svg" alt="Efficiency analysis" width="60%" />
-</div>
+| 数据集 | Hyper-RAG | Graph RAG | Light RAG | Direct LLM |
+|----------|------------|------------|------------|-------------|
+| NeurologyCorp | +12.3% | - | - | - |
 
-## :memo: License
+**详细评估结果请参考论文：** [arXiv:2504.08758](https://arxiv.org/abs/2504.08758)
 
-This project is under license from Apache 2.0. For more details, see the [LICENSE](LICENSE.md) file.
+---
 
-Hyper-RAG is maintained by [iMoon-Lab](http://moon-lab.tech/), Tsinghua University. 
-Made with :heart: by <a href="https://github.com/yifanfeng97" target="_blank">Yifan Feng</a>, <a href="https://github.com/haoohu" target="_blank">Hao Hu</a>, <a href="https://github.com/yifanfeng97" target="_blank">Xingliang Hou</a>, <a href="https://github.com/yifanfeng97" target="_blank">Shiquan Liu</a>, <a href="https://github.com/FuYou0723" target="_blank">Yifan Zhang</a>, <a href="https://github.com/yuxizhe" target="_blank">Xizhe Yu</a>. 
+## 贡献 / Contributing
 
-If you have any questions, please feel free to contact us via email: [Yifan Feng](mailto:evanfeng97@gmail.com). 
+欢迎贡献！如果你想贡献代码，请遵循以下步骤：
 
-This repo benefits from [LightRAG](https://github.com/HKUDS/LightRAG) and [Hypergraph-DB](https://github.com/iMoonLab/Hypergraph-DB).  Thanks for their wonderful works.
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
 
-&#xa0;
+---
 
-## 🌟Citation
-```
+## 许可证 / License
+
+本项目采用 Apache 2.0 许可证 - 详见 [LICENSE](LICENSE) 文件。
+
+---
+
+## 致谢 / Acknowledgments
+
+- 感谢 [LightRAG](https://github.com/HKUDS/LightRAG) 和 [Hypergraph-DB](https://github.com/iMoonLab/Hypergraph-DB) 项目，为 Hyper-RAG 的实现提供了基础
+
+---
+
+## 引用 / Citation
+
+如果您在研究中使用了 Hyper-RAG，请使用以下格式引用：
+
+```bibtex
 @misc{feng2025hyperrag,
-      title={Hyper-RAG: Combating LLM Hallucinations using Hypergraph-Driven Retrieval-Augmented Generation}, 
-      author={Yifan Feng and Hao Hu and Xingliang Hou and Shiquan Liu and Shihui Ying and Shaoyi Du and Han Hu and Yue Gao},
-      year={2025},
-      eprint={2504.08758},
-      archivePrefix={arXiv},
-      primaryClass={cs.IR},
-      url={https://arxiv.org/abs/2504.08758}, 
+  title={Hyper-RAG: Combating LLM Hallucinations using Hypergraph-Driven Retrieval-Augmented Generation},
+  author={Yifan Feng and Hao Hu and Xingliang Hou and Shiquan Liu and Shihui Ying and Shaoyi Du and Han Hu and Yue Gao},
+  year={2025},
+  eprint={2504.08758},
+  archivePrefix={arXiv},
+  primaryClass={cs.IR},
+  url={https://arxiv.org/abs/2504.08758}
 }
 ```
 
-<a href="#top">Back to top</a>
+---
+
+## 联系方式 / Contact
+
+- **团队**: iMoon Lab, Tsinghua University
+- **Email**: [evanfeng97@gmail.com](mailto:evanfeng97@gmail.com)
+- **GitHub**: [iMoonLab/Hyper-RAG](https://github.com/iMoonLab/Hyper-RAG)
+
+---
+
+<div align="center">
+  <sub>如有问题，欢迎提交 Issue 或联系作者</sub>
+</div>
