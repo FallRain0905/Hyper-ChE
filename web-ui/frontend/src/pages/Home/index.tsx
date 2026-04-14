@@ -17,6 +17,7 @@ import {
     BookOpen,
     GitCompare,
 } from 'lucide-react'
+import { Tag } from 'antd'
 import {
     Button,
     Select,
@@ -47,6 +48,10 @@ const HyperRAGHome = () => {
     const [isLoading, setIsLoading] = useState(false)
     const [availableModes, setAvailableModes] = useState(['naive', 'graph', 'hyper'])
 
+    // 新增：RAG系统状态管理
+    const [currentRAGSystem, setCurrentRAGSystem] = useState('hyperrag')
+    const [systemsStatus, setSystemsStatus] = useState(null)
+
     // 新增对比模式相关状态
     const [isCompareMode, setIsCompareMode] = useState(false)
     const [compareMode1, setCompareMode1] = useState('hyper')
@@ -60,11 +65,16 @@ const HyperRAGHome = () => {
 
     // 定义所有可用的模式配置
     const allModes = [
-        { value: 'llm', label: 'LLM', icon: Bot, color: 'bg-yellow-500' },
-        { value: 'naive', label: 'RAG', icon: BookOpen, color: 'bg-blue-500' },
-        { value: 'graph', label: 'Graph-RAG', icon: Bot, color: 'bg-orange-500' },
-        { value: 'hyper', label: 'Hyper-RAG', icon: Zap, color: 'bg-purple-500' },
-        { value: 'hyper-lite', label: 'Hyper-RAG-Lite', icon: Layers, color: 'bg-green-500' }
+        { value: 'llm', label: 'LLM', icon: Bot, color: 'bg-yellow-500', system: 'hyperrag' },
+        { value: 'naive', label: 'RAG', icon: BookOpen, color: 'bg-blue-500', system: 'hyperrag' },
+        { value: 'graph', label: 'Graph-RAG', icon: Bot, color: 'bg-orange-500', system: 'hyperrag' },
+        { value: 'hyper', label: 'Hyper-RAG', icon: Zap, color: 'bg-purple-500', system: 'hyperrag' },
+        { value: 'hyper-lite', label: 'Hyper-RAG-Lite', icon: Layers, color: 'bg-green-500', system: 'hyperrag' },
+        // Cog-RAG 模式
+        { value: 'cog', label: 'Cog-RAG', icon: GitCompare, color: 'bg-indigo-600', system: 'cograg' },
+        { value: 'cog-hybrid', label: 'Cog-Hybrid', icon: GitCompare, color: 'bg-indigo-500', system: 'cograg' },
+        { value: 'cog-entity', label: 'Cog-Entity', icon: Bot, color: 'bg-cyan-600', system: 'cograg' },
+        { value: 'cog-theme', label: 'Cog-Theme', icon: BookOpen, color: 'bg-teal-600', system: 'cograg' }
     ]
 
     // 从localStorage加载Mode配置
@@ -251,7 +261,14 @@ return 'You'
             throw new Error(`Network error: ${response.status}`)
         }
 
-        return response.json()
+        const data = await response.json()
+
+        // 确保响应包含Cog-RAG相关字段
+        return {
+            ...data,
+            themes: data.themes || [],  // Cog-RAG的主题信息
+            rag_system: data.rag_system || 'hyperrag',  // 使用的RAG系统
+        }
     }
 
     const handleSubmit = async () => {
@@ -265,6 +282,12 @@ return
 
         // Add user message
         addMessage(userMessage, 'user')
+
+        // 自动根据查询模式切换系统
+        const targetSystem = queryMode.startsWith('cog') ? 'cograg' : 'hyperrag'
+        if (currentRAGSystem !== targetSystem) {
+            setCurrentRAGSystem(targetSystem)
+        }
 
         if (isCompareMode) {
             // 对比模式：同时查询两个模式
@@ -325,21 +348,33 @@ return
 
                 if (data.success) {
                     const modeNames = {
+                        // HyperRAG 模式
                         'hyper': 'Hyper-RAG',
                         'hyper-lite': 'Hyper-RAG-Lite',
                         'graph': 'Graph-RAG',
                         'naive': 'RAG',
                         'llm': 'LLM',
+                        // Cog-RAG 模式
+                        'cog': 'Cog-RAG',
+                        'cog-hybrid': 'Cog-Hybrid',
+                        'cog-entity': 'Cog-Entity',
+                        'cog-theme': 'Cog-Theme'
                     }
                     const modeName = modeNames[queryMode] || queryMode
 
+                    // 获取系统信息
+                    const modeInfo = allModes.find(m => m.value === queryMode)
+                    const systemName = modeInfo?.system === 'cograg' ? 'Cog-RAG' : 'HyperRAG'
+
                     let responseContent = data.response || 'No response content'
-                    responseContent += `\n\n---\n*Mode: ${modeName}*`
+                    responseContent += `\n\n---\n*${systemName} - ${modeName}*`
 
                     updateLastMessage(responseContent, {
                         entities: data.entities || [],
                         hyperedges: data.hyperedges || [],
-                        text_units: data.text_units || []
+                        text_units: data.text_units || [],
+                        themes: data.themes || [],  // 添加Cog-RAG的主题信息
+                        rag_system: data.rag_system || 'hyperrag'  // 添加系统标识
                     })
                 } else {
                     throw new Error(data.message || 'Query failed')
@@ -366,6 +401,16 @@ return
         storeGlobalUser.loadDatabases()
         loadFromStorage()
         loadModeSettings()
+
+        // 获取系统状态
+        fetch(`${SERVER_URL}/systems/status`)
+            .then(response => response.json())
+            .then(data => {
+                setSystemsStatus(data)
+            })
+            .catch(error => {
+                console.error('Failed to load systems status:', error)
+            })
 
         // 添加storage事件监听器
         window.addEventListener('storage', handleStorageChange)
@@ -491,6 +536,29 @@ return
                                     </button>
                                 )
                             })
+                        )}
+                    </div>
+                </div>
+
+                {/* 系统状态指示器 */}
+                <div className="mx-3 mt-4 p-3 bg-white rounded-lg border border-gray-200">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                            {currentRAGSystem === 'cograg' ? (
+                                <GitCompare className="w-4 h-4 text-purple-500" />
+                            ) : (
+                                <Zap className="w-4 h-4 text-blue-500" />
+                            )}
+                            <span className="text-sm font-medium text-gray-700">
+                                当前使用：{currentRAGSystem === 'cograg' ? 'Cog-RAG' : 'HyperRAG'} 系统
+                            </span>
+                        </div>
+                        {systemsStatus && (
+                            <Tag color={currentRAGSystem === 'cograg' ? 'purple' : 'blue'} className="text-xs">
+                                {currentRAGSystem === 'cograg'
+                                    ? `${systemsStatus.cograg.instances} 实例`
+                                    : `${systemsStatus.hyperrag.instances} 实例`}
+                            </Tag>
                         )}
                     </div>
                 </div>
@@ -622,6 +690,13 @@ return
                                                 <span className="font-medium text-gray-900">
                                                     {message.isCompare ? '对比分析' : getModeLabel(message.role)}
                                                 </span>
+                                                {/* 系统标识标签 */}
+                                                {message.rag_system === 'cograg' && (
+                                                    <Tag color="purple" className="ml-2">Cog-RAG</Tag>
+                                                )}
+                                                {message.rag_system === 'hyperrag' && (
+                                                    <Tag color="blue" className="ml-2">HyperRAG</Tag>
+                                                )}
                                                 <span className="text-xs text-gray-500">
                                                     {new Date(message.timestamp).toLocaleTimeString()}
                                                 </span>
@@ -793,6 +868,7 @@ return
                                                                     entities={message.entities || []}
                                                                     hyperedges={message.hyperedges || []}
                                                                     textUnits={message.text_units || []}
+                                                                    themes={message.themes || []}  // 添加主题信息
                                                                     mode={message.role}
                                                                 />
 
@@ -803,6 +879,7 @@ return
                                                                             <RetrievalHyperGraph
                                                                                 entities={message.entities || []}
                                                                                 hyperedges={message.hyperedges || []}
+                                                                                themes={message.themes || []}  // 添加主题信息用于可视化
                                                                                 height="400px"
                                                                                 mode={message.role}
                                                                                 graphId={`retrieval-graph-${message.id}`}

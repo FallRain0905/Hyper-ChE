@@ -22,12 +22,14 @@ const entityTypeColors = {
   ORGANIZATION: '#F08F56',
   LOCATION: '#16f69c',
   EVENT: '#004ac9',
-  PRODUCT: '#f056d1'
+  PRODUCT: '#f056d1',
+  Theme: '#13c2c2' // 主题节点的颜色
 }
 
 const RetrievalHyperGraph = ({
   entities = [],
   hyperedges = [],
+  themes = [], // 新增themes属性
   height = '300px',
   width = '100%',
   showTooltip = true,
@@ -40,7 +42,7 @@ const RetrievalHyperGraph = ({
   // 转换数据格式为HyperGraph组件需要的格式
   const convertedData = useMemo(() => {
     // 如果没有数据，返回空
-    if (!entities.length && !hyperedges.length) {
+    if (!entities.length && !hyperedges.length && !themes.length) {
       return null
     }
 
@@ -54,7 +56,21 @@ const RetrievalHyperGraph = ({
         ...entity,
         entity_type: String(entity.entity_type || t('retrieval.unknown')),
         description: String(entity.description || ''),
-        label: String(entity.entity_name || entity.name || '')
+        label: String(entity.entity_name || entity.name || ''),
+        nodeType: 'entity' // 标识为实体节点
+      }
+    })
+
+    // 处理主题数据 (Cog-RAG特有)
+    themes.forEach(theme => {
+      const themeName = String(theme.theme_name || `Theme_${Math.random()}`)
+      vertices[themeName] = {
+        ...theme,
+        entity_type: 'Theme',
+        description: String(theme.description || ''),
+        label: String(theme.theme_name || ''),
+        nodeType: 'theme', // 标识为主题节点
+        keywords: theme.keywords || []
       }
     })
 
@@ -95,7 +111,7 @@ const RetrievalHyperGraph = ({
     })
 
     return { vertices, edges }
-  }, [entities, hyperedges, t])
+  }, [entities, hyperedges, themes, t])
 
   const options = useMemo(() => {
     const hyperData = {

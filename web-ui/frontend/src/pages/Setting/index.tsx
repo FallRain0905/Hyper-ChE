@@ -56,16 +56,23 @@ const Setting: React.FC = () => {
 
   // 可用的查询模式配置
   const queryModes = [
-    { value: 'llm', label: 'LLM', icon: '🤖', description: '仅使用大语言模型直接回答' },
-    { value: 'naive', label: 'RAG', icon: '📚', description: '基础检索增强生成' },
-    { value: 'graph', label: 'Graph-RAG', icon: '🕸️', description: '基于图结构的检索增强生成' },
-    { value: 'hyper', label: 'Hyper-RAG', icon: '⚡', description: '基于超图的检索增强生成' },
+    // HyperRAG 模式
+    { value: 'llm', label: 'LLM', icon: '🤖', description: '仅使用大语言模型直接回答', system: 'hyperrag' },
+    { value: 'naive', label: 'RAG', icon: '📚', description: '基础检索增强生成', system: 'hyperrag' },
+    { value: 'graph', label: 'Graph-RAG', icon: '🕸️', description: '基于图结构的检索增强生成', system: 'hyperrag' },
+    { value: 'hyper', label: 'Hyper-RAG', icon: '⚡', description: '基于超图的检索增强生成', system: 'hyperrag' },
     {
       value: 'hyper-lite',
       label: 'Hyper-RAG-Lite',
       icon: '🔸',
-      description: '轻量级超图检索增强生成'
-    }
+      description: '轻量级超图检索增强生成',
+      system: 'hyperrag'
+    },
+    // Cog-RAG 模式
+    { value: 'cog', label: 'Cog-RAG', icon: '🧠', description: '双超图认知检索（实体+主题）', system: 'cograg' },
+    { value: 'cog-hybrid', label: 'Cog-Hybrid', icon: '🔄', description: '混合模式：结合实体和主题检索', system: 'cograg' },
+    { value: 'cog-entity', label: 'Cog-Entity', icon: '🔷', description: '仅使用实体超图检索', system: 'cograg' },
+    { value: 'cog-theme', label: 'Cog-Theme', icon: '🎨', description: '仅使用主题超图检索', system: 'cograg' }
   ]
 
   // 模型提供商配置
@@ -459,27 +466,81 @@ const Setting: React.FC = () => {
               label="可用的查询模式"
               extra="选择在聊天界面侧边栏中显示的查询模式"
             >
-              <Checkbox.Group style={{ width: '100%' }}>
-                <Row gutter={[16, 16]}>
-                  {queryModes.map(mode => (
-                    <Col span={12} key={mode.value}>
-                      <Card size="small" style={{ height: '100%' }}>
-                        <Checkbox value={mode.value} style={{ width: '100%' }}>
-                          <div style={{ marginLeft: '8px' }}>
-                            <div style={{ fontWeight: 'bold', fontSize: '14px' }}>
-                              <span style={{ marginRight: '6px' }}>{mode.icon}</span>
-                              {mode.label}
-                            </div>
-                            <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                              {mode.description}
-                            </div>
-                          </div>
-                        </Checkbox>
-                      </Card>
-                    </Col>
-                  ))}
-                </Row>
-              </Checkbox.Group>
+              <div style={{ width: '100%' }}>
+                {/* HyperRAG 系统分组 */}
+                <div style={{ marginBottom: '24px' }}>
+                  <div style={{
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    color: '#1890ff',
+                    marginBottom: '12px',
+                    padding: '8px 12px',
+                    background: '#f0f5ff',
+                    borderRadius: '4px',
+                    borderLeft: '3px solid #1890ff'
+                  }}>
+                    HyperRAG 系统
+                  </div>
+                  <Checkbox.Group style={{ width: '100%' }}>
+                    <Row gutter={[16, 16]}>
+                      {queryModes.filter(m => m.system === 'hyperrag').map(mode => (
+                        <Col span={12} key={mode.value}>
+                          <Card size="small" style={{ height: '100%' }}>
+                            <Checkbox value={mode.value} style={{ width: '100%' }}>
+                              <div style={{ marginLeft: '8px' }}>
+                                <div style={{ fontWeight: 'bold', fontSize: '14px' }}>
+                                  <span style={{ marginRight: '6px' }}>{mode.icon}</span>
+                                  {mode.label}
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                                  {mode.description}
+                                </div>
+                              </div>
+                            </Checkbox>
+                          </Card>
+                        </Col>
+                      ))}
+                    </Row>
+                  </Checkbox.Group>
+                </div>
+
+                {/* Cog-RAG 系统分组 */}
+                <div>
+                  <div style={{
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    color: '#722ed1',
+                    marginBottom: '12px',
+                    padding: '8px 12px',
+                    background: '#f9f0ff',
+                    borderRadius: '4px',
+                    borderLeft: '3px solid #722ed1'
+                  }}>
+                    Cog-RAG 系统
+                  </div>
+                  <Checkbox.Group style={{ width: '100%' }}>
+                    <Row gutter={[16, 16]}>
+                      {queryModes.filter(m => m.system === 'cograg').map(mode => (
+                        <Col span={12} key={mode.value}>
+                          <Card size="small" style={{ height: '100%' }}>
+                            <Checkbox value={mode.value} style={{ width: '100%' }}>
+                              <div style={{ marginLeft: '8px' }}>
+                                <div style={{ fontWeight: 'bold', fontSize: '14px' }}>
+                                  <span style={{ marginRight: '6px' }}>{mode.icon}</span>
+                                  {mode.label}
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                                  {mode.description}
+                                </div>
+                              </div>
+                            </Checkbox>
+                          </Card>
+                        </Col>
+                      ))}
+                    </Row>
+                  </Checkbox.Group>
+                </div>
+              </div>
             </Form.Item>
           </Card>
 

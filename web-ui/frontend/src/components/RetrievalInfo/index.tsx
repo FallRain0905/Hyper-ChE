@@ -6,7 +6,8 @@ import {
   ShareAltOutlined,
   FileTextOutlined,
   InfoCircleOutlined,
-  DatabaseOutlined
+  DatabaseOutlined,
+  TagOutlined
 } from '@ant-design/icons'
 
 const { Panel } = Collapse
@@ -16,6 +17,7 @@ const RetrievalInfo = ({
   entities = [],
   hyperedges = [],
   textUnits = [],
+  themes = [], // 新增themes属性
   className = '',
   mode = 'hyper'
 }) => {
@@ -23,7 +25,7 @@ const RetrievalInfo = ({
   const { t } = useTranslation()
 
   // 如果没有任何检索信息，不渲染组件
-  if (!entities.length && !hyperedges.length && !textUnits.length) {
+  if (!entities.length && !hyperedges.length && !textUnits.length && !themes.length) {
     return null
   }
   const edgesName = mode === 'hyper' ? t('retrieval.hyperedge_count') : t('retrieval.edge_count')
@@ -155,7 +157,69 @@ const RetrievalInfo = ({
     </Card>
   )
 
+  const renderThemeCard = (theme, index) => (
+    <Card
+      key={index}
+      size="small"
+      className="mb-2"
+      title={
+        <Space>
+          <TagOutlined className="text-teal-500" />
+          <Text strong>{theme.theme_name || `Theme ${index + 1}`}</Text>
+          <Tag color="teal">Theme</Tag>
+        </Space>
+      }
+    >
+      <div className="text-sm">
+        {theme.description && (
+          <div className="mb-2">
+            <Text type="secondary">Description: </Text>
+            <Paragraph
+              ellipsis={{ rows: 2, expandable: true, symbol: t('retrieval.expand') }}
+              className="mb-1"
+            >
+              {theme.description}
+            </Paragraph>
+          </div>
+        )}
+        {theme.keywords && theme.keywords.length > 0 && (
+          <div className="mb-2">
+            <Text type="secondary">Keywords: </Text>
+            <div className="mt-1">
+              {Array.isArray(theme.keywords) ? (
+                theme.keywords.map((keyword, idx) => (
+                  <Tag key={idx} color="teal" className="mb-1">
+                    {keyword}
+                  </Tag>
+                ))
+              ) : (
+                <Tag color="teal">{theme.keywords}</Tag>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+
   const panelItems = []
+
+  // 主题面板 (Cog-RAG特有)
+  if (themes.length > 0) {
+    panelItems.push({
+      key: 'themes',
+      label: (
+        <Space>
+          <TagOutlined className="text-teal-500" />
+          <span>Themes</span>
+          <Badge count={themes.length} style={{ backgroundColor: '#13c2c2' }} />
+        </Space>
+      ),
+      children: (
+        <div className="max-h-80 overflow-y-auto">{themes.map(renderThemeCard)}</div>
+      )
+    })
+  }
 
   // 超边面板
   if (hyperedges.length > 0) {

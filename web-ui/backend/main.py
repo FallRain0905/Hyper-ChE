@@ -39,6 +39,38 @@ except ImportError as e:
     print(f"HyperRAG not available: {e}")
     HYPERRAG_AVAILABLE = False
 
+# 添加Cog-RAG导入
+# 向上查找Hyper-RAG根目录并添加到sys.path，使cog-rag/cograg可以被导入
+if importlib.util.find_spec("cograg") is None:
+    for parent in Path(__file__).resolve().parents:
+        # 检查是否是Hyper-RAG根目录（包含hyperrag和cog-rag子目录）
+        if (parent / "hyperrag" / "__init__.py").exists() and (parent / "cog-rag" / "cograg" / "__init__.py").exists():
+            if str(parent) not in sys.path:
+                sys.path.insert(0, str(parent))
+                print(f"已添加路径到sys.path: {parent}")
+            # 添加cog-rag目录到sys.path以便导入
+            cog_rag_path = parent / "cog-rag"
+            if str(cog_rag_path) not in sys.path:
+                sys.path.insert(0, str(cog_rag_path))
+                print(f"已添加cog-rag路径到sys.path: {cog_rag_path}")
+            break
+
+try:
+    # 尝试从cograg导入
+    import importlib
+    spec = importlib.util.find_spec("cograg")
+    if spec:
+        from cograg import CogRAG as CogRAGClass, QueryParam as CogQueryParam
+        from cograg.utils import EmbeddingFunc
+        COGRAG_AVAILABLE = True
+        print("Cog-RAG 模块加载成功")
+    else:
+        raise ImportError("cograg module spec not found")
+except ImportError as e:
+    print(f"Cog-RAG not available: {e}")
+    COGRAG_AVAILABLE = False
+    print("Cog-RAG 模块不可用")
+
 
 # 设置文件路径
 SETTINGS_FILE = "settings.json"
@@ -269,6 +301,8 @@ class SettingsModel(BaseModel):
     # HyperRAG 嵌入模型设置
     embeddingModel: str = "text-embedding-3-small"
     embeddingDim: int = 1536
+    # Cog-RAG相关设置
+    enableCogRAG: bool = True  # 启用/禁用Cog-RAG功能
 
 class APITestModel(BaseModel):
     apiKey: str
@@ -429,6 +463,10 @@ async def test_database_connection(db_test: DatabaseTestModel):
 hyperrag_instances = {}
 hyperrag_working_dir = "hyperrag_cache"
 
+# 全局 Cog-RAG 实例 - 支持多数据库
+cograg_instances = {}
+cograg_working_dir = "cograg_cache"
+
 async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[], **kwargs) -> str:
     """
     HyperRAG 专用的 LLM 函数，使用异步版本
@@ -550,6 +588,59 @@ def get_or_create_hyperrag(database: str = None):
     return hyperrag_instances[database]
 
 
+def get_or_create_cograg(database: str = None):
+    """
+    获取或创建指定数据库的 Cog-RAG 实例
+    """
+    global cograg_instances
+
+    if not COGRAG_AVAILABLE:
+        main_logger.error("Cog-RAG 不可用")
+        raise RuntimeError("Cog-RAG is not available")
+
+    # 如果没有指定数据库，使用默认数据库
+    if database is None:
+        database = db_manager.default_database
+        main_logger.info(f"使用默认数据库: {database}")
+
+    # 检查是否已存在该数据库的实例
+    if database not in cograg_instances:
+        main_logger.info(f"创建新的Cog-RAG实例，数据库: {database}")
+
+        # 使用数据库名作为工作目录（去掉.hgdb后缀）
+        if database.endswith('.hgdb'):
+            db_dir_name = database.replace('.hgdb', '')
+        else:
+            db_dir_name = database
+
+        # Cog-RAG 工作目录
+        db_working_dir = os.path.join(cograg_working_dir, db_dir_name)
+        Path(db_working_dir).mkdir(parents=True, exist_ok=True)
+
+        main_logger.info(f"Cog-RAG工作目录: {db_working_dir}")
+        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+            settings = json.load(f)
+
+        embedding_dim = settings.get("embeddingDim")
+
+        # 初始化 Cog-RAG 实例，复用现有的LLM和嵌入函数
+        cograg_instances[database] = CogRAGClass(
+            working_dir=db_working_dir,
+            llm_model_func=get_hyperrag_llm_func,
+            embedding_func=EmbeddingFunc(
+                embedding_dim=embedding_dim,
+                max_token_size=8192,
+                func=get_hyperrag_embedding_func
+            ),
+        )
+
+        main_logger.info(f"Cog-RAG实例创建完成，数据库: {database}")
+    else:
+        main_logger.info(f"使用现有Cog-RAG实例，数据库: {database}")
+
+    return cograg_instances[database]
+
+
 class Message(BaseModel):
     message: str
 
@@ -571,7 +662,7 @@ class DocumentModel(BaseModel):
 
 class QueryModel(BaseModel):
     question: str
-    mode: str = "hyper"  # hyper, hyper-lite, naive
+    mode: str = "hyper"  # 支持: hyper, hyper-lite, naive, graph, llm, cog, cog-hybrid, cog-entity, cog-theme
     top_k: int = 60
     max_token_for_text_unit: int = 1600
     max_token_for_entity_context: int = 300
@@ -612,40 +703,86 @@ async def insert_document(doc: DocumentModel):
 @app.post("/hyperrag/query")
 async def query_hyperrag(query: QueryModel):
     """
-    使用指定数据库的 HyperRAG 进行问答查询
+    统一的查询端点，支持HyperRAG和Cog-RAG模式
     """
-    if not HYPERRAG_AVAILABLE:
-        return {"success": False, "message": "HyperRAG is not available"}
-    
     try:
-        rag = get_or_create_hyperrag(query.database)
-        
-        # 创建查询参数
-        param = QueryParam(
-            mode=query.mode,
-            top_k=query.top_k,
-            max_token_for_text_unit=query.max_token_for_text_unit,
-            max_token_for_entity_context=query.max_token_for_entity_context,
-            max_token_for_relation_context=query.max_token_for_relation_context,
-            only_need_context=query.only_need_context,
-            response_type=query.response_type,
-            return_type='json'
-        )
-        
-        # 执行查询
-        result = await rag.aquery(query.question, param)
-        
-        # 处理结果格式
-        return {
-            "success": True,
-            "response": result.get("response", ""),
-            "entities": result.get("entities", []),
-            "hyperedges": result.get("hyperedges", []),
-            "text_units": result.get("text_units", []),
-            "mode": query.mode,
-            "question": query.question,
-            "database": query.database or "default"
-        }
+        # 定义Cog-RAG模式
+        cog_modes = ["cog", "cog-hybrid", "cog-entity", "cog-theme"]
+        hyper_modes = ["hyper", "hyper-lite", "naive", "graph", "llm"]
+
+        if query.mode in cog_modes:
+            # 使用Cog-RAG
+            if not COGRAG_AVAILABLE:
+                return {"success": False, "message": "Cog-RAG is not available"}
+
+            main_logger.info(f"使用Cog-RAG查询，模式: {query.mode}")
+            rag = get_or_create_cograg(query.database)
+
+            # 创建Cog-RAG查询参数
+            param = CogQueryParam(
+                mode=query.mode,
+                top_k=query.top_k,
+                max_token_for_text_unit=query.max_token_for_text_unit,
+                max_token_for_entity_context=query.max_token_for_entity_context,
+                max_token_for_relation_context=query.max_token_for_relation_context,
+                only_need_context=query.only_need_context,
+                response_type=query.response_type,
+            )
+
+            # 执行查询
+            result = await rag.aquery(query.question, param)
+
+            # 处理Cog-RAG响应格式
+            return {
+                "success": True,
+                "response": result.get("response", ""),
+                "entities": result.get("entities", []),
+                "themes": result.get("themes", []),  # Cog-RAG特有的主题信息
+                "hyperedges": result.get("hyperedges", []),
+                "text_units": result.get("text_units", []),
+                "mode": query.mode,
+                "rag_system": "cograg",  # 标识使用的系统
+                "question": query.question,
+                "database": query.database or "default"
+            }
+
+        elif query.mode in hyper_modes:
+            # 使用现有的HyperRAG逻辑
+            if not HYPERRAG_AVAILABLE:
+                return {"success": False, "message": "HyperRAG is not available"}
+
+            main_logger.info(f"使用HyperRAG查询，模式: {query.mode}")
+            rag = get_or_create_hyperrag(query.database)
+            param = QueryParam(
+                mode=query.mode,
+                top_k=query.top_k,
+                max_token_for_text_unit=query.max_token_for_text_unit,
+                max_token_for_entity_context=query.max_token_for_entity_context,
+                max_token_for_relation_context=query.max_token_for_relation_context,
+                only_need_context=query.only_need_context,
+                response_type=query.response_type,
+                return_type='json'
+            )
+
+            result = await rag.aquery(query.question, param)
+
+            return {
+                "success": True,
+                "response": result.get("response", ""),
+                "entities": result.get("entities", []),
+                "hyperedges": result.get("hyperedges", []),
+                "text_units": result.get("text_units", []),
+                "mode": query.mode,
+                "rag_system": "hyperrag",
+                "question": query.question,
+                "database": query.database or "default"
+            }
+        else:
+            return {"success": False, "message": f"Unknown query mode: {query.mode}"}
+
+    except Exception as e:
+        main_logger.error(f"查询失败: {str(e)}")
+        return {"success": False, "message": f"Query failed: {str(e)}"}
         
     except Exception as e:
         return {"success": False, "message": f"Query failed: {str(e)}"}
@@ -685,9 +822,95 @@ async def get_hyperrag_status(database: str = None):
             status["total_instances"] = len(hyperrag_instances)
         
         return status
-        
+
     except Exception as e:
         return {"success": False, "message": f"Failed to get status: {str(e)}"}
+
+@app.post("/cograg/insert")
+async def insert_cograg_document(doc: DocumentModel):
+    """
+    向指定数据库的 Cog-RAG 插入文档
+    """
+    if not COGRAG_AVAILABLE:
+        return {"success": False, "message": "Cog-RAG is not available"}
+
+    try:
+        rag = get_or_create_cograg(doc.database)
+
+        # 重试机制
+        for attempt in range(doc.retries):
+            try:
+                await rag.ainsert(doc.content)
+                main_logger.info(f"文档插入Cog-RAG成功，数据库: {doc.database}")
+                return {
+                    "success": True,
+                    "message": "Document inserted into Cog-RAG successfully",
+                    "database": doc.database or "default",
+                    "rag_system": "cograg"
+                }
+            except Exception as e:
+                if attempt == doc.retries - 1:
+                    raise e
+                main_logger.warning(f"插入尝试 {attempt + 1} 失败: {e}. 重试中...")
+                await asyncio.sleep(2)
+
+    except Exception as e:
+        main_logger.error(f"插入Cog-RAG文档失败: {str(e)}")
+        return {"success": False, "message": f"Failed to insert document into Cog-RAG: {str(e)}"}
+
+@app.get("/cograg/status")
+async def get_cograg_status(database: str = None):
+    """
+    获取Cog-RAG实例状态
+    """
+    try:
+        status = {
+            "available": COGRAG_AVAILABLE,
+            "database": database or "default",
+            "working_dir": cograg_working_dir,
+            "instances": list(cograg_instances.keys())
+        }
+
+        if database and database in cograg_instances:
+            instance = cograg_instances[database]
+            status["initialized"] = True
+            status["details"] = {
+                "chunk_token_size": instance.chunk_token_size,
+                "llm_model_name": instance.llm_model_name,
+                "embedding_func_available": instance.embedding_func is not None,
+                "working_dir": os.path.join(cograg_working_dir, database.replace('.hgdb', ''))
+            }
+        else:
+            status["initialized"] = False
+
+        return status
+    except Exception as e:
+        main_logger.error(f"获取Cog-RAG状态失败: {str(e)}")
+        return {"success": False, "message": f"Failed to get Cog-RAG status: {str(e)}"}
+
+@app.get("/systems/status")
+async def get_systems_status():
+    """
+    获取所有RAG系统的状态
+    """
+    try:
+        status = {
+            "hyperrag": {
+                "available": HYPERRAG_AVAILABLE,
+                "instances": len(hyperrag_instances),
+                "working_dir": hyperrag_working_dir
+            },
+            "cograg": {
+                "available": COGRAG_AVAILABLE,
+                "instances": len(cograg_instances),
+                "working_dir": cograg_working_dir
+            },
+            "current_system": "hyperrag"  # 默认系统
+        }
+        return status
+    except Exception as e:
+        main_logger.error(f"获取系统状态失败: {str(e)}")
+        return {"success": False, "message": f"Failed to get systems status: {str(e)}"}
 
 @app.delete("/hyperrag/reset")
 async def reset_hyperrag(database: str = None):
@@ -724,6 +947,7 @@ class FileEmbedRequest(BaseModel):
     file_ids: List[str]
     chunk_size: int = 1000
     chunk_overlap: int = 200
+    rag_system: str = "hyperrag"  # 新增：选择RAG系统 (hyperrag 或 cograg)
 
 @app.get("/files")
 async def get_files():
@@ -1207,11 +1431,23 @@ async def process_files_with_progress(request: FileEmbedRequest, total_files: in
                 main_logger.info(f"开始处理文件: {file_info['filename']} ({file_info['file_size']} bytes)，使用数据库: {database_name}")
                 
                 # 为每个文件初始化对应的HyperRAG实例
-                print("正在初始化 HyperRAG 实例...")
-                main_logger.info(f"正在初始化 HyperRAG 实例，数据库: {database_name}")
-                rag = get_or_create_hyperrag(database_name)
-                print("✅ HyperRAG 实例初始化完成")
-                main_logger.info(f"HyperRAG 实例初始化完成，使用数据库: {database_name}")
+                # 根据请求选择RAG系统
+                if request.rag_system == "cograg":
+                    if not COGRAG_AVAILABLE:
+                        return {"success": False, "message": "Cog-RAG is not available"}
+                    print(f"正在初始化 Cog-RAG 实例（{request.rag_system.upper()}系统）...")
+                    main_logger.info(f"正在初始化 Cog-RAG 实例，数据库: {database_name}")
+                    rag = get_or_create_cograg(database_name)
+                    print(f"✅ Cog-RAG 实例初始化完成")
+                    main_logger.info(f"Cog-RAG 实例初始化完成，使用数据库: {database_name}")
+                else:
+                    if not HYPERRAG_AVAILABLE:
+                        return {"success": False, "message": "HyperRAG is not available"}
+                    print(f"正在初始化 HyperRAG 实例（{request.rag_system.upper()}系统）...")
+                    main_logger.info(f"正在初始化 HyperRAG 实例，数据库: {database_name}")
+                    rag = get_or_create_hyperrag(database_name)
+                    print(f"✅ HyperRAG 实例初始化完成")
+                    main_logger.info(f"HyperRAG 实例初始化完成，使用数据库: {database_name}")
                 
                 # 发送详细进度信息
                 await manager.send_progress_update({
@@ -1220,7 +1456,8 @@ async def process_files_with_progress(request: FileEmbedRequest, total_files: in
                     "filename": file_info["filename"],
                     "database_name": database_name,
                     "stage": "reading",
-                    "message": f"正在读取文件: {file_info['filename']} (数据库: {database_name})"
+                    "message": f"正在读取文件: {file_info['filename']} (数据库: {database_name}, {request.rag_system.upper()}系统)",
+                    "rag_system": request.rag_system  # 添加系统标识
                 })
                 
                 # 读取文件内容

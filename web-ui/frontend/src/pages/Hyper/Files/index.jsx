@@ -12,6 +12,9 @@ const DocumentManager = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [isEmbedding, setIsEmbedding] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({});
+  // 新增：RAG系统选择相关状态
+  const [selectedRAGSystem, setSelectedRAGSystem] = useState('hyperrag');
+  const [systemsStatus, setSystemsStatus] = useState(null);
   const [embeddingProgress, setEmbeddingProgress] = useState({});
   const [notification, setNotification] = useState(null);
   const [progressDetails, setProgressDetails] = useState({});
@@ -25,6 +28,16 @@ const DocumentManager = () => {
   useEffect(() => {
     fetchFiles();
     connectWebSocket();
+
+    // 获取系统状态
+    fetch(`${SERVER_URL}/systems/status`)
+      .then(response => response.json())
+      .then(data => {
+        setSystemsStatus(data);
+      })
+      .catch(error => {
+        console.error('Failed to load systems status:', error);
+      });
 
     // 清理函数
     return () => {
@@ -274,7 +287,8 @@ return;
         body: JSON.stringify({
           file_ids: Array.from(selectedFiles),
           chunk_size: 1000,
-          chunk_overlap: 200
+          chunk_overlap: 200,
+          rag_system: selectedRAGSystem  // 添加系统选择
         }),
       });
 
@@ -592,6 +606,43 @@ return '0 Bytes';
         {/* 嵌入配置面板 */}
         {selectedFiles.size > 0 && !isEmbedding && (
           <div className="bg-white rounded-xl shadow-lg p-6 mt-6">
+            {/* RAG系统选择器 */}
+            <div className="mb-6 p-4 bg-gray-50 rounded-lg border">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">RAG系统选择</h3>
+              </div>
+
+              <div className="flex items-center space-x-4">
+                <span className="text-sm text-gray-600">选择文档嵌入系统：</span>
+                <select
+                  value={selectedRAGSystem}
+                  onChange={(e) => setSelectedRAGSystem(e.target.value)}
+                  style={{ width: 250, height: 40, padding: '8px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px' }}
+                >
+                  <option value="hyperrag">HyperRAG System</option>
+                  <option value="cograg">Cog-RAG System</option>
+                </select>
+
+                {/* 系统状态显示 */}
+                {systemsStatus && (
+                  <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-sm font-medium">HyperRAG:</span>
+                      <span className={`px-2 py-1 rounded text-xs ${systemsStatus.hyperrag.available ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {systemsStatus.hyperrag.available ? `可用 (${systemsStatus.hyperrag.instances} 实例)` : '不可用'}
+                      </span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-sm font-medium">Cog-RAG:</span>
+                      <span className={`px-2 py-1 rounded text-xs ${systemsStatus.cograg.available ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {systemsStatus.cograg.available ? `可用 (${systemsStatus.cograg.instances} 实例)` : '不可用'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
             <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('files.embedding_settings')}</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
