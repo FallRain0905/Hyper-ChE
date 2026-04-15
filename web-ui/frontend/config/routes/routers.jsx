@@ -2,7 +2,7 @@ import NotFoundPage from '@/404'
 import App from '@/App'
 import ErrorPage from '@/ErrorPage'
 import Home from '@/pages/Home'
-import Files from '@/pages/Hyper/Files'
+import Files from '@/pages/Files'
 import Graph from '@/pages/Hyper/Graph'
 import FullGraph from '@/pages/Hyper/FullGraph'
 import HyperDB from '@/pages/Hyper/DB'
@@ -51,7 +51,7 @@ export const routers = [
       },
       {
         path: '/Hyper/files',
-        name: '文档解析',
+        name: '文件管理',
         icon: <FileAddOutlined />,
         element: <Files />,
       },

@@ -91,6 +91,29 @@ const FullGraphPage = observer(() => {
     setError(null);
 
     try {
+      // 首先检查数据库是否存在
+      const statusUrl = `${SERVER_URL}/database/status?database=${encodeURIComponent(dbName)}`;
+      console.log('[FullGraph] 检查数据库状态:', statusUrl);
+
+      const statusRes = await fetch(statusUrl);
+      if (!statusRes.ok) {
+        throw new Error('无法获取数据库状态');
+      }
+
+      const statusData = await statusRes.json();
+      console.log('[FullGraph] 数据库状态:', statusData);
+
+      if (!statusData.exists) {
+        console.log('[FullGraph] 数据库不存在，清空数据');
+        if (isMountedRef.current) {
+          setVertices([]);
+          setHyperedges([]);
+          setError(`数据库 "${dbName}" 不存在`);
+          message.warning(`数据库 "${dbName}" 不存在，请选择其他数据库`);
+        }
+        return;
+      }
+
       const verticesUrl = `${SERVER_URL}/db/vertices?database=${encodeURIComponent(dbName)}&page=1&page_size=1000`;
       const hyperedgesUrl = `${SERVER_URL}/db/hyperedges?database=${encodeURIComponent(dbName)}&page=1&page_size=1000`;
 
@@ -103,6 +126,10 @@ const FullGraphPage = observer(() => {
 
       console.log('[FullGraph] API 响应状态:', { vertices: verticesRes.status, hyperedges: hyperedgesRes.status });
 
+      if (!verticesRes.ok || !hyperedgesRes.ok) {
+        throw new Error('API 请求失败');
+      }
+
       const verticesData = await verticesRes.json();
       const hyperedgesData = await hyperedgesRes.json();
 
@@ -114,13 +141,22 @@ const FullGraphPage = observer(() => {
         setVertices(verticesList);
         setHyperedges(hyperedgesList);
         console.log('[FullGraph] 数据已更新:', { verticesCount: verticesList.length, hyperedgesCount: hyperedgesList.length });
-        message.success(`成功加载: ${verticesList.length} 个顶点, ${hyperedgesList.length} 条超边`);
+
+        if (verticesList.length === 0 && hyperedgesList.length === 0) {
+          message.info(`数据库 "${dbName}" 为空，请先上传文档并嵌入`);
+        } else {
+          message.success(`成功加载: ${verticesList.length} 个顶点, ${hyperedgesList.length} 条超边`);
+        }
       }
     } catch (err: any) {
       console.error('[FullGraph] 加载失败:', err);
       if (isMountedRef.current) {
-        setError(t('graph.load_failed') + ': ' + err.message);
-        message.error(t('graph.load_failed'));
+        const errorMessage = err.message || '未知错误';
+        setError(t('graph.load_failed') + ': ' + errorMessage);
+        message.error(t('graph.load_failed') + ': ' + errorMessage);
+        // 出错时清空数据，避免显示错误的数据
+        setVertices([]);
+        setHyperedges([]);
         // 出错时清空 lastLoadedDbRef，允许重试
         lastLoadedDbRef.current = null;
       }
@@ -137,16 +173,21 @@ const FullGraphPage = observer(() => {
   useEffect(() => {
     const dbName = storeGlobalUser.selectedDatabase || '';
 
+    console.log('[FullGraph] useEffect 触发, dbName:', dbName, 'lastLoadedDb:', lastLoadedDbRef.current);
+
     if (!dbName) {
       // 数据库清空时也清空数据
+      console.log('[FullGraph] 数据库为空，清空数据');
       setVertices([]);
       setHyperedges([]);
       setError(null);
       lastLoadedDbRef.current = null;
-    } else if (lastLoadedDbRef.current !== dbName) {
-      // 数据库变化时加载数据
-      console.log('数据库变化:', lastLoadedDbRef.current, '->', dbName, '，开始加载数据');
+    } else if (lastLoadedDbRef.current !== dbName && !loadingRef.current) {
+      // 数据库变化时加载数据，且当前没有在加载
+      console.log('[FullGraph] 数据库变化:', lastLoadedDbRef.current, '->', dbName, '，开始加载数据');
       loadData(dbName);
+    } else {
+      console.log('[FullGraph] 跳过加载 - 可能是重复触发或正在加载');
     }
   }, [storeGlobalUser.selectedDatabase]);
 

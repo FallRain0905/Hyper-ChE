@@ -55,6 +55,15 @@ class GlobalUser {
   setAvailableDatabases(databases: Array<{ name: string; description: string }>) {
     console.log('[GlobalUser] setAvailableDatabases 被调用，数据库数量:', databases.length);
     this.availableDatabases = databases
+
+    // 检查当前选择的数据库是否还在列表中
+    if (this.selectedDatabase && !databases.find(db => db.name === this.selectedDatabase)) {
+      console.log('[GlobalUser] 当前选择的数据库不在列表中，清除选择');
+      this.selectedDatabase = '';
+      this.lastSetDbValue = '';
+      localStorage.removeItem('selectedDatabase');
+    }
+
     // 注意：不再自动修改 selectedDatabase，让用户自己选择
     // 避免循环：不主动调用 setSelectedDatabase，只更新 availableDatabases 状态
   }

@@ -81,18 +81,29 @@ const HyperRAGHome = () => {
     const loadModeSettings = () => {
         try {
             const modeSettings = localStorage.getItem('hyperrag_mode_settings')
+            console.log('📥 加载模式设置:', modeSettings) // 调试日志
+
             if (modeSettings) {
                 const parsed = JSON.parse(modeSettings)
+                console.log('📊 解析后的设置:', parsed) // 调试日志
+
                 if (parsed.availableModes && Array.isArray(parsed.availableModes) && parsed.availableModes.length > 0) {
+                    console.log('✅ 设置可用模式:', parsed.availableModes) // 调试日志
                     setAvailableModes(parsed.availableModes)
                     // 如果当前选择的mode不在可用列表中，选择第一个可用的mode
                     if (!parsed.availableModes.includes(queryMode)) {
                         setQueryMode(parsed.availableModes[0])
+                        console.log('🔄 切换到第一个可用模式:', parsed.availableModes[0]) // 调试日志
                     }
                 } else {
+                    console.log('⚠️ 可用模式为空，使用默认配置') // 调试日志
                     // 如果没有配置或配置为空，使用默认配置
                     setAvailableModes(['naive', 'graph', 'hyper'])
                 }
+            } else {
+                console.log('❌ 没有找到模式设置，使用默认配置') // 调试日志
+                // 出错时使用默认配置
+                setAvailableModes(['naive', 'graph', 'hyper'])
             }
         } catch (error) {
             console.error('Failed to load mode settings:', error)
@@ -110,6 +121,11 @@ const HyperRAGHome = () => {
 
     // 获取当前启用的模式列表
     const enabledModes = allModes.filter(mode => availableModes.includes(mode.value))
+    console.log('🎯 过滤启用的模式:', {
+      allModes: allModes.map(m => m.value),
+      availableModes: availableModes,
+      enabledModes: enabledModes.map(m => m.value)
+    }) // 调试日志
 
     // 获取模式标签的函数
     const getModeLabel = (roleValue) => {

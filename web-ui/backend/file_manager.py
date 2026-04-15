@@ -209,25 +209,94 @@ class FileManager:
             
             self._save_metadata(metadata)
     
-    def delete_file(self, file_id: str) -> bool:
-        """删除文件"""
+    def delete_file(self, file_id: str, clean_database: bool = False, rag_instance=None) -> bool:
+        """
+        删除文件
+
+        Args:
+            file_id: 文件ID
+            clean_database: 是否清理数据库中的嵌入数据
+            rag_instance: HyperRAG实例，用于清理数据库
+        """
         metadata = self._load_metadata()
-        
+
         if file_id not in metadata:
             return False
-        
+
         file_record = metadata[file_id]
-        
+
         # 删除文件
         file_path = Path(file_record["file_path"])
         if file_path.exists():
             file_path.unlink()
-        
+
+        # 如果需要清理数据库
+        if clean_database and rag_instance is not None:
+            try:
+                import asyncio
+                # 获取事件循环或创建新的
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                # 异步清理数据库中的相关数据
+                loop.run_until_complete(self._clean_file_from_database(file_id, file_record, rag_instance))
+                main_logger.info(f"已清理文件 {file_id} 的数据库数据")
+            except Exception as e:
+                main_logger.error(f"清理数据库数据失败: {str(e)}")
+
         # 删除元数据记录
         del metadata[file_id]
         self._save_metadata(metadata)
-        
+
         return True
+
+    async def _clean_file_from_database(self, file_id: str, file_record: dict, rag_instance):
+        """清理数据库中与文件相关的数据"""
+        try:
+            # 生成文档ID前缀
+            doc_id_prefix = f"doc-{file_id}"
+
+            # 1. 清理 full_docs 中的文档数据
+            all_docs = await rag_instance.full_docs.get_all()
+            docs_to_delete = [k for k in all_docs.keys() if k.startswith(doc_id_prefix)]
+
+            if docs_to_delete:
+                for doc_id in docs_to_delete:
+                    await rag_instance.full_docs.delete(doc_id)
+                main_logger.info(f"删除了 {len(docs_to_delete)} 个文档记录")
+
+            # 2. 清理 text_chunks 中的文本块
+            all_chunks = await rag_instance.text_chunks.get_all()
+            chunks_to_delete = [k for k, v in all_chunks.items()
+                              if v.get("full_doc_id", "").startswith(doc_id_prefix)]
+
+            if chunks_to_delete:
+                for chunk_id in chunks_to_delete:
+                    await rag_instance.text_chunks.delete(chunk_id)
+                main_logger.info(f"删除了 {len(chunks_to_delete)} 个文本块")
+
+            # 3. 清理向量数据库 (chunks_vdb)
+            # 由于向量数据库可能没有直接的delete方法，我们需要通过chunk IDs来处理
+            if chunks_to_delete and hasattr(rag_instance.chunks_vdb, 'delete'):
+                for chunk_id in chunks_to_delete:
+                    try:
+                        await rag_instance.chunks_vdb.delete(chunk_id)
+                    except Exception as e:
+                        main_logger.warning(f"删除向量 {chunk_id} 失败: {str(e)}")
+                main_logger.info(f"删除了 {len(chunks_to_delete)} 个向量嵌入")
+
+            # 注意：实体关系超图 (chunk_entity_relation_hypergraph) 的清理比较复杂
+            # 因为实体可能被多个文档共享，这里暂时不自动清理
+            # 如果需要完整清理，建议使用清空整个数据库的功能
+
+            main_logger.info(f"文件 {file_id} 的数据库数据清理完成")
+
+        except Exception as e:
+            main_logger.error(f"清理数据库数据时出错: {str(e)}")
+            raise
     
     async def read_file_content(self, file_path: str) -> str:
         """读取文件内容"""

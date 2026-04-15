@@ -63,8 +63,26 @@ const DatabaseSelector: React.FC<DatabaseSelectorProps> = ({
   }, []);
 
   // 处理数据库变更
-  const handleDatabaseChange = (value: string) => {
+  const handleDatabaseChange = async (value: string) => {
     console.log('[DatabaseSelector] handleDatabaseChange 被调用, value:', value);
+
+    // 验证数据库是否真的存在
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SERVER_URL || ''}/database/status?database=${encodeURIComponent(value)}`);
+      if (response.ok) {
+        const statusData = await response.json();
+        if (!statusData.exists) {
+          message.error(`数据库 "${value}" 不存在，请刷新数据库列表`);
+          // 刷新数据库列表
+          await storeGlobalUser.loadDatabases();
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('[DatabaseSelector] 验证数据库状态失败:', error);
+      // 即使验证失败，也允许选择，让后续页面处理错误
+    }
+
     storeGlobalUser.setSelectedDatabase(value);
     onChange?.(value);
   };

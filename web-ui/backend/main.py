@@ -1008,18 +1008,105 @@ async def upload_files(files: List[UploadFile] = File(...)):
     return {"files": results}
 
 @app.delete("/files/{file_id}")
-async def delete_file(file_id: str):
+async def delete_file(file_id: str, clean_database: bool = False):
     """
     删除指定的文件
+
+    Args:
+        file_id: 文件ID
+        clean_database: 是否同时清理数据库中的嵌入数据
     """
     try:
-        success = file_manager.delete_file(file_id)
+        # 获取当前活动的HyperRAG实例用于清理数据库
+        rag_instance = None
+        if clean_database:
+            # 获取默认数据库的HyperRAG实例
+            try:
+                rag_instance = get_or_create_hyperrag()
+                main_logger.info(f"准备清理文件 {file_id} 的数据库数据")
+            except Exception as e:
+                main_logger.warning(f"无法获取HyperRAG实例进行数据库清理: {str(e)}")
+                clean_database = False
+
+        success = file_manager.delete_file(file_id, clean_database=clean_database, rag_instance=rag_instance)
+
         if success:
-            return {"success": True, "message": "文件删除成功"}
+            message = "文件删除成功"
+            if clean_database and rag_instance:
+                message += "，数据库数据已清理"
+            return {"success": True, "message": message}
         else:
             raise HTTPException(status_code=404, detail="文件不存在")
     except Exception as e:
+        main_logger.error(f"删除文件失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"文件删除失败: {str(e)}")
+
+@app.post("/database/clear")
+async def clear_database(database: str = "default"):
+    """
+    清空指定数据库的所有数据
+
+    Args:
+        database: 数据库名称
+    """
+    try:
+        main_logger.info(f"开始清空数据库: {database}")
+
+        # 清空HyperRAG实例缓存
+        if database in hyperrag_instances:
+            del hyperrag_instances[database]
+            main_logger.info(f"已清除数据库 {database} 的实例缓存")
+
+        # 删除数据库文件
+        db_path = Path(hyperrag_working_dir) / database
+        if db_path.exists():
+            import shutil
+            shutil.rmtree(db_path)
+            main_logger.info(f"已删除数据库目录: {db_path}")
+
+        return {
+            "success": True,
+            "message": f"数据库 {database} 已清空",
+            "database": database
+        }
+    except Exception as e:
+        main_logger.error(f"清空数据库失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"清空数据库失败: {str(e)}")
+
+@app.get("/database/status")
+async def get_database_status(database: str = "default"):
+    """
+    获取数据库状态信息
+
+    Args:
+        database: 数据库名称
+    """
+    try:
+        # 检查数据库是否存在
+        db_path = Path(hyperrag_working_dir) / database
+        db_exists = db_path.exists()
+
+        # 获取数据库大小
+        db_size = 0
+        if db_exists:
+            for file_path in db_path.rglob("*"):
+                if file_path.is_file():
+                    db_size += file_path.stat().st_size
+
+        # 获取实例状态
+        has_instance = database in hyperrag_instances
+
+        return {
+            "database": database,
+            "exists": db_exists,
+            "has_instance": has_instance,
+            "size_bytes": db_size,
+            "size_mb": round(db_size / (1024 * 1024), 2),
+            "path": str(db_path)
+        }
+    except Exception as e:
+        main_logger.error(f"获取数据库状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取数据库状态失败: {str(e)}")
 
 @app.post("/files/embed")
 async def embed_files(request: FileEmbedRequest):

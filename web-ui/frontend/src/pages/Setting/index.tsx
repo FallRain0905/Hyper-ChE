@@ -40,6 +40,8 @@ const Setting: React.FC = () => {
   const [saveLoading, setSaveLoading] = useState(false)
   const [availableDatabases, setAvailableDatabases] = useState<any[]>([])
   const [testResults, setTestResults] = useState<any>({})
+  const [isCustomEmbedding, setIsCustomEmbedding] = useState(false)
+  const [useCustomEmbeddingApi, setUseCustomEmbeddingApi] = useState(false)
 
   // 默认配置
   const defaultSettings = {
@@ -50,8 +52,14 @@ const Setting: React.FC = () => {
     selectedDatabase: '',
     maxTokens: 2000,
     temperature: 0.7,
-    // 新增Mode配置，默认显示所有modes
-    availableModes: ['llm', 'naive', 'graph', 'hyper', 'hyper-lite']
+    // 嵌入模型配置
+    embeddingModel: 'text-embedding-3-small',
+    embeddingDim: 1536,
+    embeddingProvider: 'same', // 'same' 使用与聊天模型相同的API配置, 'custom' 使用独立配置
+    embeddingBaseUrl: '',
+    embeddingApiKey: '',
+    // 新增Mode配置，默认显示所有modes（包含Cog-RAG）
+    availableModes: ['llm', 'naive', 'graph', 'hyper', 'hyper-lite', 'cog', 'cog-hybrid', 'cog-entity', 'cog-theme']
   }
 
   // 可用的查询模式配置
@@ -103,16 +111,160 @@ const Setting: React.FC = () => {
     }
   ]
 
+  // 嵌入模型配置
+  const embeddingModels = [
+    // OpenAI 模型
+    {
+      value: 'text-embedding-3-small',
+      label: 'OpenAI text-embedding-3-small',
+      dim: 1536,
+      description: 'OpenAI 最新小型嵌入模型，1536维，性价比高',
+      provider: 'openai'
+    },
+    {
+      value: 'text-embedding-3-large',
+      label: 'OpenAI text-embedding-3-large',
+      dim: 3072,
+      description: 'OpenAI 最新大型嵌入模型，3072维，精度更高',
+      provider: 'openai'
+    },
+    {
+      value: 'text-embedding-ada-002',
+      label: 'OpenAI text-embedding-ada-002',
+      dim: 1536,
+      description: 'OpenAI 经典嵌入模型，1536维',
+      provider: 'openai'
+    },
+    // 阿里云百炼模型
+    {
+      value: 'text-embedding-v3',
+      label: '阿里云百炼 text-embedding-v3',
+      dim: 1536,
+      description: '阿里云百炼最新嵌入模型，1536维，中文效果最佳 (CMTEB: 68.92)',
+      provider: 'bailian',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    },
+    {
+      value: 'text-embedding-v2',
+      label: '阿里云百炼 text-embedding-v2',
+      dim: 1536,
+      description: '阿里云百炼嵌入模型，1536维，中文效果好 (CMTEB: 62.17)',
+      provider: 'bailian',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    },
+    {
+      value: 'text-embedding-v1',
+      label: '阿里云百炼 text-embedding-v1',
+      dim: 1536,
+      description: '阿里云百炼基础嵌入模型，1536维 (CMTEB: 59.84)',
+      provider: 'bailian',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    },
+    // Qwen3-Embedding 模型 (最新SOTA)
+    {
+      value: 'qwen3-embedding-8b',
+      label: 'Qwen3-Embedding-8B',
+      dim: 4096,
+      description: 'Qwen3最新8B嵌入模型，4096维，MTEB多语言第一 (70.58分)，支持100+语言',
+      provider: 'bailian',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    },
+    {
+      value: 'qwen3-embedding-4b',
+      label: 'Qwen3-Embedding-4B',
+      dim: 2560,
+      description: 'Qwen3最新4B嵌入模型，2560维，性能优异 (MTEB: 69.45分)',
+      provider: 'bailian',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    },
+    {
+      value: 'qwen3-embedding-0.6b',
+      label: 'Qwen3-Embedding-0.6B',
+      dim: 1024,
+      description: 'Qwen3最新0.6B轻量级嵌入模型，1024维，高效实用 (MTEB: 64.33分)',
+      provider: 'bailian',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    },
+    // 其他开源模型
+    {
+      value: 'bge-large-zh-v1.5',
+      label: 'BGE-large-zh-v1.5',
+      dim: 1024,
+      description: '智源AI中文嵌入模型，1024维，中文效果好',
+      provider: 'custom'
+    },
+    {
+      value: 'm3e-base',
+      label: 'M3E-base',
+      dim: 768,
+      description: '开源多语言嵌入模型，768维',
+      provider: 'custom'
+    },
+    {
+      value: 'text2vec-large-chinese',
+      label: 'text2vec-large-chinese',
+      dim: 1024,
+      description: '中文语义理解模型，1024维',
+      provider: 'custom'
+    },
+    {
+      value: 'paraphrase-multilingual-mpnet-base-v2',
+      label: 'paraphrase-multilingual-mpnet-base-v2',
+      dim: 768,
+      description: '多语言语义模型，768维',
+      provider: 'custom'
+    },
+    // 自定义选项
+    {
+      value: 'custom-4096',
+      label: '自定义 4096维模型',
+      dim: 4096,
+      description: '自定义嵌入模型，4096维',
+      provider: 'custom'
+    },
+    {
+      value: 'custom-2048',
+      label: '自定义 2048维模型',
+      dim: 2048,
+      description: '自定义嵌入模型，2048维',
+      provider: 'custom'
+    },
+    {
+      value: 'custom-1024',
+      label: '自定义 1024维模型',
+      dim: 1024,
+      description: '自定义嵌入模型，1024维',
+      provider: 'custom'
+    },
+    {
+      value: 'custom-768',
+      label: '自定义 768维模型',
+      dim: 768,
+      description: '自定义嵌入模型，768维',
+      provider: 'custom'
+    },
+    {
+      value: 'custom',
+      label: '完全自定义',
+      dim: 0,
+      description: '自定义模型名称和维度',
+      provider: 'custom'
+    }
+  ]
+
   // 加载设置
   const loadSettings = async () => {
     setLoading(true)
     try {
       // 首先尝试从localStorage加载Mode配置
       const localModeSettings = localStorage.getItem('hyperrag_mode_settings')
+      console.log('📥 [Settings] 从localStorage加载Mode设置:', localModeSettings) // 调试日志
+
       let modeSettings = {}
       if (localModeSettings) {
         try {
           modeSettings = JSON.parse(localModeSettings)
+          console.log('📊 [Settings] 解析后的Mode设置:', modeSettings) // 调试日志
         } catch (e) {
           console.error('解析本地Mode设置失败:', e)
         }
@@ -121,24 +273,59 @@ const Setting: React.FC = () => {
       const response = await fetch(`${SERVER_URL}/settings`)
       if (response.ok) {
         const settings = await response.json()
-        form.setFieldsValue({ ...defaultSettings, ...settings, ...modeSettings })
+
+        // 处理自定义嵌入模型
+        let embeddingModel = settings.embeddingModel || defaultSettings.embeddingModel
+        let customEmbeddingModel = ''
+
+        // 检查是否为自定义模型（不在预定义列表中）
+        const isCustomModel = !embeddingModels.find(m => m.value === embeddingModel)
+        if (isCustomModel) {
+          customEmbeddingModel = embeddingModel
+          embeddingModel = 'custom'
+          setIsCustomEmbedding(true)
+        } else {
+          setIsCustomEmbedding(false)
+        }
+
+        const finalSettings = {
+          ...defaultSettings,
+          ...settings,
+          ...modeSettings,
+          embeddingModel,
+          customEmbeddingModel
+        }
+        console.log('🎯 [Settings] 最终设置的表单值:', finalSettings) // 调试日志
+
+        // 设置嵌入服务提供商状态
+        setUseCustomEmbeddingApi(settings.embeddingProvider === 'custom')
+
+        form.setFieldsValue(finalSettings)
       } else {
         // 如果获取失败，使用默认设置加上本地Mode设置
-        form.setFieldsValue({ ...defaultSettings, ...modeSettings })
+        const finalSettings = { ...defaultSettings, ...modeSettings }
+        console.log('🎯 [Settings] 最终设置的表单值 (API失败):', finalSettings) // 调试日志
+        form.setFieldsValue(finalSettings)
       }
     } catch (error) {
       console.error('加载设置失败:', error)
       // 尝试加载本地Mode设置
       const localModeSettings = localStorage.getItem('hyperrag_mode_settings')
+      console.log('📥 [Settings] 从localStorage加载Mode设置 (异常):', localModeSettings) // 调试日志
+
       let modeSettings = {}
       if (localModeSettings) {
         try {
           modeSettings = JSON.parse(localModeSettings)
+          console.log('📊 [Settings] 解析后的Mode设置 (异常):', modeSettings) // 调试日志
         } catch (e) {
           console.error('解析本地Mode设置失败:', e)
         }
       }
-      form.setFieldsValue({ ...defaultSettings, ...modeSettings })
+      const finalSettings = { ...defaultSettings, ...modeSettings }
+      console.log('🎯 [Settings] 最终设置的表单值 (异常):', finalSettings) // 调试日志
+      form.setFieldsValue(finalSettings)
+      setIsCustomEmbedding(false) // 重置自定义状态
       message.warning(t('settings.load_failed'))
     } finally {
       setLoading(false)
@@ -168,33 +355,65 @@ const Setting: React.FC = () => {
     setSaveLoading(true)
     try {
       // 分离Mode设置和其他设置
-      const { availableModes, ...otherSettings } = values
+      const { availableModes, customEmbeddingModel, ...otherSettings } = values
+
+      console.log('💾 保存设置 - availableModes:', availableModes) // 调试日志
+      console.log('💾 保存设置 - availableModes 类型:', typeof availableModes) // 调试日志
+      console.log('💾 保存设置 - otherSettings:', otherSettings) // 调试日志
+
+      // 处理自定义嵌入模型
+      let finalEmbeddingModel = otherSettings.embeddingModel
+      if (otherSettings.embeddingModel === 'custom' && customEmbeddingModel) {
+        finalEmbeddingModel = customEmbeddingModel
+        console.log('💾 使用自定义嵌入模型:', finalEmbeddingModel)
+      }
+
+      const settingsToSave = {
+        ...otherSettings,
+        embeddingModel: finalEmbeddingModel
+      }
+
+      // 确保 availableModes 始终是数组
+      const normalizedModes = Array.isArray(availableModes) ? availableModes : [availableModes]
+      console.log('💾 保存设置 - normalizedModes:', normalizedModes) // 调试日志
 
       // Mode设置保存到localStorage
-      const modeSettings = { availableModes }
+      const modeSettings = { availableModes: normalizedModes }
       localStorage.setItem('hyperrag_mode_settings', JSON.stringify(modeSettings))
+      console.log('✅ 已保存到localStorage hyperrag_mode_settings') // 调试日志
 
       const response = await fetch(`${SERVER_URL}/settings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(otherSettings)
+        body: JSON.stringify(settingsToSave)
       })
 
       if (response.ok) {
         message.success(t('settings.save_success'))
         // 保存到本地存储作为备份
-        localStorage.setItem('hyperrag_settings', JSON.stringify(otherSettings))
+        localStorage.setItem('hyperrag_settings', JSON.stringify(settingsToSave))
       } else {
         throw new Error(t('settings.save_failed'))
       }
     } catch (error) {
       console.error('保存设置失败:', error)
       // 即使后端保存失败，也保存到本地存储
-      const { availableModes, ...otherSettings } = values
-      localStorage.setItem('hyperrag_settings', JSON.stringify(otherSettings))
-      localStorage.setItem('hyperrag_mode_settings', JSON.stringify({ availableModes }))
+      const { availableModes, customEmbeddingModel, ...otherSettings } = values
+      // 处理自定义嵌入模型
+      let finalEmbeddingModel = otherSettings.embeddingModel
+      if (otherSettings.embeddingModel === 'custom' && customEmbeddingModel) {
+        finalEmbeddingModel = customEmbeddingModel
+      }
+      const settingsToSave = {
+        ...otherSettings,
+        embeddingModel: finalEmbeddingModel
+      }
+      // 确保 availableModes 始终是数组
+      const normalizedModes = Array.isArray(availableModes) ? availableModes : [availableModes]
+      localStorage.setItem('hyperrag_settings', JSON.stringify(settingsToSave))
+      localStorage.setItem('hyperrag_mode_settings', JSON.stringify({ availableModes: normalizedModes }))
       message.warning(t('settings.backend_save_failed'))
     } finally {
       setSaveLoading(false)
@@ -291,6 +510,55 @@ const Setting: React.FC = () => {
     }
   }
 
+  // 处理嵌入模型变化
+  const handleEmbeddingModelChange = (value: string) => {
+    const model = embeddingModels.find(m => m.value === value)
+    if (model) {
+      // 检查是否为完全自定义
+      const isCustom = value === 'custom'
+      setIsCustomEmbedding(isCustom)
+
+      if (!isCustom) {
+        form.setFieldsValue({
+          embeddingDim: model.dim // 自动设置对应的维度
+        })
+
+        // 如果是阿里云百炼模型，自动设置base_url并提示使用独立API配置
+        if (model.provider === 'bailian' && model.baseUrl) {
+          setUseCustomEmbeddingApi(true)
+          form.setFieldsValue({
+            embeddingProvider: 'custom',
+            embeddingBaseUrl: model.baseUrl
+          })
+          message.info(`已自动设置阿里云百炼API地址，请配置您的阿里云百炼API Key`)
+        }
+        // 如果是OpenAI模型，恢复使用相同API配置
+        else if (model.provider === 'openai') {
+          setUseCustomEmbeddingApi(false)
+          form.setFieldsValue({
+            embeddingProvider: 'same',
+            embeddingBaseUrl: '',
+            embeddingApiKey: ''
+          })
+        }
+      }
+    }
+  }
+
+  // 处理嵌入服务提供商变化
+  const handleEmbeddingProviderChange = (value: string) => {
+    const useCustom = value === 'custom'
+    setUseCustomEmbeddingApi(useCustom)
+
+    if (!useCustom) {
+      // 如果选择使用相同的API配置，清空自定义配置
+      form.setFieldsValue({
+        embeddingBaseUrl: '',
+        embeddingApiKey: ''
+      })
+    }
+  }
+
   useEffect(() => {
     loadSettings()
     loadDatabases()
@@ -308,6 +576,8 @@ const Setting: React.FC = () => {
         </div>
 
         <Form form={form} layout="vertical" onFinish={saveSettings} initialValues={defaultSettings}>
+          {/* 添加调试信息 */}
+          {console.log('📋 Settings表单初始值:', defaultSettings)}
           {/* 系统配置区块 */}
           <Card
             title={
@@ -443,6 +713,171 @@ const Setting: React.FC = () => {
             </Form.Item>
           </Card>
 
+          {/* 嵌入模型配置区块 */}
+          <Card
+            title={
+              <span>
+                <DatabaseOutlined style={{ marginRight: '8px' }} />
+                嵌入模型配置
+              </span>
+            }
+            style={{ marginBottom: '24px' }}
+          >
+            <Alert
+              message="嵌入模型配置"
+              description="选择用于文档向量化的嵌入模型。不同模型有不同的维度和性能特征。更换模型需要清空现有数据库。"
+              type="warning"
+              showIcon
+              style={{ marginBottom: '24px' }}
+            />
+
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item
+                  name="embeddingModel"
+                  label="嵌入模型"
+                  rules={[{ required: true, message: '请选择嵌入模型' }]}
+                >
+                  <Select
+                    onChange={handleEmbeddingModelChange}
+                    placeholder="选择嵌入模型"
+                  >
+                    {embeddingModels.map(model => (
+                      <Option key={model.value} value={model.value}>
+                        <div>
+                          <div style={{ fontWeight: 'bold' }}>{model.label}</div>
+                          <div style={{ fontSize: '12px', color: '#666' }}>
+                            {model.dim} 维 - {model.description}
+                          </div>
+                        </div>
+                      </Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  name="embeddingDim"
+                  label="嵌入维度"
+                  rules={[{ required: true, message: '请输入嵌入维度' }]}
+                  extra="向量维度，由嵌入模型决定"
+                >
+                  <Input
+                    type="number"
+                    disabled={!isCustomEmbedding}
+                    placeholder={isCustomEmbedding ? "请输入维度" : "自动根据模型设置"}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            {/* 自定义模型名称输入 */}
+            {isCustomEmbedding && (
+              <Row gutter={16}>
+                <Col span={24}>
+                  <Form.Item
+                    name="customEmbeddingModel"
+                    label="自定义模型名称"
+                    rules={[{ required: true, message: '请输入自定义模型名称' }]}
+                    extra="请输入你要使用的嵌入模型名称，例如：your-custom-model"
+                  >
+                    <Input placeholder="例如：your-custom-model" />
+                  </Form.Item>
+                </Col>
+              </Row>
+            )}
+
+            {/* 嵌入服务提供商配置 */}
+            <Row gutter={16}>
+              <Col span={24}>
+                <Form.Item
+                  name="embeddingProvider"
+                  label="嵌入API配置"
+                  rules={[{ required: true, message: '请选择嵌入API配置' }]}
+                  extra="选择嵌入模型使用的API配置"
+                >
+                  <Select onChange={handleEmbeddingProviderChange}>
+                    <Option value="same">
+                      <div>
+                        <div style={{ fontWeight: 'bold' }}>使用与聊天模型相同的API配置</div>
+                        <div style={{ fontSize: '12px', color: '#666' }}>
+                          嵌入模型将使用上方配置的API Key和Base URL
+                        </div>
+                      </div>
+                    </Option>
+                    <Option value="custom">
+                      <div>
+                        <div style={{ fontWeight: 'bold' }}>使用独立的嵌入API配置</div>
+                        <div style={{ fontSize: '12px', color: '#666' }}>
+                          为嵌入模型配置独立的API Key和Base URL
+                        </div>
+                      </div>
+                    </Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+            </Row>
+
+            {/* 自定义嵌入API配置 */}
+            {useCustomEmbeddingApi && (
+              <>
+                <Alert
+                  message="嵌入API配置说明"
+                  description={
+                    <div>
+                      <p><strong>阿里云百炼配置：</strong></p>
+                      <ul style={{ marginLeft: '20px', marginTop: '8px' }}>
+                        <li>Base URL: https://dashscope.aliyuncs.com/compatible-mode/v1</li>
+                        <li>API Key: 从阿里云百炼控制台获取的API-KEY</li>
+                        <li>官方文档: <a href="https://help.aliyun.com/zh/model-studio/dashscopeembedding-in-llamaindex" target="_blank" rel="noopener noreferrer">查看文档</a></li>
+                      </ul>
+                      <p style={{ marginTop: '8px' }}><strong>其他自定义API：</strong></p>
+                      <p style={{ marginLeft: '20px', marginTop: '4px' }}>请根据您的API提供商填写相应的Base URL和API Key</p>
+                    </div>
+                  }
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: '16px' }}
+                />
+                <Row gutter={16}>
+                  <Col span={24}>
+                    <Form.Item
+                      name="embeddingBaseUrl"
+                      label="嵌入API Base URL"
+                      rules={[{ required: true, message: '请输入嵌入API的Base URL' }]}
+                      extra="嵌入模型的API端点，例如：https://dashscope.aliyuncs.com/compatible-mode/v1"
+                    >
+                      <Input placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                <Row gutter={16}>
+                  <Col span={24}>
+                    <Form.Item
+                      name="embeddingApiKey"
+                      label="嵌入API Key"
+                      rules={[{ required: true, message: '请输入嵌入API的Key' }]}
+                      extra="嵌入模型的API密钥，例如：sk-xxxxxxxxxxxxxxxx"
+                    >
+                      <Password
+                        placeholder="请输入嵌入API的密钥"
+                        iconRender={visible => (visible ? <KeyOutlined /> : <KeyOutlined />)}
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </>
+            )}
+
+            <Alert
+              message="重要提示"
+              description="更换嵌入模型后，需要清空现有数据库重新嵌入文档，否则会因维度不匹配导致错误。"
+              type="error"
+              showIcon
+              style={{ marginTop: '16px' }}
+            />
+          </Card>
+
           {/* Mode配置区块 */}
           <Card
             title={
@@ -466,7 +901,7 @@ const Setting: React.FC = () => {
               label="可用的查询模式"
               extra="选择在聊天界面侧边栏中显示的查询模式"
             >
-              <div style={{ width: '100%' }}>
+              <Checkbox.Group style={{ width: '100%' }}>
                 {/* HyperRAG 系统分组 */}
                 <div style={{ marginBottom: '24px' }}>
                   <div style={{
@@ -481,27 +916,25 @@ const Setting: React.FC = () => {
                   }}>
                     HyperRAG 系统
                   </div>
-                  <Checkbox.Group style={{ width: '100%' }}>
-                    <Row gutter={[16, 16]}>
-                      {queryModes.filter(m => m.system === 'hyperrag').map(mode => (
-                        <Col span={12} key={mode.value}>
-                          <Card size="small" style={{ height: '100%' }}>
-                            <Checkbox value={mode.value} style={{ width: '100%' }}>
-                              <div style={{ marginLeft: '8px' }}>
-                                <div style={{ fontWeight: 'bold', fontSize: '14px' }}>
-                                  <span style={{ marginRight: '6px' }}>{mode.icon}</span>
-                                  {mode.label}
-                                </div>
-                                <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                                  {mode.description}
-                                </div>
+                  <Row gutter={[16, 16]}>
+                    {queryModes.filter(m => m.system === 'hyperrag').map(mode => (
+                      <Col span={12} key={mode.value}>
+                        <Card size="small" style={{ height: '100%' }}>
+                          <Checkbox value={mode.value} style={{ width: '100%' }}>
+                            <div style={{ marginLeft: '8px' }}>
+                              <div style={{ fontWeight: 'bold', fontSize: '14px' }}>
+                                <span style={{ marginRight: '6px' }}>{mode.icon}</span>
+                                {mode.label}
                               </div>
-                            </Checkbox>
-                          </Card>
-                        </Col>
-                      ))}
-                    </Row>
-                  </Checkbox.Group>
+                              <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                                {mode.description}
+                              </div>
+                            </div>
+                          </Checkbox>
+                        </Card>
+                      </Col>
+                    ))}
+                  </Row>
                 </div>
 
                 {/* Cog-RAG 系统分组 */}
@@ -518,29 +951,27 @@ const Setting: React.FC = () => {
                   }}>
                     Cog-RAG 系统
                   </div>
-                  <Checkbox.Group style={{ width: '100%' }}>
-                    <Row gutter={[16, 16]}>
-                      {queryModes.filter(m => m.system === 'cograg').map(mode => (
-                        <Col span={12} key={mode.value}>
-                          <Card size="small" style={{ height: '100%' }}>
-                            <Checkbox value={mode.value} style={{ width: '100%' }}>
-                              <div style={{ marginLeft: '8px' }}>
-                                <div style={{ fontWeight: 'bold', fontSize: '14px' }}>
-                                  <span style={{ marginRight: '6px' }}>{mode.icon}</span>
-                                  {mode.label}
-                                </div>
-                                <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                                  {mode.description}
-                                </div>
+                  <Row gutter={[16, 16]}>
+                    {queryModes.filter(m => m.system === 'cograg').map(mode => (
+                      <Col span={12} key={mode.value}>
+                        <Card size="small" style={{ height: '100%' }}>
+                          <Checkbox value={mode.value} style={{ width: '100%' }}>
+                            <div style={{ marginLeft: '8px' }}>
+                              <div style={{ fontWeight: 'bold', fontSize: '14px' }}>
+                                <span style={{ marginRight: '6px' }}>{mode.icon}</span>
+                                {mode.label}
                               </div>
-                            </Checkbox>
-                          </Card>
-                        </Col>
-                      ))}
-                    </Row>
-                  </Checkbox.Group>
+                              <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                                {mode.description}
+                              </div>
+                            </div>
+                          </Checkbox>
+                        </Card>
+                      </Col>
+                    ))}
+                  </Row>
                 </div>
-              </div>
+              </Checkbox.Group>
             </Form.Item>
           </Card>
 
