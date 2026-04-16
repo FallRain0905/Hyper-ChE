@@ -2,7 +2,17 @@
   "permissions": {
     "allow": [
       "Bash(python -m py_compile \"c:/Users/surface/OneDrive/Desktop/Hyer-Gragh/Hyper-RAG/gradio/app.py\")",
-      "Bash(python -m py_compile app.py)"
+      "Bash(python -m py_compile app.py)",
+      "Bash(grep -l extract_entities C:/Users/surface/OneDrive/Desktop/Hyer-Gragh/Hyper-RAG/hyperrag/*.py)",
+      "Bash(grep -n \"^.*extract_entities\" \"C:/Users/surface/OneDrive/Desktop/Hyer-Gragh/Hyper-RAG/hyperrag\"/*.py)",
+      "Bash(python -m py_compile streamlit/app.py)",
+      "Bash(python -c \"import streamlit; print\\(''Streamlit works''\\)\")",
+      "Bash(git checkout:*)",
+      "Bash(python -m py_compile gradio/app.py)",
+      "Bash(python -c \":*)",
+      "Bash(timeout 10 python gradio/app.py)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''''app.py'''', ''''r'''', encoding=''''utf-8''''\\).read\\(\\)\\)\")",
+      "Bash(python -m py_compile \"c:\\\\Users\\\\surface\\\\OneDrive\\\\Desktop\\\\Hyer-Gragh\\\\Hyper-RAG\\\\gradio\\\\app.py\")"
     ]
   }
 }

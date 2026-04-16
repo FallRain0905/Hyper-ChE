@@ -41,7 +41,6 @@ const Setting: React.FC = () => {
   const [availableDatabases, setAvailableDatabases] = useState<any[]>([])
   const [testResults, setTestResults] = useState<any>({})
   const [isCustomEmbedding, setIsCustomEmbedding] = useState(false)
-  const [useCustomEmbeddingApi, setUseCustomEmbeddingApi] = useState(false)
 
   // 默认配置
   const defaultSettings = {
@@ -55,9 +54,8 @@ const Setting: React.FC = () => {
     // 嵌入模型配置
     embeddingModel: 'text-embedding-3-small',
     embeddingDim: 1536,
-    embeddingProvider: 'same', // 'same' 使用与聊天模型相同的API配置, 'custom' 使用独立配置
-    embeddingBaseUrl: '',
-    embeddingApiKey: '',
+    embeddingBaseUrl: '', // 嵌入模型的API地址
+    embeddingApiKey: '', // 嵌入模型的API密钥
     // 新增Mode配置，默认显示所有modes（包含Cog-RAG）
     availableModes: ['llm', 'naive', 'graph', 'hyper', 'hyper-lite', 'cog', 'cog-hybrid', 'cog-entity', 'cog-theme']
   }
@@ -187,10 +185,26 @@ const Setting: React.FC = () => {
     },
     // 硅基流动 Qwen3-Embeddings 模型
     {
-      value: 'Qwen/Qwen2.5-Embedding-8B',
-      label: '硅基流动 Qwen2.5-Embedding-8B',
+      value: 'Qwen/Qwen3-Embedding-8B',
+      label: '硅基流动 Qwen3-Embedding-8B',
       dim: 4096,
-      description: '硅基流动 Qwen2.5 8B嵌入模型，4096维，性能优秀，中文效果好',
+      description: '硅基流动 Qwen3 8B嵌入模型，4096维，MTEB多语言第一，支持100+语言，最高32768 token',
+      provider: 'siliconflow',
+      baseUrl: 'https://api.siliconflow.cn/v1'
+    },
+    {
+      value: 'Qwen/Qwen3-Embedding-4B',
+      label: '硅基流动 Qwen3-Embedding-4B',
+      dim: 2560,
+      description: '硅基流动 Qwen3 4B嵌入模型，2560维，性能优异，最高32768 token',
+      provider: 'siliconflow',
+      baseUrl: 'https://api.siliconflow.cn/v1'
+    },
+    {
+      value: 'Qwen/Qwen3-Embedding-0.6B',
+      label: '硅基流动 Qwen3-Embedding-0.6B',
+      dim: 1024,
+      description: '硅基流动 Qwen3 0.6B轻量级嵌入模型，1024维，高效实用，最高32768 token',
       provider: 'siliconflow',
       baseUrl: 'https://api.siliconflow.cn/v1'
     },
@@ -228,35 +242,35 @@ const Setting: React.FC = () => {
       value: 'custom-4096',
       label: '自定义 4096维模型',
       dim: 4096,
-      description: '自定义嵌入模型，4096维',
+      description: '自定义4096维嵌入模型，需要在下方输入具体的模型名称（如：BAAI/bge-large-zh-v1.5）',
       provider: 'custom'
     },
     {
       value: 'custom-2048',
       label: '自定义 2048维模型',
       dim: 2048,
-      description: '自定义嵌入模型，2048维',
+      description: '自定义2048维嵌入模型，需要在下方输入具体的模型名称',
       provider: 'custom'
     },
     {
       value: 'custom-1024',
       label: '自定义 1024维模型',
       dim: 1024,
-      description: '自定义嵌入模型，1024维',
+      description: '自定义1024维嵌入模型，需要在下方输入具体的模型名称',
       provider: 'custom'
     },
     {
       value: 'custom-768',
       label: '自定义 768维模型',
       dim: 768,
-      description: '自定义嵌入模型，768维',
+      description: '自定义768维嵌入模型，需要在下方输入具体的模型名称',
       provider: 'custom'
     },
     {
       value: 'custom',
       label: '完全自定义',
       dim: 0,
-      description: '自定义模型名称和维度',
+      description: '完全自定义模型名称和维度，维度和模型名称都需要在下方输入',
       provider: 'custom'
     }
   ]
@@ -282,19 +296,29 @@ const Setting: React.FC = () => {
       const response = await fetch(`${SERVER_URL}/settings`)
       if (response.ok) {
         const settings = await response.json()
+        console.log('📦 [Settings] 从后端获取的原始设置:', JSON.stringify(settings, null, 2))
 
         // 处理自定义嵌入模型
         let embeddingModel = settings.embeddingModel || defaultSettings.embeddingModel
-        let customEmbeddingModel = ''
+        let customEmbeddingModel = settings.customEmbeddingModel || ''
 
         // 检查是否为自定义模型（不在预定义列表中）
         const isCustomModel = !embeddingModels.find(m => m.value === embeddingModel)
-        if (isCustomModel) {
-          customEmbeddingModel = embeddingModel
-          embeddingModel = 'custom'
+
+        // 检查是否选择了自定义选项（以custom开头）
+        const isCustomOption = embeddingModel.startsWith('custom')
+
+        // 如果是完全自定义或者有自定义模型名称，则显示模型名称输入框
+        if (isCustomModel || isCustomOption || customEmbeddingModel) {
+          if (isCustomModel) {
+            // 如果是完全自定义（不在列表中），将模型名称保存到customEmbeddingModel
+            customEmbeddingModel = embeddingModel
+            embeddingModel = 'custom'
+          }
           setIsCustomEmbedding(true)
         } else {
           setIsCustomEmbedding(false)
+          customEmbeddingModel = ''
         }
 
         const finalSettings = {
@@ -304,20 +328,14 @@ const Setting: React.FC = () => {
           embeddingModel,
           customEmbeddingModel
         }
-        console.log('🎯 [Settings] 最终设置的表单值:', finalSettings) // 调试日志
-
-        // 设置嵌入服务提供商状态
-        const embeddingProvider = settings.embeddingProvider || defaultSettings.embeddingProvider
-        setUseCustomEmbeddingApi(embeddingProvider === 'custom')
+        console.log('🎯 [Settings] 最终设置的表单值:', JSON.stringify(finalSettings, null, 2)) // 调试日志
 
         form.setFieldsValue(finalSettings)
+        console.log('✅ [Settings] 表单值已设置')
       } else {
         // 如果获取失败，使用默认设置加上本地Mode设置
         const finalSettings = { ...defaultSettings, ...modeSettings }
         console.log('🎯 [Settings] 最终设置的表单值 (API失败):', finalSettings) // 调试日志
-
-        // 设置嵌入服务提供商状态
-        setUseCustomEmbeddingApi(finalSettings.embeddingProvider === 'custom')
 
         form.setFieldsValue(finalSettings)
       }
@@ -371,9 +389,10 @@ const Setting: React.FC = () => {
       // 分离Mode设置和其他设置
       const { availableModes, customEmbeddingModel, ...otherSettings } = values
 
+      console.log('💾 保存设置 - 完整表单值:', JSON.stringify(values, null, 2)) // 调试日志
       console.log('💾 保存设置 - availableModes:', availableModes) // 调试日志
       console.log('💾 保存设置 - availableModes 类型:', typeof availableModes) // 调试日志
-      console.log('💾 保存设置 - otherSettings:', otherSettings) // 调试日志
+      console.log('💾 保存设置 - otherSettings:', JSON.stringify(otherSettings, null, 2)) // 调试日志
 
       // 处理自定义嵌入模型
       let finalEmbeddingModel = otherSettings.embeddingModel
@@ -386,6 +405,8 @@ const Setting: React.FC = () => {
         ...otherSettings,
         embeddingModel: finalEmbeddingModel
       }
+
+      console.log('💾 准备保存的完整设置:', JSON.stringify(settingsToSave, null, 2))
 
       // 确保 availableModes 始终是数组
       const normalizedModes = Array.isArray(availableModes) ? availableModes : [availableModes]
@@ -528,57 +549,35 @@ const Setting: React.FC = () => {
   const handleEmbeddingModelChange = (value: string) => {
     const model = embeddingModels.find(m => m.value === value)
     if (model) {
-      // 检查是否为完全自定义
-      const isCustom = value === 'custom'
+      // 检查是否为自定义模型（完全自定义或自定义维度选项）
+      const isCustom = value === 'custom' || value.startsWith('custom-')
       setIsCustomEmbedding(isCustom)
+
+      // 清空自定义模型名称，除非是完全自定义选项
+      if (value !== 'custom') {
+        form.setFieldsValue({ customEmbeddingModel: '' })
+      }
 
       if (!isCustom) {
         form.setFieldsValue({
           embeddingDim: model.dim // 自动设置对应的维度
         })
 
-        // 如果是阿里云百炼模型，自动设置base_url并提示使用独立API配置
+        // 如果是阿里云百炼模型，自动设置base_url
         if (model.provider === 'bailian' && model.baseUrl) {
-          setUseCustomEmbeddingApi(true)
           form.setFieldsValue({
-            embeddingProvider: 'custom',
             embeddingBaseUrl: model.baseUrl
           })
           message.info(`已自动设置阿里云百炼API地址，请配置您的阿里云百炼API Key`)
         }
-        // 如果是硅基流动模型，自动配置base_url并提示使用独立API配置
+        // 如果是硅基流动模型，自动配置base_url
         else if (model.provider === 'siliconflow' && model.baseUrl) {
-          setUseCustomEmbeddingApi(true)
           form.setFieldsValue({
-            embeddingProvider: 'custom',
             embeddingBaseUrl: model.baseUrl
           })
           message.info(`已自动设置硅基流动API地址，请配置您的硅基流动API Key`)
         }
-        // 如果是OpenAI模型，恢复使用相同API配置
-        else if (model.provider === 'openai') {
-          setUseCustomEmbeddingApi(false)
-          form.setFieldsValue({
-            embeddingProvider: 'same',
-            embeddingBaseUrl: '',
-            embeddingApiKey: ''
-          })
-        }
       }
-    }
-  }
-
-  // 处理嵌入服务提供商变化
-  const handleEmbeddingProviderChange = (value: string) => {
-    const useCustom = value === 'custom'
-    setUseCustomEmbeddingApi(useCustom)
-
-    if (!useCustom) {
-      // 如果选择使用相同的API配置，清空自定义配置
-      form.setFieldsValue({
-        embeddingBaseUrl: '',
-        embeddingApiKey: ''
-      })
     }
   }
 
@@ -802,102 +801,80 @@ const Setting: React.FC = () => {
                     name="customEmbeddingModel"
                     label="自定义模型名称"
                     rules={[{ required: true, message: '请输入自定义模型名称' }]}
-                    extra="请输入你要使用的嵌入模型名称，例如：your-custom-model"
+                    extra={
+                      <div>
+                        <p>请输入你要使用的嵌入模型名称，例如：</p>
+                        <ul style={{ marginLeft: '20px', marginTop: '4px' }}>
+                          <li>BAAI/bge-large-zh-v1.5 (中文模型)</li>
+                          <li>BAAI/bge-m3 (多语言模型)</li>
+                          <li>netease-youdao/bce-embedding-base_v1 (网易有道)</li>
+                          <li>your-custom-model (自定义模型)</li>
+                        </ul>
+                        <p style={{ marginTop: '4px' }}>请确保该模型在您的API提供商处可用，并且维度与上方设置一致。</p>
+                      </div>
+                    }
                   >
-                    <Input placeholder="例如：your-custom-model" />
+                    <Input placeholder="例如：BAAI/bge-large-zh-v1.5" />
                   </Form.Item>
                 </Col>
               </Row>
             )}
 
-            {/* 嵌入服务提供商配置 */}
+            {/* 嵌入API配置说明 */}
+            <Alert
+              message="嵌入API配置说明"
+              description={
+                <div>
+                  <p><strong>阿里云百炼配置：</strong></p>
+                  <ul style={{ marginLeft: '20px', marginTop: '8px' }}>
+                    <li>Base URL: https://dashscope.aliyuncs.com/compatible-mode/v1</li>
+                    <li>API Key: 从阿里云百炼控制台获取的API-KEY</li>
+                    <li>官方文档: <a href="https://help.aliyun.com/zh/model-studio/dashscopeembedding-in-llamaindex" target="_blank" rel="noopener noreferrer">查看文档</a></li>
+                  </ul>
+                  <p style={{ marginTop: '8px' }}><strong>硅基流动配置：</strong></p>
+                  <ul style={{ marginLeft: '20px', marginTop: '8px' }}>
+                    <li>Base URL: https://api.siliconflow.cn/v1</li>
+                    <li>API Key: 从硅基流动控制台获取的API-KEY</li>
+                    <li>官方文档: <a href="https://docs.siliconflow.cn/cn/api-reference/embeddings/create-embeddings" target="_blank" rel="noopener noreferrer">查看文档</a></li>
+                    <li>Qwen3-Embedding-8B: 高性能中文嵌入模型，4096维，支持32768 token</li>
+                  </ul>
+                  <p style={{ marginTop: '8px' }}><strong>其他自定义API：</strong></p>
+                  <p style={{ marginLeft: '20px', marginTop: '4px' }}>请根据您的API提供商填写相应的Base URL和API Key</p>
+                </div>
+              }
+              type="info"
+              showIcon
+              style={{ marginBottom: '16px' }}
+            />
+
+            {/* 嵌入API配置 */}
             <Row gutter={16}>
               <Col span={24}>
                 <Form.Item
-                  name="embeddingProvider"
-                  label="嵌入API配置"
-                  rules={[{ required: true, message: '请选择嵌入API配置' }]}
-                  extra="选择嵌入模型使用的API配置"
+                  name="embeddingBaseUrl"
+                  label="嵌入API Base URL"
+                  rules={[{ required: true, message: '请输入嵌入API的Base URL' }]}
+                  extra="嵌入模型的API端点，例如：https://api.siliconflow.cn/v1"
                 >
-                  <Select onChange={handleEmbeddingProviderChange}>
-                    <Option value="same">
-                      <div>
-                        <div style={{ fontWeight: 'bold' }}>使用与聊天模型相同的API配置</div>
-                        <div style={{ fontSize: '12px', color: '#666' }}>
-                          嵌入模型将使用上方配置的API Key和Base URL
-                        </div>
-                      </div>
-                    </Option>
-                    <Option value="custom">
-                      <div>
-                        <div style={{ fontWeight: 'bold' }}>使用独立的嵌入API配置</div>
-                        <div style={{ fontSize: '12px', color: '#666' }}>
-                          为嵌入模型配置独立的API Key和Base URL
-                        </div>
-                      </div>
-                    </Option>
-                  </Select>
+                  <Input placeholder="https://api.siliconflow.cn/v1" />
                 </Form.Item>
               </Col>
             </Row>
-
-            {/* 自定义嵌入API配置 */}
-            {useCustomEmbeddingApi && (
-              <>
-                <Alert
-                  message="嵌入API配置说明"
-                  description={
-                    <div>
-                      <p><strong>阿里云百炼配置：</strong></p>
-                      <ul style={{ marginLeft: '20px', marginTop: '8px' }}>
-                        <li>Base URL: https://dashscope.aliyuncs.com/compatible-mode/v1</li>
-                        <li>API Key: 从阿里云百炼控制台获取的API-KEY</li>
-                        <li>官方文档: <a href="https://help.aliyun.com/zh/model-studio/dashscopeembedding-in-llamaindex" target="_blank" rel="noopener noreferrer">查看文档</a></li>
-                      </ul>
-                      <p style={{ marginTop: '8px' }}><strong>硅基流动配置：</strong></p>
-                      <ul style={{ marginLeft: '20px', marginTop: '8px' }}>
-                        <li>Base URL: https://api.siliconflow.cn/v1</li>
-                        <li>API Key: 从硅基流动控制台获取的API-KEY</li>
-                        <li>官方文档: <a href="https://docs.siliconflow.cn/cn/api-reference/embeddings/create-embeddings" target="_blank" rel="noopener noreferrer">查看文档</a></li>
-                        <li>Qwen2.5-Embedding-8B: 高性能中文嵌入模型，4096维</li>
-                      </ul>
-                      <p style={{ marginTop: '8px' }}><strong>其他自定义API：</strong></p>
-                      <p style={{ marginLeft: '20px', marginTop: '4px' }}>请根据您的API提供商填写相应的Base URL和API Key</p>
-                    </div>
-                  }
-                  type="info"
-                  showIcon
-                  style={{ marginBottom: '16px' }}
-                />
-                <Row gutter={16}>
-                  <Col span={24}>
-                    <Form.Item
-                      name="embeddingBaseUrl"
-                      label="嵌入API Base URL"
-                      rules={[{ required: true, message: '请输入嵌入API的Base URL' }]}
-                      extra="嵌入模型的API端点，例如：https://dashscope.aliyuncs.com/compatible-mode/v1"
-                    >
-                      <Input placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" />
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Row gutter={16}>
-                  <Col span={24}>
-                    <Form.Item
-                      name="embeddingApiKey"
-                      label="嵌入API Key"
-                      rules={[{ required: true, message: '请输入嵌入API的Key' }]}
-                      extra="嵌入模型的API密钥，例如：sk-xxxxxxxxxxxxxxxx"
-                    >
-                      <Password
-                        placeholder="请输入嵌入API的密钥"
-                        iconRender={visible => (visible ? <KeyOutlined /> : <KeyOutlined />)}
-                      />
-                    </Form.Item>
-                  </Col>
-                </Row>
-              </>
-            )}
+            <Row gutter={16}>
+              <Col span={24}>
+                <Form.Item
+                  name="embeddingApiKey"
+                  label="嵌入API Key"
+                  rules={[{ required: true, message: '请输入嵌入API的Key' }]}
+                  extra="嵌入模型的API密钥，例如：sk-xxxxxxxxxxxxxxxx"
+                >
+                  <Password
+                    placeholder="请输入嵌入API的密钥"
+                    iconRender={visible => (visible ? <KeyOutlined /> : <KeyOutlined />)}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
 
             <Alert
               message="重要提示"
