@@ -9,7 +9,7 @@ if sys.platform == 'win32':
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from db import get_hypergraph, getFrequentVertices, get_vertices, get_hyperedges, get_vertice, get_vertice_neighbor, get_hyperedge_neighbor_server, add_vertex, add_hyperedge, delete_vertex, delete_hyperedge, update_vertex, update_hyperedge, get_hyperedge_detail, db_manager
+from db import get_hypergraph, getFrequentVertices, get_vertices, get_hyperedges, get_vertice, get_vertice_neighbor, get_hyperedge_neighbor_server, add_vertex, add_hyperedge, delete_vertex, delete_hyperedge, update_vertex, update_hyperedge, get_hyperedge_detail, db_manager, get_theme_hypergraph, get_theme_vertices, get_theme_hyperedges, get_theme_vertex_neighbor
 from file_manager import file_manager
 import json
 import os
@@ -287,6 +287,45 @@ async def delete_hyperedge_endpoint(hyperedge_id: str, database: str = None):
         return {"success": True, "message": "Hyperedge deleted successfully"}
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+# ========== 主题超图相关API端点 ==========
+
+@app.get("/db/theme_hypergraph")
+async def get_theme_hypergraph_endpoint(database: str = None):
+    """获取主题超图全部数据"""
+    try:
+        data = get_theme_hypergraph(database)
+        return data
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/db/theme_vertices")
+async def get_theme_vertices_endpoint(database: str = None, page: int = None, page_size: int = None):
+    """获取主题超图顶点列表"""
+    try:
+        data = get_theme_vertices(database, page, page_size)
+        return data
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/db/theme_hyperedges")
+async def get_theme_hyperedges_endpoint(database: str = None, page: int = None, page_size: int = None):
+    """获取主题超图超边列表"""
+    try:
+        data = get_theme_hyperedges(database, page, page_size)
+        return data
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/db/theme_vertices_neighbor/{vertex_id}")
+async def get_theme_vertex_neighbor_endpoint(vertex_id: str, database: str = None):
+    """获取主题超图中顶点的邻居"""
+    try:
+        vertex_id = vertex_id.replace("%20", " ")
+        data = get_theme_vertex_neighbor(vertex_id, database)
+        return data
+    except Exception as e:
+        return {"error": str(e)}
 
 # 设置相关的API接口
 

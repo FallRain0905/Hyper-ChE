@@ -23,6 +23,10 @@ const GraphPage = () => {
   const [verticesPage, setVerticesPage] = useState(1);
   const [verticesTotal, setVerticesTotal] = useState(0);
   const [verticesLoading, setVerticesLoading] = useState(false);
+  const [hypergraphType, setHypergraphType] = useState<'entity' | 'theme'>('entity');
+  const [themeVerticesList, setThemeVerticesList] = useState([]);
+  const [themeVerticesPage, setThemeVerticesPage] = useState(1);
+  const [themeVerticesTotal, setThemeVerticesTotal] = useState(0);
 
   // 初始化数据库列表（但不自动恢复选择的数据库）
   useEffect(() => {
@@ -43,12 +47,31 @@ const GraphPage = () => {
     setVerticesLoading(false);
   };
 
-  // 获取vertices列表
+  // 获取主题vertices分页加载
+  const loadThemeVertices = async (page = 1, append = false) => {
+    setVerticesLoading(true);
+    const pageSize = 50;
+    const url = `${SERVER_URL}/db/theme_vertices?database=${encodeURIComponent(storeGlobalUser.selectedDatabase)}&page=${page}&page_size=${pageSize}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const list = data.data || data;
+    setThemeVerticesTotal(data.total || list.length);
+    setThemeVerticesPage(page);
+    setThemeVerticesList(prev => append ? [...prev, ...list] : list);
+    setVerticesLoading(false);
+  };
+
+  // 获取vertices列表（支持双超图）
   useEffect(() => {
     if (!storeGlobalUser.selectedDatabase || !storeGlobalUser.hasUserInitiatedVisualization) return;
 
     setLoading(true);
-    const url = `${SERVER_URL}/db/vertices?database=${encodeURIComponent(storeGlobalUser.selectedDatabase)}`;
+
+    // 根据超图类型选择不同的API端点
+    const url = hypergraphType === 'theme'
+      ? `${SERVER_URL}/db/theme_vertices?database=${encodeURIComponent(storeGlobalUser.selectedDatabase)}`
+      : `${SERVER_URL}/db/vertices?database=${encodeURIComponent(storeGlobalUser.selectedDatabase)}`;
+
     fetch(url)
       .then((res) => res.json())
       .then((data) => {
@@ -65,7 +88,7 @@ const GraphPage = () => {
         console.error(t('graph.fetch_vertices_failed') + ':', error);
         setLoading(false);
       });
-  }, [storeGlobalUser.selectedDatabase, storeGlobalUser.hasUserInitiatedVisualization, t]);
+  }, [storeGlobalUser.selectedDatabase, storeGlobalUser.hasUserInitiatedVisualization, hypergraphType, t]);
 
   // 初始化和数据库切换时加载第一页
   useEffect(() => {
@@ -277,6 +300,27 @@ const GraphPage = () => {
           onChange={onDatabaseChange}
         />
 
+        <span className='ml-4'>超图类型</span>
+        <Select
+          value={hypergraphType}
+          onChange={(value) => {
+            setHypergraphType(value);
+            // 切换超图类型时重置选择
+            setKey(undefined);
+            setItem({
+              entity_name: '',
+              entity_type: '',
+              descriptions: [''],
+              properties: ['']
+            });
+          }}
+          style={{ width: 120 }}
+          size="middle"
+        >
+          <Select.Option value="entity">实体超图</Select.Option>
+          <Select.Option value="theme">主题超图</Select.Option>
+        </Select>
+
         <span className='ml-4'>{t('graph.select_entity')}</span>
         <Select
           value={key}
@@ -312,6 +356,7 @@ const GraphPage = () => {
             width="100%"
             showTooltip={true}
             graphId="graph-page-hypergraph"
+            hypergraphType={hypergraphType}
           />
         </div>
 

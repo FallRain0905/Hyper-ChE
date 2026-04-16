@@ -5,6 +5,7 @@ class DatabaseManager:
     """数据库管理器，支持多个数据库实例和双系统"""
     def __init__(self):
         self.databases = {}
+        self.theme_databases = {}  # 新增：主题超图数据库缓存
         self.cache_dir = "hyperrag_cache"
         self.cograg_cache_dir = "cograg_cache"
         
@@ -186,6 +187,51 @@ class DatabaseManager:
         result["success"] = all_success
 
         return result
+
+    def get_theme_database(self, database_name: str):
+        """获取主题超图数据库实例
+
+        Args:
+            database_name: 数据库名称
+
+        Returns:
+            HypergraphDB实例或None（如果主题超图不存在）
+        """
+        if database_name not in self.theme_databases:
+            # 检查数据库是否存在
+            db_path = self._get_database_path(database_name)
+            if not db_path:
+                return None
+
+            # 加载主题超图数据库
+            theme_hgdb_path = os.path.join(db_path, "hypergraph_chunk_key_theme.hgdb")
+            if not os.path.exists(theme_hgdb_path):
+                return None
+
+            self.theme_databases[database_name] = HypergraphDB(storage_file=theme_hgdb_path)
+
+        return self.theme_databases[database_name]
+
+    def _get_database_path(self, database_name: str) -> str:
+        """获取数据库路径
+
+        Args:
+            database_name: 数据库名称
+
+        Returns:
+            数据库路径或None
+        """
+        # 先检查cograg_cache
+        cograg_path = os.path.join(self.cograg_cache_dir, database_name)
+        if os.path.exists(cograg_path):
+            return cograg_path
+
+        # 再检查hyperrag_cache
+        hyperrag_path = os.path.join(self.cache_dir, database_name)
+        if os.path.exists(hyperrag_path):
+            return hyperrag_path
+
+        return None
 
 # 全局数据库管理器实例
 db_manager = DatabaseManager()
@@ -585,3 +631,125 @@ def delete_hyperedge(vertices: list, database=None):
         return True
     except Exception as e:
         raise Exception(f"Failed to delete hyperedge: {str(e)}")
+
+# ========== 主题超图相关函数 ==========
+
+def get_theme_hypergraph(database=None):
+    """获取主题超图数据"""
+    db = db_manager.get_theme_database(database)
+    if db is None:
+        return {"vertices": {}, "edges": {}, "error": "主题超图数据库不存在"}
+
+    all_v = db.all_v
+    all_e = db.all_e
+
+    return get_theme_all_detail(all_v, all_e, database)
+
+def get_theme_vertices(database=None, page=None, page_size=None):
+    """获取主题超图的顶点列表"""
+    db = db_manager.get_theme_database(database)
+    if db is None:
+        return {"data": [], "total": 0, "error": "主题超图数据库不存在"}
+
+    all_v = list(db.all_v)
+
+    # 如果没有分页参数，返回所有数据
+    if page is None or page_size is None:
+        return all_v
+
+    # 计算分页
+    total = len(all_v)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+
+    # 获取分页数据
+    page_data = all_v[start_idx:end_idx]
+
+    return {
+        'data': page_data,
+        'total': total,
+        'page': page,
+        'page_size': page_size,
+        'total_pages': (total + page_size - 1) // page_size
+    }
+
+def get_theme_hyperedges(database=None, page=None, page_size=None):
+    """获取主题超图的超边列表"""
+    db = db_manager.get_theme_database(database)
+    if db is None:
+        return {"data": [], "total": 0, "error": "主题超图数据库不存在"}
+
+    all_e = list(db.all_e)
+
+    hyperedges = []
+    for e in all_e:
+        hyperedge_id = '|*|'.join(e)
+        hyperedge_data = db.e(e)
+
+        edge_info = {
+            'id': hyperedge_id,
+            'vertices': list(e),
+            'keywords': hyperedge_data.get('keywords', ''),
+            'description': hyperedge_data.get('description', ''),
+            'weight': hyperedge_data.get('weight', 1.0)
+        }
+        hyperedges.append(edge_info)
+
+    # 如果没有分页参数，返回所有数据
+    if page is None or page_size is None:
+        return hyperedges
+
+    # 计算分页
+    total = len(hyperedges)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+
+    # 获取分页数据
+    page_data = hyperedges[start_idx:end_idx]
+
+    return {
+        'data': page_data,
+        'total': total,
+        'page': page,
+        'page_size': page_size,
+        'total_pages': (total + page_size - 1) // page_size
+    }
+
+def get_theme_vertex_neighbor(vertex_id: str, database=None):
+    """获取主题超图中顶点的邻居"""
+    db = db_manager.get_theme_database(database)
+    if db is None:
+        return {"vertices": {}, "edges": {}, "error": "主题超图数据库不存在"}
+
+    n, e = get_theme_vertice_neighbor_inner(vertex_id, db)
+    return get_theme_all_detail(n, e, database)
+
+def get_theme_vertice_neighbor_inner(vertex_id: str, db):
+    """获取主题超图中顶点的邻居（内部函数）"""
+    try:
+        n = db.nbr_v(vertex_id)
+        n.add(vertex_id)
+        e = db.nbr_e_of_v(vertex_id)
+    except Exception:
+        # 如果报错，返回空列表
+        n = []
+        e = []
+
+    return (n, e)
+
+def get_theme_all_detail(all_v, all_e, database=None):
+    """获取主题超图的所有详情"""
+    db = db_manager.get_theme_database(database)
+    # 循环遍历 all_v 每个元素 赋值为 db.v
+    nodes = {}
+    for v in all_v:
+        nodes[v] = db.v(v)
+
+    hyperedges = {}
+    for e in all_e:
+        data = db.e(e)
+        # data的 keywords 赋值
+        data['keywords'] = data.get('keywords', '').replace("<SEP>", ",")
+        hyperedges['|#|'.join(e)] = data
+
+    return {"vertices": nodes, "edges": hyperedges}

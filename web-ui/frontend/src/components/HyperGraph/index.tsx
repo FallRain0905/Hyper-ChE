@@ -23,6 +23,8 @@ const entityTypeColors = {
     'LOCATION': '#16f69c',
     'EVENT': '#004ac9',
     'PRODUCT': '#f056d1',
+    'Theme': '#13c2c2',  // 主题节点颜色
+    'KEYWORD': '#ff6b6b'  // 关键词节点颜色
 }
 
 const HyperGraph = ({
@@ -32,7 +34,8 @@ const HyperGraph = ({
     width = '100%',
     showTooltip = true,
     containerStyle = {},
-    graphId = 'hypergraph-viewer'
+    graphId = 'hypergraph-viewer',
+    hypergraphType = 'entity'
 }) => {
     const [data, setData] = useState(undefined);
     const [loading, setLoading] = useState(false);
@@ -45,9 +48,14 @@ return;
 
         setLoading(true);
         try {
-            const url = db
-                ? `${SERVER_URL}/db/vertices_neighbor/${encodeURIComponent(vId)}?database=${encodeURIComponent(db)}`
-                : `${SERVER_URL}/db/vertices_neighbor/${encodeURIComponent(vId)}`;
+            // 根据超图类型选择不同的API端点
+            const url = hypergraphType === 'theme'
+                ? (db
+                    ? `${SERVER_URL}/db/theme_vertices_neighbor/${encodeURIComponent(vId)}?database=${encodeURIComponent(db)}`
+                    : `${SERVER_URL}/db/theme_vertices_neighbor/${encodeURIComponent(vId)}`)
+                : (db
+                    ? `${SERVER_URL}/db/vertices_neighbor/${encodeURIComponent(vId)}?database=${encodeURIComponent(db)}`
+                    : `${SERVER_URL}/db/vertices_neighbor/${encodeURIComponent(vId)}`);
 
             const response = await fetch(url);
             if (!response.ok) {
@@ -154,7 +162,13 @@ return;
             node: {
                 palette: { field: 'cluster' },
                 style: {
-                    size: 25,
+                    size: d => {
+                        // 主题节点使用更大的尺寸
+                        if (d.entity_type === 'Theme') {
+                            return 35;
+                        }
+                        return 25;
+                    },
                     labelText: d => d.id,
                     fill: d => {
                         // 如果是当前查看的顶点，使用红色高亮
@@ -163,10 +177,24 @@ return;
                         }
                         // 根据entity_type设置不同颜色
                         if (d.entity_type) {
-                            return entityTypeColors[d.entity_type] || '#8566CC' ;
+                            return entityTypeColors[d.entity_type] || '#8566CC';
                         }
                         // 默认颜色
                         return '#8566CC';
+                    },
+                    stroke: d => {
+                        // 主题节点使用金色边框
+                        if (d.entity_type === 'Theme') {
+                            return '#FFD700';
+                        }
+                        return undefined;
+                    },
+                    lineWidth: d => {
+                        // 主题节点使用更粗的边框
+                        if (d.entity_type === 'Theme') {
+                            return 3;
+                        }
+                        return 0;
                     },
                 }
             },

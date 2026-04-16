@@ -65,6 +65,7 @@ const FullGraphPage = observer(() => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [graphMode, setGraphMode] = useState('hyperedges');
+  const [hypergraphType, setHypergraphType] = useState<'entity' | 'theme'>('entity');
   const isMountedRef = useRef(true);
   const loadingRef = useRef(false);
   const lastLoadedDbRef = useRef<string | null>(null);
@@ -114,8 +115,13 @@ const FullGraphPage = observer(() => {
         return;
       }
 
-      const verticesUrl = `${SERVER_URL}/db/vertices?database=${encodeURIComponent(dbName)}&page=1&page_size=1000`;
-      const hyperedgesUrl = `${SERVER_URL}/db/hyperedges?database=${encodeURIComponent(dbName)}&page=1&page_size=1000`;
+      // 根据超图类型选择不同的API端点
+      const verticesUrl = hypergraphType === 'theme'
+        ? `${SERVER_URL}/db/theme_vertices?database=${encodeURIComponent(dbName)}&page=1&page_size=1000`
+        : `${SERVER_URL}/db/vertices?database=${encodeURIComponent(dbName)}&page=1&page_size=1000`;
+      const hyperedgesUrl = hypergraphType === 'theme'
+        ? `${SERVER_URL}/db/theme_hyperedges?database=${encodeURIComponent(dbName)}&page=1&page_size=1000`
+        : `${SERVER_URL}/db/hyperedges?database=${encodeURIComponent(dbName)}&page=1&page_size=1000`;
 
       console.log('[FullGraph] 请求 URL:', { verticesUrl, hyperedgesUrl });
 
@@ -465,15 +471,32 @@ const FullGraphPage = observer(() => {
           title={
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>{t('graph.graph_visualization')}</span>
-              <Select
-                value={graphMode}
-                style={{ width: 150 }}
-                onChange={setGraphMode}
-                options={[
-                  { label: '无标签', value: 'entities' },
-                  { label: '显示标签', value: 'hyperedges' }
-                ]}
-              />
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <Select
+                  value={hypergraphType}
+                  style={{ width: 120 }}
+                  onChange={(value) => {
+                    setHypergraphType(value);
+                    // 重新加载数据
+                    if (storeGlobalUser.selectedDatabase && storeGlobalUser.hasUserInitiatedVisualization) {
+                      loadData(storeGlobalUser.selectedDatabase);
+                    }
+                  }}
+                  options={[
+                    { label: '实体超图', value: 'entity' },
+                    { label: '主题超图', value: 'theme' }
+                  ]}
+                />
+                <Select
+                  value={graphMode}
+                  style={{ width: 150 }}
+                  onChange={setGraphMode}
+                  options={[
+                    { label: '无标签', value: 'entities' },
+                    { label: '显示标签', value: 'hyperedges' }
+                  ]}
+                />
+              </div>
             </div>
           }
           style={{ marginBottom: 0 }}
