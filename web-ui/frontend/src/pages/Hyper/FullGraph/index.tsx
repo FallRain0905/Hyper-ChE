@@ -176,20 +176,21 @@ const FullGraphPage = observer(() => {
     console.log('[FullGraph] useEffect 触发, dbName:', dbName, 'lastLoadedDb:', lastLoadedDbRef.current);
 
     if (!dbName) {
-      // 数据库清空时也清空数据
+      // 数据库清空时清空数据
       console.log('[FullGraph] 数据库为空，清空数据');
       setVertices([]);
       setHyperedges([]);
       setError(null);
       lastLoadedDbRef.current = null;
-    } else if (lastLoadedDbRef.current !== dbName && !loadingRef.current) {
-      // 数据库变化时加载数据，且当前没有在加载
+      storeGlobalUser.resetVisualizationState();
+    } else if (storeGlobalUser.hasUserInitiatedVisualization && lastLoadedDbRef.current !== dbName && !loadingRef.current) {
+      // 只有用户手动触发可视化且数据库变化时才加载数据
       console.log('[FullGraph] 数据库变化:', lastLoadedDbRef.current, '->', dbName, '，开始加载数据');
       loadData(dbName);
     } else {
-      console.log('[FullGraph] 跳过加载 - 可能是重复触发或正在加载');
+      console.log('[FullGraph] 跳过加载 - 等待用户手动触发可视化');
     }
-  }, [storeGlobalUser.selectedDatabase]);
+  }, [storeGlobalUser.selectedDatabase, storeGlobalUser.hasUserInitiatedVisualization]);
 
   // 组件卸载时清理
   useEffect(() => {
@@ -215,6 +216,29 @@ const FullGraphPage = observer(() => {
     a.click();
     URL.revokeObjectURL(url);
     message.success(t('graph.download_success'));
+  };
+
+  const handleStartVisualization = async () => {
+    const dbName = storeGlobalUser.selectedDatabase;
+    if (!dbName) {
+      message.warning('请先选择一个数据库');
+      return;
+    }
+
+    console.log('[FullGraph] 用户手动开始可视化，数据库:', dbName);
+
+    // 验证数据库是否在可用列表中
+    if (!storeGlobalUser.validateDatabaseExists(dbName)) {
+      message.warning('所选数据库不存在，请重新选择');
+      return;
+    }
+
+    // 设置用户已触发可视化
+    storeGlobalUser.setHasUserInitiatedVisualization(true);
+    storeGlobalUser.visualizationReady = true;
+
+    // 开始加载数据
+    await loadData(dbName);
   };
 
   const getEntityColor = (type: string) => {
@@ -338,11 +362,17 @@ const FullGraphPage = observer(() => {
         }
       },
       animate: false,
-      layout: {
+      layout: graphMode === 'hyperedges' ? {
         type: 'circular',
         preventOverlap: true,
         nodeSpacing: 80,
         radius: 300,
+      } : {
+        type: 'force-atlas2',
+        preventOverlap: true,
+        kr: 80,
+        gravity: 20,
+        linkDistance: 10,
       },
       behaviors: [
         'zoom-canvas',
@@ -350,13 +380,6 @@ const FullGraphPage = observer(() => {
         'drag-element',
       ],
       autoFit: { type: 'view' as const },
-      layout: {
-        type: 'force-atlas2',
-        preventOverlap: true,
-        kr: 80,
-        gravity: 20,
-        linkDistance: 10,
-      },
       plugins,
     };
     console.log('[FullGraph] 完整 Graphin options:', JSON.stringify(result, null, 2));
@@ -420,7 +443,24 @@ const FullGraphPage = observer(() => {
         </Card>
       )}
 
-      {vertices.length > 0 && (
+      {!storeGlobalUser.hasUserInitiatedVisualization ? (
+        <Card style={{ textAlign: 'center', padding: '48px' }}>
+          <div className="flex flex-col items-center justify-center">
+            <DatabaseOutlined style={{ fontSize: 64, color: '#d9d9d9', marginBottom: 16 }} />
+            <h2 style={{ fontSize: 24, marginBottom: 8 }}>请选择数据库并开始可视化</h2>
+            <p style={{ color: '#666', marginBottom: 24 }}>选择一个数据库后，点击下方按钮开始超图可视化</p>
+            <Button
+              type="primary"
+              size="large"
+              icon={<DatabaseOutlined />}
+              onClick={handleStartVisualization}
+              disabled={!storeGlobalUser.selectedDatabase}
+            >
+              开始可视化
+            </Button>
+          </div>
+        </Card>
+      ) : vertices.length > 0 && (
         <Card
           title={
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -456,7 +496,7 @@ const FullGraphPage = observer(() => {
         </Card>
       )}
 
-      {vertices.length === 0 && !error && storeGlobalUser.selectedDatabase && (
+      {storeGlobalUser.hasUserInitiatedVisualization && vertices.length === 0 && !error && storeGlobalUser.selectedDatabase && (
         <Card style={{ textAlign: 'center', padding: '48px' }}>
           <DatabaseOutlined style={{ fontSize: 64, color: '#d9d9d9', marginBottom: 16 }} />
           <p style={{ color: '#999', margin: 0 }}>{t('graph.no_graph_data')}</p>

@@ -191,7 +191,7 @@ class HyperRAG:
                 string_or_strings = [string_or_strings]
 
             new_docs = {
-                compute_mdhash_id(c.strip(), prefix="doc-"): {"content": c.strip()}
+                compute_mdhash_id(c.strip(), prefix="doc-hyperrag-"): {"content": c.strip()}
                 for c in string_or_strings
             }
             _add_doc_keys = await self.full_docs.filter_keys(list(new_docs.keys()))
@@ -205,7 +205,7 @@ class HyperRAG:
             inserting_chunks = {}
             for doc_key, doc in new_docs.items():
                 chunks = {
-                    compute_mdhash_id(dp["content"], prefix="chunk-"): {
+                    compute_mdhash_id(dp["content"], prefix="chunk-hyperrag-"): {
                         **dp,
                         "full_doc_id": doc_key,
                     }

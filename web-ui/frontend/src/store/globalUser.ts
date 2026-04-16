@@ -8,6 +8,10 @@ class GlobalUser {
   private isLoadingDatabases: boolean = false
   private lastSetDbValue: string = ''
 
+  // 新增：可视化控制状态
+  hasUserInitiatedVisualization: boolean = false  // 用户是否已点击开始可视化
+  visualizationReady: boolean = false             // 可视化是否准备就绪
+
   constructor() {
     makeAutoObservable(this)
   }
@@ -68,16 +72,33 @@ class GlobalUser {
     // 避免循环：不主动调用 setSelectedDatabase，只更新 availableDatabases 状态
   }
 
-  // 从localStorage恢复选中的数据库
+  // 从localStorage恢复选中的数据库（仅恢复名称，不触发加载）
   restoreSelectedDatabase() {
     const saved = localStorage.getItem('selectedDatabase')
     console.log('[GlobalUser] restoreSelectedDatabase 被调用, saved:', saved, '当前 selectedDatabase:', this.selectedDatabase);
     if (saved && !this.selectedDatabase) {
       // 只在没有选中数据库时才恢复
       this.selectedDatabase = saved
-      this.lastSetDbValue = saved;  // 同时更新 lastSetDbValue 防止被 setSelectedDatabase 阻止
+      this.lastSetDbValue = saved;
       console.log('[GlobalUser] 已从 localStorage 恢复数据库:', saved);
+      // 不再自动设置可视化状态，等待用户手动触发
     }
+  }
+
+  // 用户手动开始可视化
+  setHasUserInitiatedVisualization(value: boolean) {
+    this.hasUserInitiatedVisualization = value;
+  }
+
+  // 重置可视化状态
+  resetVisualizationState() {
+    this.hasUserInitiatedVisualization = false;
+    this.visualizationReady = false;
+  }
+
+  // 验证数据库是否在可用列表中
+  validateDatabaseExists(database: string): boolean {
+    return this.availableDatabases.some(db => db.name === database);
   }
 
   // 获取数据库列表

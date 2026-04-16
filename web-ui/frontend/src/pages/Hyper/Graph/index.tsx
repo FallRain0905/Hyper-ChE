@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Select, Card, Tag, Spin } from 'antd';
+import { Select, Card, Tag, Spin, Button, message } from 'antd';
 import { observer } from 'mobx-react';
 import { useTranslation } from 'react-i18next';
 import { storeGlobalUser } from '../../../store/globalUser';
@@ -24,9 +24,8 @@ const GraphPage = () => {
   const [verticesTotal, setVerticesTotal] = useState(0);
   const [verticesLoading, setVerticesLoading] = useState(false);
 
-  // 初始化数据库
+  // 初始化数据库列表（但不自动恢复选择的数据库）
   useEffect(() => {
-    storeGlobalUser.restoreSelectedDatabase();
     storeGlobalUser.loadDatabases();
   }, []);
 
@@ -46,7 +45,7 @@ const GraphPage = () => {
 
   // 获取vertices列表
   useEffect(() => {
-    if (!storeGlobalUser.selectedDatabase) return;
+    if (!storeGlobalUser.selectedDatabase || !storeGlobalUser.hasUserInitiatedVisualization) return;
 
     setLoading(true);
     const url = `${SERVER_URL}/db/vertices?database=${encodeURIComponent(storeGlobalUser.selectedDatabase)}`;
@@ -66,17 +65,17 @@ const GraphPage = () => {
         console.error(t('graph.fetch_vertices_failed') + ':', error);
         setLoading(false);
       });
-  }, [storeGlobalUser.selectedDatabase, t]);
+  }, [storeGlobalUser.selectedDatabase, storeGlobalUser.hasUserInitiatedVisualization, t]);
 
   // 初始化和数据库切换时加载第一页
   useEffect(() => {
-    if (storeGlobalUser.selectedDatabase) {
+    if (storeGlobalUser.selectedDatabase && storeGlobalUser.hasUserInitiatedVisualization) {
       setVerticesList([]);
       setVerticesPage(1);
       setVerticesTotal(0);
       loadVertices(1, false);
     }
-  }, [storeGlobalUser.selectedDatabase]);
+  }, [storeGlobalUser.selectedDatabase, storeGlobalUser.hasUserInitiatedVisualization]);
 
   // 获取选中实体的详细信息（用于右侧详情展示）
   useEffect(() => {
@@ -111,6 +110,70 @@ const GraphPage = () => {
       descriptions: [''],
       properties: ['']
     });
+  };
+
+  // 当数据库不存在时重置状态
+  useEffect(() => {
+    const dbName = storeGlobalUser.selectedDatabase;
+
+    if (storeGlobalUser.hasUserInitiatedVisualization && dbName) {
+      // 验证数据库是否还在可用列表中
+      if (!storeGlobalUser.validateDatabaseExists(dbName)) {
+        console.log('[Graph] 数据库已被删除，重置状态');
+        storeGlobalUser.resetVisualizationState();
+        setKeys(undefined);
+        setKey(undefined);
+        setVerticesList([]);
+        setVerticesPage(1);
+        setVerticesTotal(0);
+        message.warning(`数据库 "${dbName}" 已被删除`);
+      }
+    }
+  }, [storeGlobalUser.selectedDatabase, storeGlobalUser.availableDatabases, storeGlobalUser.hasUserInitiatedVisualization]);
+
+  const handleStartVisualization = async () => {
+    const dbName = storeGlobalUser.selectedDatabase;
+    if (!dbName) {
+      message.warning('请先选择一个数据库');
+      return;
+    }
+
+    console.log('[Graph] 用户手动开始可视化，数据库:', dbName);
+
+    // 验证数据库是否在可用列表中
+    if (!storeGlobalUser.validateDatabaseExists(dbName)) {
+      message.warning('所选数据库不存在，请重新选择');
+      return;
+    }
+
+    // 设置用户已触发可视化
+    storeGlobalUser.setHasUserInitiatedVisualization(true);
+    storeGlobalUser.visualizationReady = true;
+
+    // 开始加载数据
+    setLoading(true);
+    const url = `${SERVER_URL}/db/vertices?database=${encodeURIComponent(dbName)}`;
+    try {
+      const response = await fetch(url);
+      const data = await response.json();
+      // 处理分页数据格式
+      const vertices = data.data || data;
+      setKeys(vertices);
+      // 设置默认选中第一个vertex
+      if (vertices && vertices.length > 0) {
+        setKey(vertices[0]);
+      }
+      // 同时加载第一页数据
+      setVerticesList([]);
+      setVerticesPage(1);
+      setVerticesTotal(0);
+      loadVertices(1, false);
+      setLoading(false);
+    } catch (error) {
+      console.error('加载数据失败:', error);
+      message.error('加载数据失败，请重试');
+      setLoading(false);
+    }
   };
 
   // 渲染加载状态
@@ -153,8 +216,34 @@ const GraphPage = () => {
     );
   }
 
-  // 渲染无数据状态
-  if (!keys || keys.length === 0) {
+  // 渲染未开始可视化状态
+  if (!storeGlobalUser.hasUserInitiatedVisualization) {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: '400px',
+        flexDirection: 'column',
+        gap: '16px'
+      }}>
+        <DatabaseOutlined style={{ fontSize: '64px', color: '#d9d9d9' }} />
+        <h2 style={{ fontSize: 24, margin: 0 }}>请选择数据库并开始可视化</h2>
+        <p style={{ color: '#666', margin: 0 }}>选择一个数据库后，点击下方按钮开始超图关系可视化</p>
+        <Button
+          type="primary"
+          size="large"
+          icon={<DatabaseOutlined />}
+          onClick={handleStartVisualization}
+        >
+          开始可视化
+        </Button>
+      </div>
+    );
+  }
+
+  // 渲染无数据状态（只有在用户已开始可视化时）
+  if (storeGlobalUser.hasUserInitiatedVisualization && (!keys || keys.length === 0)) {
     return (
       <div style={{
         display: 'flex',

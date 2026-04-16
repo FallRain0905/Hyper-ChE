@@ -208,7 +208,10 @@
     "description": "Description",
     "properties": "Properties",
     "fetch_vertices_failed": "Failed to fetch vertices",
-    "fetch_neighbor_data_failed": "Failed to fetch neighbor data"
+    "fetch_neighbor_data_failed": "Failed to fetch neighbor data",
+    "start_visualization": "Start Visualization",
+    "please_select_database": "Please select a database first",
+    "database_not_exists": "Selected database does not exist, please select another"
   },
   "graph": {
     "title": "Knowledge Graph",

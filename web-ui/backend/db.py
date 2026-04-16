@@ -2,48 +2,190 @@ from hyperdb import HypergraphDB
 import os
 
 class DatabaseManager:
-    """数据库管理器，支持多个数据库实例"""
+    """数据库管理器，支持多个数据库实例和双系统"""
     def __init__(self):
         self.databases = {}
         self.cache_dir = "hyperrag_cache"
+        self.cograg_cache_dir = "cograg_cache"
         
     def get_database(self, database_name=None):
-        """获取数据库实例"""
+        """获取数据库实例
+
+        Args:
+            database_name: 数据库名称
+        """
         if database_name is None:
             return None
-            
-        # 构建完整的数据库文件路径
-        database_path = os.path.join(self.cache_dir, database_name, "hypergraph_chunk_entity_relation.hgdb")
-        
+
+        # 尝试在 hyperrag_cache 中查找
+        hyperrag_path = os.path.join(self.cache_dir, database_name, "hypergraph_chunk_entity_relation.hgdb")
+        database_path = None
+        system = None
+
+        if os.path.exists(hyperrag_path):
+            database_path = hyperrag_path
+            system = "hyperrag"
+        else:
+            # 尝试在 cograg_cache 中查找
+            cograg_path = os.path.join(self.cograg_cache_dir, database_name, "hypergraph_chunk_entity_relation.hgdb")
+            if os.path.exists(cograg_path):
+                database_path = cograg_path
+                system = "cograg"
+
         # 检查数据库文件是否存在
-        if not os.path.exists(database_path):
-            raise Exception(f"Database file '{database_path}' does not exist")
-            
+        if not database_path:
+            raise Exception(f"Database '{database_name}' not found in either hyperrag_cache or cograg_cache")
+
+        # 使用唯一键存储数据库实例 (database_name_system)
+        db_key = f"{database_name}_{system}"
+
         # 如果数据库实例不存在，创建新实例
-        if database_name not in self.databases:
-            self.databases[database_name] = HypergraphDB(storage_file=database_path)
-            
-        return self.databases[database_name]
+        if db_key not in self.databases:
+            self.databases[db_key] = HypergraphDB(storage_file=database_path)
+
+        return self.databases[db_key]
     
-    def list_databases(self):
-        """列出hyperrag_cache目录下所有可用的数据库文件"""
-        databases = []
-        
-        # 检查hyperrag_cache目录是否存在
-        if not os.path.exists(self.cache_dir):
-            return databases
-        
+    def validate_database_file(self, db_path: str) -> bool:
+        """
+        验证数据库文件是否完整和可用
+
+        Args:
+            db_path: 数据库文件路径
+
+        Returns:
+            数据库是否有效
+        """
         try:
-            for file in os.listdir(self.cache_dir):
-                file_path = os.path.join(self.cache_dir, file)
-               
-                if os.path.isdir(file_path):
-                    databases.append(file)
-        except OSError:
-            # 如果无法读取目录，返回空列表
-            pass
-                
+            # 检查数据库文件是否存在
+            hgdb_file = os.path.join(db_path, "hypergraph_chunk_entity_relation.hgdb")
+            if not os.path.exists(hgdb_file):
+                return False
+
+            # 尝试打开数据库文件（不进行完整加载，只验证可读性）
+            try:
+                with open(hgdb_file, 'rb') as f:
+                    # 读取前几个字节验证文件格式
+                    header = f.read(16)
+                    if len(header) < 16:
+                        return False
+            except Exception as e:
+                print(f"数据库文件验证失败: {db_path}, 错误: {e}")
+                return False
+
+            return True
+        except Exception as e:
+            print(f"数据库验证异常: {db_path}, 错误: {e}")
+            return False
+
+    def list_databases(self):
+        """列出hyperrag_cache和cograg_cache目录下所有可用的数据库文件"""
+        databases = []
+
+        # 扫描 hyperrag_cache 目录
+        if os.path.exists(self.cache_dir):
+            try:
+                for file in os.listdir(self.cache_dir):
+                    file_path = os.path.join(self.cache_dir, file)
+                    if os.path.isdir(file_path):
+                        # 验证数据库文件完整性
+                        if self.validate_database_file(file_path):
+                            databases.append({
+                                "name": file,
+                                "description": f"{file} 超图 (HyperRAG)",
+                                "system": "hyperrag",
+                                "valid": True
+                            })
+                        else:
+                            print(f"跳过无效数据库: {file_path}")
+            except OSError:
+                pass
+
+        # 扫描 cograg_cache 目录
+        if os.path.exists(self.cograg_cache_dir):
+            try:
+                for file in os.listdir(self.cograg_cache_dir):
+                    file_path = os.path.join(self.cograg_cache_dir, file)
+                    if os.path.isdir(file_path):
+                        # 验证数据库文件完整性
+                        if self.validate_database_file(file_path):
+                            databases.append({
+                                "name": file,
+                                "description": f"{file} 超图 (Cog-RAG)",
+                                "system": "cograg",
+                                "valid": True
+                            })
+                        else:
+                            print(f"跳过无效数据库: {file_path}")
+            except OSError:
+                pass
+
         return databases
+
+    def delete_database(self, database_name: str) -> dict:
+        """
+        删除指定数据库（支持HyperRAG和Cog-RAG双系统）
+
+        Args:
+            database_name: 数据库名称
+
+        Returns:
+            删除结果字典，包含各系统的删除状态
+        """
+        result = {
+            "database": database_name,
+            "hyperrag": {"success": False, "message": ""},
+            "cograg": {"success": False, "message": ""}
+        }
+
+        # 删除HyperRAG数据库
+        hyperrag_db_path = os.path.join(self.cache_dir, database_name)
+        if os.path.exists(hyperrag_db_path):
+            try:
+                import shutil
+                shutil.rmtree(hyperrag_db_path)
+                result["hyperrag"]["success"] = True
+                result["hyperrag"]["message"] = f"HyperRAG数据库 {database_name} 删除成功"
+                print(f"已删除HyperRAG数据库: {hyperrag_db_path}")
+            except Exception as e:
+                result["hyperrag"]["message"] = f"HyperRAG数据库删除失败: {str(e)}"
+                print(f"删除HyperRAG数据库失败: {e}")
+        else:
+            result["hyperrag"]["success"] = True
+            result["hyperrag"]["message"] = "HyperRAG数据库不存在，跳过删除"
+
+        # 删除Cog-RAG数据库
+        cograg_db_path = os.path.join(self.cograg_cache_dir, database_name)
+        if os.path.exists(cograg_db_path):
+            try:
+                import shutil
+                shutil.rmtree(cograg_db_path)
+                result["cograg"]["success"] = True
+                result["cograg"]["message"] = f"Cog-RAG数据库 {database_name} 删除成功"
+                print(f"已删除Cog-RAG数据库: {cograg_db_path}")
+            except Exception as e:
+                result["cograg"]["message"] = f"Cog-RAG数据库删除失败: {str(e)}"
+                print(f"删除Cog-RAG数据库失败: {e}")
+        else:
+            result["cograg"]["success"] = True
+            result["cograg"]["message"] = "Cog-RAG数据库不存在，跳过删除"
+
+        # 清除内存中的数据库实例
+        db_key_hyperrag = f"{database_name}_hyperrag"
+        db_key_cograg = f"{database_name}_cograg"
+
+        if db_key_hyperrag in self.databases:
+            del self.databases[db_key_hyperrag]
+            print(f"已清除数据库实例: {db_key_hyperrag}")
+
+        if db_key_cograg in self.databases:
+            del self.databases[db_key_cograg]
+            print(f"已清除数据库实例: {db_key_cograg}")
+
+        # 判断整体删除是否成功
+        all_success = result["hyperrag"]["success"] and result["cograg"]["success"]
+        result["success"] = all_success
+
+        return result
 
 # 全局数据库管理器实例
 db_manager = DatabaseManager()

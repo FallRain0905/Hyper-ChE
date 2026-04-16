@@ -5,6 +5,7 @@ import { observer } from 'mobx-react';
 import { DatabaseOutlined, ReloadOutlined } from '@ant-design/icons';
 import { storeGlobalUser } from '../../store/globalUser';
 import { useTranslation } from 'react-i18next';
+import { useWebSocket } from '../../hooks/useWebSocket';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -40,6 +41,26 @@ const DatabaseSelector: React.FC<DatabaseSelectorProps> = ({
 }) => {
   const { t } = useTranslation();
 
+  // WebSocket处理
+  useWebSocket((data) => {
+    console.log('[DatabaseSelector] 收到WebSocket消息:', data);
+
+    // 处理数据库删除事件
+    if (data.type === 'database_deleted') {
+      const deletedDb = data.database_name;
+      console.log('[DatabaseSelector] 数据库已删除:', deletedDb);
+
+      // 如果当前选中的数据库被删除，清除选择
+      if (storeGlobalUser.selectedDatabase === deletedDb) {
+        storeGlobalUser.setSelectedDatabase('');
+        message.warning(`数据库 "${deletedDb}" 已被删除`);
+      }
+
+      // 立即刷新数据库列表
+      storeGlobalUser.loadDatabases();
+    }
+  });
+
   // 使用 ref 确保只在组件首次挂载时恢复数据库
   const hasRestoredRef = useRef(false);
 
@@ -56,10 +77,19 @@ const DatabaseSelector: React.FC<DatabaseSelectorProps> = ({
         storeGlobalUser.restoreSelectedDatabase();
       }
 
-      if (storeGlobalUser.availableDatabases.length === 0) {
-        storeGlobalUser.loadDatabases();
-      }
+      // 总是加载数据库列表，确保获取最新数据
+      storeGlobalUser.loadDatabases();
     }
+  }, []);
+
+  // 定期刷新数据库列表（每60秒，因为有WebSocket实时通知）
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      console.log('[DatabaseSelector] 定期刷新数据库列表（60秒间隔）');
+      await storeGlobalUser.loadDatabases();
+    }, 60000); // 60秒刷新一次
+
+    return () => clearInterval(interval);
   }, []);
 
   // 处理数据库变更

@@ -160,10 +160,10 @@ const Setting: React.FC = () => {
       provider: 'bailian',
       baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
     },
-    // Qwen3-Embedding 模型 (最新SOTA)
+    // Qwen3-Embedding 模型 (阿里云百炼)
     {
       value: 'qwen3-embedding-8b',
-      label: 'Qwen3-Embedding-8B',
+      label: 'Qwen3-Embedding-8B (阿里云)',
       dim: 4096,
       description: 'Qwen3最新8B嵌入模型，4096维，MTEB多语言第一 (70.58分)，支持100+语言',
       provider: 'bailian',
@@ -171,7 +171,7 @@ const Setting: React.FC = () => {
     },
     {
       value: 'qwen3-embedding-4b',
-      label: 'Qwen3-Embedding-4B',
+      label: 'Qwen3-Embedding-4B (阿里云)',
       dim: 2560,
       description: 'Qwen3最新4B嵌入模型，2560维，性能优异 (MTEB: 69.45分)',
       provider: 'bailian',
@@ -179,11 +179,20 @@ const Setting: React.FC = () => {
     },
     {
       value: 'qwen3-embedding-0.6b',
-      label: 'Qwen3-Embedding-0.6B',
+      label: 'Qwen3-Embedding-0.6B (阿里云)',
       dim: 1024,
       description: 'Qwen3最新0.6B轻量级嵌入模型，1024维，高效实用 (MTEB: 64.33分)',
       provider: 'bailian',
       baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    },
+    // 硅基流动 Qwen3-Embeddings 模型
+    {
+      value: 'Qwen/Qwen2.5-Embedding-8B',
+      label: '硅基流动 Qwen2.5-Embedding-8B',
+      dim: 4096,
+      description: '硅基流动 Qwen2.5 8B嵌入模型，4096维，性能优秀，中文效果好',
+      provider: 'siliconflow',
+      baseUrl: 'https://api.siliconflow.cn/v1'
     },
     // 其他开源模型
     {
@@ -298,13 +307,18 @@ const Setting: React.FC = () => {
         console.log('🎯 [Settings] 最终设置的表单值:', finalSettings) // 调试日志
 
         // 设置嵌入服务提供商状态
-        setUseCustomEmbeddingApi(settings.embeddingProvider === 'custom')
+        const embeddingProvider = settings.embeddingProvider || defaultSettings.embeddingProvider
+        setUseCustomEmbeddingApi(embeddingProvider === 'custom')
 
         form.setFieldsValue(finalSettings)
       } else {
         // 如果获取失败，使用默认设置加上本地Mode设置
         const finalSettings = { ...defaultSettings, ...modeSettings }
         console.log('🎯 [Settings] 最终设置的表单值 (API失败):', finalSettings) // 调试日志
+
+        // 设置嵌入服务提供商状态
+        setUseCustomEmbeddingApi(finalSettings.embeddingProvider === 'custom')
+
         form.setFieldsValue(finalSettings)
       }
     } catch (error) {
@@ -531,6 +545,15 @@ const Setting: React.FC = () => {
             embeddingBaseUrl: model.baseUrl
           })
           message.info(`已自动设置阿里云百炼API地址，请配置您的阿里云百炼API Key`)
+        }
+        // 如果是硅基流动模型，自动配置base_url并提示使用独立API配置
+        else if (model.provider === 'siliconflow' && model.baseUrl) {
+          setUseCustomEmbeddingApi(true)
+          form.setFieldsValue({
+            embeddingProvider: 'custom',
+            embeddingBaseUrl: model.baseUrl
+          })
+          message.info(`已自动设置硅基流动API地址，请配置您的硅基流动API Key`)
         }
         // 如果是OpenAI模型，恢复使用相同API配置
         else if (model.provider === 'openai') {
@@ -830,6 +853,13 @@ const Setting: React.FC = () => {
                         <li>Base URL: https://dashscope.aliyuncs.com/compatible-mode/v1</li>
                         <li>API Key: 从阿里云百炼控制台获取的API-KEY</li>
                         <li>官方文档: <a href="https://help.aliyun.com/zh/model-studio/dashscopeembedding-in-llamaindex" target="_blank" rel="noopener noreferrer">查看文档</a></li>
+                      </ul>
+                      <p style={{ marginTop: '8px' }}><strong>硅基流动配置：</strong></p>
+                      <ul style={{ marginLeft: '20px', marginTop: '8px' }}>
+                        <li>Base URL: https://api.siliconflow.cn/v1</li>
+                        <li>API Key: 从硅基流动控制台获取的API-KEY</li>
+                        <li>官方文档: <a href="https://docs.siliconflow.cn/cn/api-reference/embeddings/create-embeddings" target="_blank" rel="noopener noreferrer">查看文档</a></li>
+                        <li>Qwen2.5-Embedding-8B: 高性能中文嵌入模型，4096维</li>
                       </ul>
                       <p style={{ marginTop: '8px' }}><strong>其他自定义API：</strong></p>
                       <p style={{ marginLeft: '20px', marginTop: '4px' }}>请根据您的API提供商填写相应的Base URL和API Key</p>

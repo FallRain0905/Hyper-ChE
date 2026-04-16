@@ -301,6 +301,8 @@ class SettingsModel(BaseModel):
     # HyperRAG 嵌入模型设置
     embeddingModel: str = "text-embedding-3-small"
     embeddingDim: int = 1536
+    embeddingBaseUrl: str = ""  # 嵌入模型的API地址
+    embeddingApiKey: str = ""  # 嵌入模型的API密钥
     # Cog-RAG相关设置
     enableCogRAG: bool = True  # 启用/禁用Cog-RAG功能
 
@@ -326,6 +328,8 @@ async def get_settings():
             settings_safe = settings.copy()
             if 'apiKey' in settings_safe:
                 settings_safe['apiKey'] = '***' if settings_safe['apiKey'] else ''
+            if 'embeddingApiKey' in settings_safe:
+                settings_safe['embeddingApiKey'] = '***' if settings_safe['embeddingApiKey'] else ''
             return settings_safe
         else:
             # 返回默认设置
@@ -338,7 +342,9 @@ async def get_settings():
                 "maxTokens": 2000,
                 "temperature": 0.7,
                 "embeddingModel": "text-embedding-3-small",
-                "embeddingDim": 1536
+                "embeddingDim": 1536,
+                "embeddingBaseUrl": "",
+                "embeddingApiKey": ""
             }
     except Exception as e:
         return {"success": False, "message": str(e)}
@@ -350,7 +356,10 @@ async def save_settings(settings: SettingsModel):
     """
     try:
         settings_dict = settings.dict()
-        
+
+        # 添加调试日志
+        main_logger.info(f"🔍 [Settings] 接收到的设置: {json.dumps(settings_dict, ensure_ascii=False, indent=2)}")
+
         # 如果apiKey是***，则保持原有的apiKey不变
         if settings_dict.get('apiKey') == '***':
             # 读取现有设置中的apiKey
@@ -362,11 +371,30 @@ async def save_settings(settings: SettingsModel):
             else:
                 # 如果没有现有设置文件，则设为空字符串
                 settings_dict['apiKey'] = ''
-        
+
+        # 如果embeddingApiKey是***，则保持原有的embeddingApiKey不变
+        if settings_dict.get('embeddingApiKey') == '***':
+            # 读取现有设置中的embeddingApiKey
+            if os.path.exists(SETTINGS_FILE):
+                with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                    existing_settings = json.load(f)
+                # 保持原有的embeddingApiKey
+                settings_dict['embeddingApiKey'] = existing_settings.get('embeddingApiKey', '')
+            else:
+                # 如果没有现有设置文件，则设为空字符串
+                settings_dict['embeddingApiKey'] = ''
+
+        # 确保embedding相关字段被保存
+        if 'embeddingBaseUrl' not in settings_dict:
+            settings_dict['embeddingBaseUrl'] = ''
+
+        main_logger.info(f"💾 [Settings] 准备保存的设置: {json.dumps(settings_dict, ensure_ascii=False, indent=2)}")
+
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(settings_dict, f, ensure_ascii=False, indent=2)
         return {"success": True, "message": "设置保存成功"}
     except Exception as e:
+        main_logger.error(f"❌ [Settings] 保存设置失败: {str(e)}")
         return {"success": False, "message": str(e)}
 
 @app.get("/databases")
@@ -376,23 +404,26 @@ async def get_databases():
     """
     try:
         databases = []
-        
+
         # 使用db_manager获取数据库列表
         database_files = db_manager.list_databases()
-        
-        for file in database_files:
-            # 根据文件名推断描述
-            description = f"{file.replace('.hgdb', '')}超图"
-            
-            databases.append({
-                "name": file,
-                "description": description
-            })
-        
+
+        for db_info in database_files:
+            # db_info 现在是字典格式，包含 'name', 'description', 'system' 字段
+            if isinstance(db_info, dict):
+                databases.append(db_info)
+            else:
+                # 向后兼容：如果是旧格式（字符串），则转换为字典
+                databases.append({
+                    "name": db_info,
+                    "description": f"{db_info.replace('.hgdb', '')}超图",
+                    "system": "hyperrag"  # 默认为 HyperRAG
+                })
+
         # 如果没有找到数据库文件，返回默认列表
         if not databases:
             databases = []
-        
+
         return databases
     except Exception as e:
         return {"success": False, "message": str(e), "data": []}
@@ -945,8 +976,8 @@ async def reset_hyperrag(database: str = None):
 
 class FileEmbedRequest(BaseModel):
     file_ids: List[str]
-    chunk_size: int = 1000
-    chunk_overlap: int = 200
+    chunk_size: int = 500  # 减小chunk_size避免超时
+    chunk_overlap: int = 100  # 相应减小overlap
     rag_system: str = "hyperrag"  # 新增：选择RAG系统 (hyperrag 或 cograg)
 
 @app.get("/files")
@@ -964,47 +995,67 @@ async def get_files():
 async def upload_files(files: List[UploadFile] = File(...)):
     """
     上传文件接口
+
+    Args:
+        files: 上传的文件列表
+
+    Returns:
+        包含上传结果的字典
     """
     print(f"\n{'='*50}")
     print(f"开始文件上传，文件数量: {len(files)}")
     print(f"{'='*50}")
-    
+
+    # 检查是否有文件
+    if not files or len(files) == 0:
+        print("❌ 没有接收到文件")
+        raise HTTPException(status_code=400, detail="没有接收到文件")
+
     results = []
-    
+
     for i, file in enumerate(files):
         try:
             print(f"\n上传文件 {i+1}/{len(files)}: {file.filename}")
             print(f"文件大小: {file.size if hasattr(file, 'size') else '未知'} bytes")
-            
+            print(f"文件类型: {file.content_type}")
+
+            # 检查文件大小
+            if hasattr(file, 'size') and file.size and file.size > 50 * 1024 * 1024:  # 50MB
+                raise ValueError("文件大小超过50MB限制")
+
             # 读取文件内容
             print("正在读取文件内容...")
             content = await file.read()
             print(f"✅ 文件内容读取完成，实际大小: {len(content)} bytes")
-            
+
+            if len(content) == 0:
+                raise ValueError("文件内容为空")
+
             # 保存文件
             print("正在保存文件到本地...")
             file_info = await file_manager.save_uploaded_file(content, file.filename)
             file_info["status"] = "uploaded"
+            file_info["size"] = len(content)
             print(f"✅ 文件保存成功: {file_info['filename']}")
             print(f"  - 文件ID: {file_info['file_id']}")
             print(f"  - 保存路径: {file_info['file_path']}")
             print(f"  - 数据库: {file_info['database_name']}")
-            
+
             results.append(file_info)
-            
+
         except Exception as e:
-            error_msg = f"文件上传失败: {file.filename}, 错误: {str(e)}"
+            error_msg = f"文件上传失败: {file.filename if hasattr(file, 'filename') else '未知文件'}, 错误: {str(e)}"
             print(f"❌ {error_msg}")
             main_logger.error(error_msg)
             results.append({
-                "filename": file.filename,
+                "filename": file.filename if hasattr(file, 'filename') else '未知文件',
                 "status": "error",
                 "error": str(e)
             })
-    
+
     print(f"\n文件上传完成，成功: {len([r for r in results if r.get('status') == 'uploaded'])}/{len(files)}")
     print(f"{'='*50}")
-    
+
     return {"files": results}
 
 @app.delete("/files/{file_id}")
@@ -1057,12 +1108,41 @@ async def clear_database(database: str = "default"):
             del hyperrag_instances[database]
             main_logger.info(f"已清除数据库 {database} 的实例缓存")
 
-        # 删除数据库文件
+        # 删除数据库文件（保留日志文件，避免文件占用错误）
         db_path = Path(hyperrag_working_dir) / database
         if db_path.exists():
             import shutil
-            shutil.rmtree(db_path)
-            main_logger.info(f"已删除数据库目录: {db_path}")
+            # 保留日志文件，只删除数据文件
+            data_files_to_delete = []
+            for item in db_path.iterdir():
+                if item.is_file() and not item.name.endswith('.log'):
+                    data_files_to_delete.append(item)
+                elif item.is_dir():
+                    # 删除子目录中的所有文件（除了.log文件）
+                    for sub_item in item.rglob('*'):
+                        if sub_item.is_file() and not sub_item.name.endswith('.log'):
+                            try:
+                                sub_item.unlink()
+                            except Exception as e:
+                                main_logger.warning(f"删除文件 {sub_item} 失败: {e}")
+
+            # 删除数据文件
+            for file in data_files_to_delete:
+                try:
+                    file.unlink()
+                    main_logger.info(f"已删除数据文件: {file}")
+                except Exception as e:
+                    main_logger.warning(f"删除文件 {file} 失败: {e}")
+
+            # 尝试删除空目录
+            for item in db_path.iterdir():
+                if item.is_dir():
+                    try:
+                        shutil.rmtree(item)
+                    except Exception as e:
+                        main_logger.warning(f"删除目录 {item} 失败: {e}")
+
+            main_logger.info(f"已清空数据库数据: {db_path}")
 
         return {
             "success": True,
@@ -1107,6 +1187,53 @@ async def get_database_status(database: str = "default"):
     except Exception as e:
         main_logger.error(f"获取数据库状态失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取数据库状态失败: {str(e)}")
+
+@app.delete("/databases/{database_name}")
+async def delete_database_endpoint(database_name: str):
+    """
+    删除指定数据库（支持HyperRAG和Cog-RAG双系统）
+
+    Args:
+        database_name: 数据库名称
+
+    Returns:
+        删除结果
+    """
+    try:
+        main_logger.info(f"开始删除数据库: {database_name}")
+
+        # 验证数据库名称安全性
+        if not database_name or database_name in ['.', '..'] or '/' in database_name or '\\' in database_name:
+            return {"success": False, "message": "Invalid database name"}
+
+        # 调用数据库管理器删除数据库
+        result = db_manager.delete_database(database_name)
+
+        # 清除内存中的实例
+        if database_name in hyperrag_instances:
+            del hyperrag_instances[database_name]
+            main_logger.info(f"已清除HyperRAG实例: {database_name}")
+
+        if database_name in cograg_instances:
+            del cograg_instances[database_name]
+            main_logger.info(f"已清除Cog-RAG实例: {database_name}")
+
+        # 发送WebSocket通知
+        try:
+            await manager.broadcast_json({
+                "type": "database_deleted",
+                "database_name": database_name,
+                "timestamp": datetime.now().isoformat()
+            })
+            main_logger.info(f"已发送数据库删除通知: {database_name}")
+        except Exception as e:
+            main_logger.warning(f"发送WebSocket通知失败: {e}")
+
+        return result
+
+    except Exception as e:
+        main_logger.error(f"删除数据库失败: {database_name}, 错误: {e}")
+        return {"success": False, "message": f"删除数据库失败: {str(e)}"}
 
 @app.post("/files/embed")
 async def embed_files(request: FileEmbedRequest):
@@ -1309,7 +1436,21 @@ class ConnectionManager:
             except Exception:
                 # 如果连接已断开，标记为移除
                 disconnected.append(connection)
-        
+
+        # 移除断开的连接
+        for conn in disconnected:
+            self.disconnect(conn)
+
+    async def broadcast_json(self, message: dict):
+        """向所有连接的客户端广播JSON消息"""
+        disconnected = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                # 如果连接已断开，标记为移除
+                disconnected.append(connection)
+
         # 移除断开的连接
         for conn in disconnected:
             self.disconnect(conn)

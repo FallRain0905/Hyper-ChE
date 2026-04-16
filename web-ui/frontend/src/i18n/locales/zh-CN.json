@@ -208,7 +208,10 @@
     "description": "描述",
     "properties": "属性",
     "fetch_vertices_failed": "获取vertices失败",
-    "fetch_neighbor_data_failed": "获取邻居数据失败"
+    "fetch_neighbor_data_failed": "获取邻居数据失败",
+    "start_visualization": "开始可视化",
+    "please_select_database": "请先选择一个数据库",
+    "database_not_exists": "所选数据库不存在，请重新选择"
   },
   "graph": {
     "title": "知识图谱",
