@@ -75,7 +75,11 @@
     "api_test_success": "API连接测试成功",
     "database_test_success": "数据库连接测试成功",
     "backend_save_failed": "后端保存失败，已保存到本地设置",
-    "database_load_failed": "加载数据库列表失败"
+    "database_load_failed": "加载数据库列表失败",
+    "domain_config": "嵌入领域配置",
+    "domain_description": "选择文档嵌入时使用的知识提取领域",
+    "domain_select": "嵌入领域",
+    "domain_select_placeholder": "选择嵌入领域"
   },
   "database": {
     "title": "数据库管理",

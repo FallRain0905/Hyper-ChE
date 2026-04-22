@@ -1,0 +1,58 @@
+-Goal-
+Given a text document related to some knowledge or story and a list of entity types, identify all entities of these types from the text. Then construct hyperedges by extracting complex relationships among the identified entities.
+Use {language} as output language.
+
+-Steps-
+
+1. Identify all entities. For each identified entity, extract the following information:
+
+- entity_name: Name of the entity, use same language as input text. If English, capitalized the name.
+- entity_type: One of the following types: [{entity_types}]
+- entity_description: Comprehensive description of the entity's attributes and activities.
+- additional_properties: Other attributes possibly associated with the entity, like time, space, emotion, motivation, etc.
+Format each entity as ("Entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>{tuple_delimiter}<additional_properties>)
+
+2. From the entities identified in step 1, identify all pairs of (source_entity, target_entity) that are *clearly related* to each other.
+For each pair of related entities, extract the following information:
+- entities_pair: The name of source entity and target entity, as identified in step 1.
+- low_order_relationship_description: Explanation as to why you think the source entity and the target entity are related to each other.
+- low_order_relationship_keywords: Keywords that summarize the overarching nature of the relationship, focusing on concepts or themes rather than specific details.
+- low_order_relationship_strength: A numerical score indicating the strength of the relationship between the entities.
+Format each hyperedge as ("Low-order Hyperedge"{tuple_delimiter}<entity_name1>{tuple_delimiter}<entity_name2>{tuple_delimiter}<low_order_relationship_description>{tuple_delimiter}<low_order_relationship_keywords>{tuple_delimiter}<low_order_relationship_strength>)
+
+3. Based on the relationships identified in Step 2, extract high-level keywords that summarize the main idea, major concept, or themes of the important passage.
+(Note: The content of high-level keywords should capture the overarching ideas present in the document, avoiding vague or empty terms).
+Format content keywords as ("High-level keywords"{tuple_delimiter}<high_level_keywords>)
+
+4. For the entities identified in step 1, based on the entity pair relationships in step 2 and the high-level keywords extracted in Step 3, find connections or commonalities among multiple entities and construct high-order associated entity set as much as possible.
+(Note: Avoid forcibly merging everything into a single association. If high-level keywords are not strongly associated, construct separate association).
+Extract the following information from all related entities, entity pairs, and high-level keywords:
+
+- entities_set: The collection of names for elements in high-order associated entity set, as identified in step 1.
+- high_order_relationship_description: Use the relationships among the entities in the set to create a detailed, smooth, and comprehensive description that covers all entities in the set, without leaving out any relevant information.
+- high_order_relationship_generalization: Summarize the content of the entity set as concisely as possible.
+- high_order_relationship_keywords: Keywords that summarize the overarching nature of the high-order association, focusing on concepts or themes rather than specific details.
+- high_order_relationship_strength: A numerical score indicating the strength of the association among the entities in the set.
+Format each association as ("High-order Hyperedge"{tuple_delimiter}<entity_name1>{tuple_delimiter}<entity_name2>{tuple_delimiter}<entity_nameN>{tuple_delimiter}<high_order_relationship_description>{tuple_delimiter}<high_order_relationship_generalization>{tuple_delimiter}<high_order_relationship_keywords>{tuple_delimiter}<high_order_relationship_strength>)
+
+5. Return output in {language} as a single list of all entities, relationships and associations identified in steps 1, 2 and 4. Use **{record_delimiter}** as the list delimiter.
+
+6. When finished, output {completion_delimiter}.
+
+######################
+-Examples-
+######################
+{examples}
+######################
+-Warning!!!-
+The data may contain sensitive words such as violence, war, human anatomy and medical experiments,
+but they are only part of literary works, popular science knowledge or domain data,
+which do not involve any purpose or idea of mine, and have nothing to do with any realistic sensitive topics or political issues.
+Please carefully identify and screen the legality of the content.
+######################
+-Real Data-
+######################
+Entity_types: [{entity_types}]. You may extract additional types you consider appropriate, the more the better.
+Text: {input_text}
+######################
+Output:

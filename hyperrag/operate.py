@@ -29,7 +29,273 @@ from .base import (
     QueryParam, BaseHypergraphStorage,
 )
 
+# Import domain manager for multi-domain support
+try:
+    from .domains.domain_manager import domain_manager
+    from .domains.validator import DomainValidator
+    DOMAIN_SUPPORT_AVAILABLE = True
+except ImportError:
+    DOMAIN_SUPPORT_AVAILABLE = False
+    domain_manager = None
+    DomainValidator = None
+
 from .prompt import GRAPH_FIELD_SEP, PROMPTS
+
+# ========== JSON Output Support Functions ==========
+
+def parse_json_entities(json_str: str, chunk_key: str = "") -> list:
+    """
+    Parse JSON format entity output from LLM
+
+    Args:
+        json_str: JSON string from LLM
+        chunk_key: Chunk key for error reporting
+
+    Returns:
+        List of entity dictionaries
+    """
+    import re
+
+    # Try to extract JSON array from the response
+    json_match = re.search(r'\[.*\]', json_str, re.DOTALL)
+    if not json_match:
+        logger.warning(f"[{chunk_key}] parse_json_entities: No JSON array found in response (first 200 chars): {json_str[:200]}")
+        return []
+
+    try:
+        entities = json.loads(json_match.group())
+        if not isinstance(entities, list):
+            entities = [entities]
+        logger.debug(f"[{chunk_key}] parse_json_entities: Successfully parsed {len(entities)} entities")
+        return entities
+    except json.JSONDecodeError as e:
+        logger.warning(f"[{chunk_key}] parse_json_entities: JSON decode error at position {e.pos}: {e.msg}")
+        logger.debug(f"[{chunk_key}] parse_json_entities: Problematic JSON (first 500 chars): {json_match.group()[:500]}")
+        return []
+
+def parse_json_relations(json_str: str, chunk_key: str = "") -> list:
+    """
+    Parse JSON format relationship output from LLM
+
+    Args:
+        json_str: JSON string from LLM
+        chunk_key: Chunk key for error reporting
+
+    Returns:
+        List of relationship dictionaries
+    """
+    import re
+
+    # Try to extract JSON array from the response
+    json_match = re.search(r'\[.*\]', json_str, re.DOTALL)
+    if not json_match:
+        logger.warning(f"[{chunk_key}] parse_json_relations: No JSON array found in response (first 200 chars): {json_str[:200]}")
+        return []
+
+    try:
+        relations = json.loads(json_match.group())
+        if not isinstance(relations, list):
+            relations = [relations]
+        logger.debug(f"[{chunk_key}] parse_json_relations: Successfully parsed {len(relations)} relations")
+        return relations
+    except json.JSONDecodeError as e:
+        logger.warning(f"[{chunk_key}] parse_json_relations: JSON decode error at position {e.pos}: {e.msg}")
+        logger.debug(f"[{chunk_key}] parse_json_relations: Problematic JSON (first 500 chars): {json_match.group()[:500]}")
+        return []
+
+def parse_json_hyperedges(json_str: str, chunk_key: str = "") -> list:
+    """
+    Parse JSON format hyperedge output from LLM
+
+    Args:
+        json_str: JSON string from LLM
+        chunk_key: Chunk key for error reporting
+
+    Returns:
+        List of hyperedge dictionaries
+    """
+    import re
+
+    # Try to extract JSON array from the response
+    json_match = re.search(r'\[.*\]', json_str, re.DOTALL)
+    if not json_match:
+        logger.warning(f"[{chunk_key}] parse_json_hyperedges: No JSON array found in response (first 200 chars): {json_str[:200]}")
+        return []
+
+    try:
+        hyperedges = json.loads(json_match.group())
+        if not isinstance(hyperedges, list):
+            hyperedges = [hyperedges]
+        logger.debug(f"[{chunk_key}] parse_json_hyperedges: Successfully parsed {len(hyperedges)} hyperedges")
+        return hyperedges
+    except json.JSONDecodeError as e:
+        logger.warning(f"[{chunk_key}] parse_json_hyperedges: JSON decode error at position {e.pos}: {e.msg}")
+        logger.debug(f"[{chunk_key}] parse_json_hyperedges: Problematic JSON (first 500 chars): {json_match.group()[:500]}")
+        return []
+
+def convert_json_entity_to_standard_format(entity: dict, chunk_key: str = "") -> dict:
+    """
+    Convert JSON entity format to standard Hyper-RAG entity format
+    Preserves all domain-specific fields with key names for retrieval
+    """
+    additional_props = []
+
+    # Preserve subtype with key name
+    if entity.get("subtype"):
+        additional_props.append(f"subtype={entity['subtype']}")
+
+    # Handle value or value range
+    if entity.get("value") is not None:
+        additional_props.append(f"value={entity['value']}")
+    elif entity.get("value_min") is not None or entity.get("value_max") is not None:
+        # Range values - critical for CONDITION and METRIC entities
+        if entity.get("value_min") is not None:
+            additional_props.append(f"value_min={entity['value_min']}")
+        if entity.get("value_max") is not None:
+            additional_props.append(f"value_max={entity['value_max']}")
+
+    if entity.get("unit"):
+        additional_props.append(f"unit={entity['unit']}")
+
+    if entity.get("key_attribute"):
+        additional_props.append(f"key_attribute={entity['key_attribute']}")
+
+    return {
+        "entity_name": entity.get("name", ""),
+        "entity_type": entity.get("type", ""),
+        "description": entity.get("description", ""),
+        "source_id": chunk_key,
+        "additional_properties": additional_props,
+    }
+
+def convert_json_relation_to_standard_format(relation: dict, chunk_key: str = "") -> dict:
+    """
+    Convert JSON relation format to standard Hyper-RAG relation format
+    Preserves evidence_span and relation_type for retrieval and traceability
+    """
+    # For low-order relations (pair relationships)
+    if "source" in relation and "target" in relation:
+        result = {
+            "entityN": (relation["source"], relation["target"]),
+            "entities_pair": (relation["source"], relation["target"]),
+            "weight": float(relation.get("strength", 5)) / 10.0,
+            "description": relation.get("description", ""),
+            "keywords": relation.get("keywords", ""),
+            "source_id": chunk_key,
+            "level_hg": "Low-order Hyperedge",
+        }
+        # Preserve relation_type and evidence_span if present
+        if relation.get("relation_type"):
+            result["relation_type"] = relation["relation_type"]
+        if relation.get("evidence_span"):
+            result["evidence_span"] = relation["evidence_span"]
+        return result
+
+    # For high-order relations (hyperedges)
+    elif "vertices" in relation:
+        vertices = relation["vertices"]
+        result = {
+            "entityN": tuple(vertices),
+            "entities_set": tuple(vertices),
+            "weight": float(relation.get("strength", 5)) / 10.0,
+            "description": relation.get("description", ""),
+            "keywords": relation.get("keywords", ""),
+            "source_id": chunk_key,
+            "level_hg": "High-order Hyperedge",
+        }
+        # Preserve relation_type and evidence_span for traceability
+        if relation.get("relation_type"):
+            result["relation_type"] = relation["relation_type"]
+        if relation.get("evidence_span"):
+            result["evidence_span"] = relation["evidence_span"]
+        return result
+
+    return {}
+
+def validate_domain_output(entities: list, relations: list, domain: str = 'default'):
+    """
+    Validate domain-specific output using DomainValidator
+
+    Args:
+        entities: List of entities
+        relations: List of relations
+        domain: Domain name
+
+    Returns:
+        Validation results
+    """
+    if not DOMAIN_SUPPORT_AVAILABLE or domain == 'default':
+        return {"valid": True, "errors": []}
+
+    try:
+        domain_config = domain_manager.load_domain_config(domain)
+        validator = DomainValidator()
+
+        # Validate entities
+        entity_errors = []
+        for i, entity in enumerate(entities):
+            if not isinstance(entity, dict):
+                continue
+            errors = validator.validate_entity(entity, domain_config)
+            if errors:
+                entity_errors.extend([f"Entity {i}: {error}" for error in errors])
+
+        # Validate relations
+        relation_errors = []
+        for i, relation in enumerate(relations):
+            if not isinstance(relation, dict):
+                continue
+            if "vertices" in relation:  # Hyperedge
+                errors = validator.validate_hyperedge(relation, domain_config)
+            else:  # Low-order relation
+                errors = validator.validate_relation(relation, domain_config)
+
+            if errors:
+                relation_errors.extend([f"Relation {i}: {error}" for error in errors])
+
+        all_errors = entity_errors + relation_errors
+
+        return {
+            "valid": len(all_errors) == 0,
+            "errors": all_errors,
+            "entity_errors_count": len(entity_errors),
+            "relation_errors_count": len(relation_errors)
+        }
+
+    except Exception as e:
+        logger.warning(f"Error validating domain output: {e}")
+        return {"valid": True, "errors": [], "validation_failed": str(e)}
+
+def get_domain_from_config(global_config: dict) -> str:
+    """
+    Get current domain from global configuration
+
+    Args:
+        global_config: Global configuration dictionary
+
+    Returns:
+        Domain name
+    """
+    return global_config.get("domain", "default")
+
+def is_json_output_domain(domain: str) -> bool:
+    """
+    Check if domain uses JSON output format
+
+    Args:
+        domain: Domain name
+
+    Returns:
+        True if domain uses JSON output, False otherwise
+    """
+    if not DOMAIN_SUPPORT_AVAILABLE:
+        return False
+
+    try:
+        output_format = domain_manager.get_output_format(domain)
+        return output_format == "json"
+    except:
+        return False
 
 def chunking_by_token_size(
     content: str, overlap_token_size=128, max_token_size=1024, tiktoken_model="gpt-4o"
@@ -338,6 +604,8 @@ async def _merge_edges_then_upsert(
     already_source_ids = []
     already_description = []
     already_keywords = []
+    already_evidence_spans = []
+    already_relation_types = []
 
     if await knowledge_hypergraph_inst.has_hyperedge(id_set):
         already_edge = await knowledge_hypergraph_inst.get_hyperedge(id_set)
@@ -349,6 +617,11 @@ async def _merge_edges_then_upsert(
         already_keywords.extend(
             split_string_by_multi_markers(already_edge["keywords"], [GRAPH_FIELD_SEP])
         )
+        # Load existing evidence_span and relation_type
+        if already_edge.get("evidence_span"):
+            already_evidence_spans.append(already_edge["evidence_span"])
+        if already_edge.get("relation_type"):
+            already_relation_types.append(already_edge["relation_type"])
 
     weight = sum([dp["weight"] for dp in edges_data] + already_weights)
     description = GRAPH_FIELD_SEP.join(
@@ -360,6 +633,16 @@ async def _merge_edges_then_upsert(
     source_id = GRAPH_FIELD_SEP.join(
         set([dp["source_id"] for dp in edges_data] + already_source_ids)
     )
+
+    # Merge evidence_spans (preserve for traceability)
+    evidence_spans = [dp.get("evidence_span", "") for dp in edges_data if dp.get("evidence_span")]
+    all_evidence_spans = evidence_spans + already_evidence_spans
+    evidence_span = GRAPH_FIELD_SEP.join(sorted(set(all_evidence_spans))) if all_evidence_spans else ""
+
+    # Merge relation_types (may have multiple types for same entity set)
+    relation_types = [dp.get("relation_type", "") for dp in edges_data if dp.get("relation_type")]
+    all_relation_types = relation_types + already_relation_types
+    relation_type = GRAPH_FIELD_SEP.join(sorted(set(all_relation_types))) if all_relation_types else ""
 
     for need_insert_id in id_set:
         if not (await knowledge_hypergraph_inst.has_vertex(need_insert_id)):
@@ -380,23 +663,177 @@ async def _merge_edges_then_upsert(
         id_set, keywords, global_config
     )
 
-    await knowledge_hypergraph_inst.upsert_hyperedge(
-        id_set,
-        dict(
-            description=description,
-            keywords=filter_keywords,
-            source_id=source_id,
-            weight=weight
-        ),
+    edge_dict = dict(
+        description=description,
+        keywords=filter_keywords,
+        source_id=source_id,
+        weight=weight
     )
+    # Add evidence_span and relation_type if present
+    if evidence_span:
+        edge_dict["evidence_span"] = evidence_span
+    if relation_type:
+        edge_dict["relation_type"] = relation_type
+
+    await knowledge_hypergraph_inst.upsert_hyperedge(id_set, edge_dict)
 
     edge_data = dict(
         id_set=id_set,
         description=description,
         keywords=filter_keywords,
     )
+    if evidence_span:
+        edge_data["evidence_span"] = evidence_span
+    if relation_type:
+        edge_data["relation_type"] = relation_type
 
     return edge_data
+
+
+async def _process_json_format_extraction(
+    content: str,
+    chunk_key: str,
+    use_llm_func: callable,
+    global_config: dict,
+    domain: str = 'default'
+) -> tuple[list, list]:
+    """
+    Process JSON format extraction for domain-specific prompts
+
+    Args:
+        content: Text content to process
+        chunk_key: Chunk identifier
+        use_llm_func: LLM function to use
+        global_config: Global configuration
+        domain: Current domain
+
+    Returns:
+        Tuple of (entities, relations) in standard format
+    """
+    from .prompt import get_entity_extraction_prompt, get_low_order_extraction_prompt, get_high_order_extraction_prompt
+
+    logger.info(f"[{chunk_key}] Starting JSON format extraction for domain: {domain}")
+
+    # Step 1: Extract entities using domain-specific prompt
+    logger.debug(f"[{chunk_key}] Step 1: Generating entity extraction prompt...")
+    entity_prompt = get_entity_extraction_prompt(
+        domain=domain,
+        CHUNK_TEXT=content
+    )
+    logger.debug(f"[{chunk_key}] Step 1: Prompt length = {len(entity_prompt)} chars")
+
+    try:
+        logger.info(f"[{chunk_key}] Step 1: Calling LLM for entity extraction...")
+        entity_result = await use_llm_func(entity_prompt)
+        logger.info(f"[{chunk_key}] Step 1: LLM returned {len(entity_result)} chars")
+        entities_json = parse_json_entities(entity_result, chunk_key)
+        logger.info(f"[{chunk_key}] Step 1: Parsed {len(entities_json)} entities from JSON")
+    except Exception as e:
+        logger.error(f"[{chunk_key}] Step 1 FAILED - Entity extraction error: {type(e).__name__}: {e}")
+        return [], []
+
+    if not entities_json:
+        logger.warning(f"[{chunk_key}] Step 1: No entities extracted, aborting pipeline")
+        return [], []
+
+    # Log entity type distribution
+    from collections import Counter
+    entity_types = Counter(e.get("type", "UNKNOWN") for e in entities_json)
+    logger.info(f"[{chunk_key}] Step 1: Entity types: {dict(entity_types)}")
+
+    # Convert to standard format
+    entities = [convert_json_entity_to_standard_format(entity, chunk_key) for entity in entities_json]
+    logger.debug(f"[{chunk_key}] Step 1: Converted {len(entities)} entities to standard format")
+
+    # Step 2: Extract low-order relationships
+    # Build enriched entity info for better LLM context (not just names)
+    entity_info = []
+    for e in entities_json:
+        info = {"name": e.get("name", "")}
+        if e.get("type"):
+            info["type"] = e["type"]
+        # Include value or range for CONDITION/METRIC entities
+        if e.get("value") is not None:
+            info["value"] = e["value"]
+        elif e.get("value_min") is not None or e.get("value_max") is not None:
+            info["value_range"] = {}
+            if e.get("value_min") is not None:
+                info["value_range"]["min"] = e["value_min"]
+            if e.get("value_max") is not None:
+                info["value_range"]["max"] = e["value_max"]
+        if e.get("unit"):
+            info["unit"] = e["unit"]
+        entity_info.append(info)
+
+    logger.debug(f"[{chunk_key}] Step 2: Generating low-order prompt with {len(entity_info)} entities...")
+    low_prompt = get_low_order_extraction_prompt(
+        domain=domain,
+        K_v_JSON=json.dumps(entity_info),
+        CHUNK_TEXT=content
+    )
+    logger.debug(f"[{chunk_key}] Step 2: Prompt length = {len(low_prompt)} chars")
+
+    low_relations_json = []
+    try:
+        logger.info(f"[{chunk_key}] Step 2: Calling LLM for low-order relations...")
+        low_result = await use_llm_func(low_prompt)
+        logger.info(f"[{chunk_key}] Step 2: LLM returned {len(low_result)} chars")
+        low_relations_json = parse_json_relations(low_result, chunk_key)
+        logger.info(f"[{chunk_key}] Step 2: Parsed {len(low_relations_json)} low-order relations")
+        if low_relations_json:
+            rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in low_relations_json)
+            logger.debug(f"[{chunk_key}] Step 2: Relation types: {dict(rel_types)}")
+    except Exception as e:
+        logger.error(f"[{chunk_key}] Step 2 FAILED - Low-order relation extraction error: {type(e).__name__}: {e}")
+
+    # Step 3: Extract high-order relationships (hyperedges)
+    logger.debug(f"[{chunk_key}] Step 3: Generating high-order prompt with {len(entity_info)} entities...")
+    high_prompt = get_high_order_extraction_prompt(
+        domain=domain,
+        K_v_JSON=json.dumps(entity_info),
+        CHUNK_TEXT=content
+    )
+    logger.debug(f"[{chunk_key}] Step 3: Prompt length = {len(high_prompt)} chars")
+
+    high_relations_json = []
+    try:
+        logger.info(f"[{chunk_key}] Step 3: Calling LLM for high-order relations (hyperedges)...")
+        high_result = await use_llm_func(high_prompt)
+        logger.info(f"[{chunk_key}] Step 3: LLM returned {len(high_result)} chars")
+        high_relations_json = parse_json_hyperedges(high_result, chunk_key)
+        logger.info(f"[{chunk_key}] Step 3: Parsed {len(high_relations_json)} high-order relations (hyperedges)")
+        if high_relations_json:
+            rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in high_relations_json)
+            logger.debug(f"[{chunk_key}] Step 3: Hyperedge types: {dict(rel_types)}")
+    except Exception as e:
+        logger.error(f"[{chunk_key}] Step 3 FAILED - High-order relation extraction error: {type(e).__name__}: {e}")
+
+    # Convert all relations to standard format
+    relations = []
+    for relation_json in low_relations_json:
+        standard_relation = convert_json_relation_to_standard_format(relation_json, chunk_key)
+        if standard_relation:
+            relations.append(standard_relation)
+
+    for relation_json in high_relations_json:
+        standard_relation = convert_json_relation_to_standard_format(relation_json, chunk_key)
+        if standard_relation:
+            relations.append(standard_relation)
+
+    logger.info(f"[{chunk_key}] Pipeline complete: {len(entities)} entities, {len(relations)} relations "
+                f"(low={len(low_relations_json)}, high={len(high_relations_json)})")
+
+    # Validate output if domain support is available (non-blocking)
+    try:
+        validation_result = validate_domain_output(entities_json, low_relations_json + high_relations_json, domain)
+        if not validation_result["valid"]:
+            logger.warning(f"[{chunk_key}] Validation: {validation_result['errors']}")
+        else:
+            logger.info(f"[{chunk_key}] Validation passed")
+    except Exception as e:
+        logger.warning(f"[{chunk_key}] Validation check failed: {e}")
+
+    return entities, relations
 
 
 async def extract_entities(
@@ -409,7 +846,14 @@ async def extract_entities(
     use_llm_func: callable = global_config["llm_model_func"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
 
+    # Get current domain from configuration
+    current_domain = get_domain_from_config(global_config)
+    is_json_output = is_json_output_domain(current_domain)
+
+    logger.info(f"Using domain: {current_domain}, JSON output: {is_json_output}")
+
     ordered_chunks = list(chunks.items())
+    logger.info(f"Processing {len(ordered_chunks)} chunks for entity extraction")
 
     entity_extract_prompt = PROMPTS["entity_extraction"]
     # We can choose the example what we want from the prompt.
@@ -443,6 +887,54 @@ async def extract_entities(
         chunk_key = chunk_key_dp[0]
         chunk_dp = chunk_key_dp[1]
         content = chunk_dp["content"]
+
+        logger.debug(f"Processing chunk {chunk_key} (content length: {len(content)} chars)")
+
+        # Handle JSON format output for domain-specific prompts
+        if is_json_output:
+            try:
+                entities, relations = await _process_json_format_extraction(
+                    content, chunk_key, use_llm_func, global_config, current_domain
+                )
+                logger.debug(f"[{chunk_key}] JSON extraction returned: {len(entities)} entities, {len(relations)} relations")
+            except Exception as e:
+                logger.error(f"[{chunk_key}] JSON extraction FAILED with exception: {type(e).__name__}: {e}")
+                import traceback
+                logger.debug(f"[{chunk_key}] Traceback: {traceback.format_exc()}")
+                return None, None, None, None
+
+            # Initialize containers for this chunk
+            chunk_maybe_nodes = defaultdict(list)
+            chunk_maybe_edges = defaultdict(list)
+            chunk_maybe_edges_low = defaultdict(list)
+            chunk_maybe_edges_high = defaultdict(list)
+
+            # Process entities
+            for entity in entities:
+                entity_name = entity["entity_name"]
+                chunk_maybe_nodes[entity_name].append(entity)
+
+            # Process relations
+            for relation in relations:
+                if "entities_pair" in relation:  # Low-order relation
+                    edge_key = tuple(relation["entities_pair"])
+                    chunk_maybe_edges[edge_key].append(relation)
+                    chunk_maybe_edges_low[edge_key].append(relation)
+                elif "entities_set" in relation:  # High-order relation
+                    edge_key = relation["entities_set"]
+                    chunk_maybe_edges[edge_key].append(relation)
+                    chunk_maybe_edges_high[edge_key].append(relation)
+
+            # Update counters
+            already_entities += len(entities)
+            already_relations += len(relations)
+            already_relations_low += len([r for r in relations if "entities_pair" in r])
+            already_relations_high += len([r for r in relations if "entities_set" in r])
+            already_processed += 1
+
+            return chunk_maybe_nodes, chunk_maybe_edges, chunk_maybe_edges_low, chunk_maybe_edges_high
+
+        # Original delimiter-based processing for default domain
         hint_prompt = entity_extract_prompt.format(**context_base, input_text=content)
 
         final_result = await use_llm_func(hint_prompt)
@@ -541,16 +1033,35 @@ async def extract_entities(
     # ----------------------------------------------------------------------------
     # use_llm_func is wrapped in ascynio.Semaphore, limiting max_async callings
     begin_time = datetime.now()
+    logger.info(f"Starting parallel processing of {len(ordered_chunks)} chunks...")
     results = await asyncio.gather(
-        *[_process_single_content(c) for c in ordered_chunks ]
+        *[_process_single_content(c) for c in ordered_chunks],
+        return_exceptions=True
     )
-    
+
+    # Count successes and failures
+    success_count = 0
+    failure_count = 0
+    for i, result in enumerate(results):
+        chunk_key = ordered_chunks[i][0]
+        if isinstance(result, Exception):
+            logger.error(f"Chunk {i+1}/{len(results)} ({chunk_key}) FAILED: {type(result).__name__}: {result}")
+            failure_count += 1
+        else:
+            success_count += 1
+            logger.debug(f"Chunk {i+1}/{len(results)} ({chunk_key}) SUCCESS")
+
+    logger.info(f"Chunk processing complete: {success_count} succeeded, {failure_count} failed")
+
     # print()  # clear the progress bar
     maybe_nodes = defaultdict(list)
     maybe_edges = defaultdict(list)
     high = defaultdict(list)
     low = defaultdict(list)
-    for m_nodes, m_edges, low_edge, high_edge in results:
+    for result in results:
+        if isinstance(result, Exception):
+            continue
+        m_nodes, m_edges, low_edge, high_edge = result
         if m_nodes is not None:
             for k, v in m_nodes.items():
                 maybe_nodes[k].extend(v)
@@ -563,12 +1074,11 @@ async def extract_entities(
         if high_edge is not None:
             for k, v in high_edge.items():
                 high[tuple(sorted(k))].extend(v)
-        if m_nodes is None or m_edges is None or low_edge is None or high_edge is None:
-            print("extract a element that is None")
     # ----------------------------------------------------------------------------
     """
         update the hypergraph database
     """
+    logger.info(f"Merging and upserting {len(maybe_nodes)} unique entities to hypergraph...")
     all_entities_data = await asyncio.gather(
         *[
             _merge_nodes_then_upsert(k, v, knowledge_hypergraph_inst, global_config)
@@ -576,6 +1086,7 @@ async def extract_entities(
         ]
     )
 
+    logger.info(f"Merging and upserting {len(maybe_edges)} unique relationships to hypergraph...")
     all_relationships_data = await asyncio.gather(
         *[
             _merge_edges_then_upsert(k, v, knowledge_hypergraph_inst, global_config)

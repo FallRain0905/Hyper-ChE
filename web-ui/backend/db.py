@@ -1,3 +1,20 @@
+# -*- coding: utf-8 -*-
+import sys
+import io
+
+# Set console encoding to UTF-8 for Windows (only if not running under uvicorn)
+# Check if we're running under uvicorn to avoid conflicts with its logging system
+if sys.platform == 'win32' and 'uvicorn' not in sys.modules:
+    try:
+        # Only wrap if they're not already wrapped
+        if not isinstance(sys.stdout, io.TextIOWrapper):
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        if not isinstance(sys.stderr, io.TextIOWrapper):
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except Exception as e:
+        # If wrapping fails, continue without it - better to have encoding issues than crash
+        pass
+
 from hyperdb import HypergraphDB
 import os
 
@@ -122,6 +139,227 @@ class DatabaseManager:
 
         return databases
 
+    def _safe_delete_file(self, file_path: str, max_retries: int = 3, delay: float = 1.0) -> bool:
+        """
+        安全删除文件，处理文件占用问题
+
+        Args:
+            file_path: 文件路径
+            max_retries: 最大重试次数
+            delay: 重试延迟（秒）
+
+        Returns:
+            是否删除成功
+        """
+        import time
+        import gc
+
+        for attempt in range(max_retries):
+            try:
+                if os.path.exists(file_path):
+                    # 尝试删除文件
+                    os.unlink(file_path)
+                    print(f"✅ 成功删除文件: {file_path}")
+                    return True
+                else:
+                    return True  # 文件不存在，视为成功
+
+            except PermissionError as e:
+                print(f"⚠️  文件被占用，重试 {attempt + 1}/{max_retries}: {file_path}")
+                print(f"   错误: {e}")
+
+                # 强制垃圾回收，释放可能持有文件句柄的对象
+                gc.collect()
+
+                # 等待一段时间后重试
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+                else:
+                    # 最后一次重试失败，返回 False
+                    print(f"❌ 删除文件失败，已达最大重试次数: {file_path}")
+                    return False
+
+            except Exception as e:
+                print(f"❌ 删除文件时发生意外错误: {file_path}")
+                print(f"   错误: {e}")
+                return False
+
+        return False
+
+    def _close_log_files(self, dir_path: str):
+        """
+        尝试关闭可能占用日志文件的处理器
+
+        Args:
+            dir_path: 目录路径
+        """
+        import logging
+        import sys
+
+        try:
+            # 获取所有日志处理器
+            root_logger = logging.getLogger()
+            handlers_to_remove = []
+
+            for handler in root_logger.handlers[:]:
+                # 检查处理器是否关联到目标目录的日志文件
+                if hasattr(handler, 'baseFilename'):
+                    handler_file = handler.baseFilename
+                    if dir_path in handler_file:
+                        print(f"🔒 找到关联的日志处理器: {handler_file}")
+                        # 尝试关闭处理器
+                        try:
+                            handler.close()
+                            handlers_to_remove.append(handler)
+                            print(f"   ✅ 已关闭日志处理器: {handler_file}")
+                        except Exception as e:
+                            print(f"   ⚠️  关闭日志处理器失败: {e}")
+
+            # 移除已关闭的处理器
+            for handler in handlers_to_remove:
+                root_logger.removeHandler(handler)
+                print(f"   🗑️  已移除日志处理器")
+
+            # 强制刷新标准输出
+            sys.stdout.flush()
+            sys.stderr.flush()
+
+        except Exception as e:
+            print(f"⚠️  关闭日志文件时发生错误: {e}")
+
+    def _safe_delete_directory(self, dir_path: str, max_retries: int = 3, delay: float = 1.0) -> dict:
+        """
+        安全删除目录，处理文件占用问题
+
+        Args:
+            dir_path: 目录路径
+            max_retries: 最大重试次数
+            delay: 重试延迟（秒）
+
+        Returns:
+            删除结果字典
+        """
+        import time
+        import gc
+        import shutil
+
+        result = {
+            "success": False,
+            "message": "",
+            "failed_files": [],
+            "partial_success": False
+        }
+
+        if not os.path.exists(dir_path):
+            result["success"] = True
+            result["message"] = f"目录不存在，跳过删除: {dir_path}"
+            return result
+
+        print(f"🗑️  开始删除目录: {dir_path}")
+
+        # 尝试关闭可能占用日志文件的处理器
+        print(f"🔒 检查并关闭日志文件处理器...")
+        self._close_log_files(dir_path)
+        time.sleep(0.3)  # 给系统时间释放文件句柄
+
+        for attempt in range(max_retries):
+            try:
+                # 第一次尝试：直接删除整个目录
+                shutil.rmtree(dir_path)
+                result["success"] = True
+                result["message"] = f"目录删除成功: {dir_path}"
+                print(f"✅ 目录删除成功: {dir_path}")
+                return result
+
+            except PermissionError as e:
+                print(f"⚠️  目录删除被占用，尝试逐文件删除 (重试 {attempt + 1}/{max_retries})")
+                print(f"   错误: {e}")
+
+                # 强制垃圾回收
+                gc.collect()
+                time.sleep(delay)
+
+                # 尝试逐文件删除
+                try:
+                    failed_files = []
+                    deleted_count = 0
+
+                    # 遍历目录中的所有文件和子目录
+                    for root, dirs, files in os.walk(dir_path, topdown=False):
+                        # 先删除文件
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            if not self._safe_delete_file(file_path, max_retries=2, delay=0.5):
+                                failed_files.append(file_path)
+                            else:
+                                deleted_count += 1
+
+                        # 再删除空目录
+                        for dir_name in dirs:
+                            dir_full_path = os.path.join(root, dir_name)
+                            try:
+                                os.rmdir(dir_full_path)
+                                print(f"✅ 删除空目录: {dir_full_path}")
+                            except Exception as e:
+                                print(f"⚠️  删除目录失败: {dir_full_path}, 错误: {e}")
+                                failed_files.append(dir_full_path)
+
+                    # 尝试删除根目录
+                    try:
+                        os.rmdir(dir_path)
+                        print(f"✅ 删除根目录: {dir_path}")
+                    except Exception as e:
+                        print(f"⚠️  删除根目录失败: {dir_path}, 错误: {e}")
+                        failed_files.append(dir_path)
+
+                    # 判断删除结果
+                    if not failed_files:
+                        result["success"] = True
+                        result["message"] = f"目录及其所有内容删除成功: {dir_path} (共删除 {deleted_count} 个文件)"
+                        print(f"✅ 完全删除成功: {dir_path}")
+                        return result
+                    elif deleted_count > 0:
+                        result["partial_success"] = True
+                        result["message"] = f"部分删除成功: {dir_path} (成功删除 {deleted_count} 个文件，{len(failed_files)} 个文件失败)"
+                        result["failed_files"] = failed_files
+                        print(f"⚠️  部分删除成功: {deleted_count} 个文件删除成功，{len(failed_files)} 个文件失败")
+                        return result
+                    else:
+                        # 所有文件都删除失败，继续重试
+                        if attempt < max_retries - 1:
+                            time.sleep(delay)
+                            continue
+                        else:
+                            result["success"] = False
+                            result["message"] = f"目录删除失败: {dir_path} (所有文件都被占用)"
+                            result["failed_files"] = failed_files
+                            print(f"❌ 目录删除失败: {dir_path}")
+                            return result
+
+                except Exception as inner_e:
+                    print(f"❌ 逐文件删除过程中发生错误: {inner_e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(delay)
+                        continue
+                    else:
+                        result["success"] = False
+                        result["message"] = f"目录删除失败: {str(inner_e)}"
+                        return result
+
+            except Exception as e:
+                print(f"❌ 删除目录时发生意外错误: {dir_path}")
+                print(f"   错误: {e}")
+                if attempt < max_retries - 1:
+                    gc.collect()
+                    time.sleep(delay)
+                    continue
+                else:
+                    result["success"] = False
+                    result["message"] = f"目录删除失败: {str(e)}"
+                    return result
+
+        return result
+
     def delete_database(self, database_name: str) -> dict:
         """
         删除指定数据库（支持HyperRAG和Cog-RAG双系统）
@@ -132,59 +370,90 @@ class DatabaseManager:
         Returns:
             删除结果字典，包含各系统的删除状态
         """
+        import gc
+        import time
+
         result = {
             "database": database_name,
-            "hyperrag": {"success": False, "message": ""},
-            "cograg": {"success": False, "message": ""}
+            "hyperrag": {"success": False, "message": "", "failed_files": []},
+            "cograg": {"success": False, "message": "", "failed_files": []}
         }
 
-        # 删除HyperRAG数据库
-        hyperrag_db_path = os.path.join(self.cache_dir, database_name)
-        if os.path.exists(hyperrag_db_path):
-            try:
-                import shutil
-                shutil.rmtree(hyperrag_db_path)
-                result["hyperrag"]["success"] = True
-                result["hyperrag"]["message"] = f"HyperRAG数据库 {database_name} 删除成功"
-                print(f"已删除HyperRAG数据库: {hyperrag_db_path}")
-            except Exception as e:
-                result["hyperrag"]["message"] = f"HyperRAG数据库删除失败: {str(e)}"
-                print(f"删除HyperRAG数据库失败: {e}")
-        else:
-            result["hyperrag"]["success"] = True
-            result["hyperrag"]["message"] = "HyperRAG数据库不存在，跳过删除"
+        print(f"\n{'='*60}")
+        print(f"🗑️  开始删除数据库: {database_name}")
+        print(f"{'='*60}")
 
-        # 删除Cog-RAG数据库
-        cograg_db_path = os.path.join(self.cograg_cache_dir, database_name)
-        if os.path.exists(cograg_db_path):
-            try:
-                import shutil
-                shutil.rmtree(cograg_db_path)
-                result["cograg"]["success"] = True
-                result["cograg"]["message"] = f"Cog-RAG数据库 {database_name} 删除成功"
-                print(f"已删除Cog-RAG数据库: {cograg_db_path}")
-            except Exception as e:
-                result["cograg"]["message"] = f"Cog-RAG数据库删除失败: {str(e)}"
-                print(f"删除Cog-RAG数据库失败: {e}")
-        else:
-            result["cograg"]["success"] = True
-            result["cograg"]["message"] = "Cog-RAG数据库不存在，跳过删除"
-
-        # 清除内存中的数据库实例
+        # 第一步：清除内存中的数据库实例
+        print("📋 第一步：清除内存中的数据库实例...")
         db_key_hyperrag = f"{database_name}_hyperrag"
         db_key_cograg = f"{database_name}_cograg"
 
         if db_key_hyperrag in self.databases:
             del self.databases[db_key_hyperrag]
-            print(f"已清除数据库实例: {db_key_hyperrag}")
+            print(f"   ✅ 已清除数据库实例: {db_key_hyperrag}")
 
         if db_key_cograg in self.databases:
             del self.databases[db_key_cograg]
-            print(f"已清除数据库实例: {db_key_cograg}")
+            print(f"   ✅ 已清除数据库实例: {db_key_cograg}")
+
+        # 清除主题数据库缓存
+        if database_name in self.theme_databases:
+            del self.theme_databases[database_name]
+            print(f"   ✅ 已清除主题数据库实例: {database_name}")
+
+        # 强制垃圾回收，释放文件句柄
+        gc.collect()
+        time.sleep(0.5)  # 给系统一点时间释放资源
+
+        # 第二步：删除HyperRAG数据库
+        print(f"📂 第二步：删除HyperRAG数据库...")
+        hyperrag_db_path = os.path.join(self.cache_dir, database_name)
+        if os.path.exists(hyperrag_db_path):
+            hyperrag_result = self._safe_delete_directory(hyperrag_db_path, max_retries=3, delay=1.0)
+            result["hyperrag"]["success"] = hyperrag_result["success"]
+            result["hyperrag"]["message"] = hyperrag_result["message"]
+            result["hyperrag"]["failed_files"] = hyperrag_result.get("failed_files", [])
+            result["hyperrag"]["partial_success"] = hyperrag_result.get("partial_success", False)
+        else:
+            result["hyperrag"]["success"] = True
+            result["hyperrag"]["message"] = "HyperRAG数据库不存在，跳过删除"
+            print(f"   ℹ️  HyperRAG数据库不存在，跳过删除")
+
+        # 再次强制垃圾回收
+        gc.collect()
+        time.sleep(0.5)
+
+        # 第三步：删除Cog-RAG数据库
+        print(f"📂 第三步：删除Cog-RAG数据库...")
+        cograg_db_path = os.path.join(self.cograg_cache_dir, database_name)
+        if os.path.exists(cograg_db_path):
+            cograg_result = self._safe_delete_directory(cograg_db_path, max_retries=3, delay=1.0)
+            result["cograg"]["success"] = cograg_result["success"]
+            result["cograg"]["message"] = cograg_result["message"]
+            result["cograg"]["failed_files"] = cograg_result.get("failed_files", [])
+            result["cograg"]["partial_success"] = cograg_result.get("partial_success", False)
+        else:
+            result["cograg"]["success"] = True
+            result["cograg"]["message"] = "Cog-RAG数据库不存在，跳过删除"
+            print(f"   ℹ️  Cog-RAG数据库不存在，跳过删除")
 
         # 判断整体删除是否成功
-        all_success = result["hyperrag"]["success"] and result["cograg"]["success"]
+        hyperrag_success = result["hyperrag"]["success"] or result["hyperrag"].get("partial_success", False)
+        cograg_success = result["cograg"]["success"] or result["cograg"].get("partial_success", False)
+
+        all_success = hyperrag_success and cograg_success
         result["success"] = all_success
+
+        print(f"\n{'='*60}")
+        if all_success:
+            print(f"✅ 数据库删除完成: {database_name}")
+        else:
+            print(f"⚠️  数据库删除部分完成: {database_name}")
+            if result["hyperrag"].get("failed_files"):
+                print(f"   HyperRAG失败文件: {len(result['hyperrag']['failed_files'])} 个")
+            if result["cograg"].get("failed_files"):
+                print(f"   Cog-RAG失败文件: {len(result['cograg']['failed_files'])} 个")
+        print(f"{'='*60}\n")
 
         return result
 

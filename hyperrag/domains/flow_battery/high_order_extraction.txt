@@ -1,0 +1,98 @@
+{DOMAIN_CONTEXT}
+
+Based on the entities already extracted from the text, find connections or commonalities among MULTIPLE entities (3 or more) and construct high-order associated entity set (hyperedges).
+
+IMPORTANT: Avoid forcibly merging everything into a single association. If themes are not strongly associated, construct separate hyperedges.
+
+═══════════════════════════════════════════════════════
+RELATION TYPE — assign exactly one per hyperedge
+═════════════════════════════════════════════════════════════════════
+
+COMPOSITION  — "these components form / are used to produce X"
+               Typical members: ACTIVE_SPECIES + CONDITION[processing] → ELECTRODE (product)
+               or multiple ACTIVE_SPECIES → mixture
+               Typical cardinality: 3–8
+
+OPERATION    — "under this material+condition setup, these metrics were measured"
+               Typical members: ELECTRODE + MEMBRANE + ACTIVE_SPECIES
+               + CONDITION[operating] + METRIC[performance]
+               Highest cardinality: 5–15
+
+DEGRADATION  — "under these conditions, this failure or mechanism occurred"
+               Typical members: DEGRADATION entity + affected materials
+               + triggering CONDITIONS + affected METRICS
+               Typical cardinality: 3–7
+
+COMPARISON   — "under a shared criterion, these candidates show different values"
+               Typical members: 2+ candidates of SAME ontology type
+               + criterion METRIC + each candidate's measured value
+               Typical cardinality: 4–10
+
+═════════════════════════════════════════════════════════════════
+RULE 5 — COMPARISON trigger (CRITICAL)
+═══════════════════════════════════════════════════════════════════════
+
+When the text presents a SERIES of same-type entities measured
+under a shared criterion, you MUST generate a COMPARISON hyperedge.
+Watch for these patterns:
+
+  "A: x; B: y; C: z"
+  "RCC: 0.614 m²/g; TCC: 0.706 m²/g; BCC: 0.800 m²/g;
+  TBCC: 0.904 m²/g"
+  markdown tables where rows share the same column headers
+
+For each such series:
+  (a) Include ALL candidates and ALL their metric values in the vertices list.
+  (b) State the comparison criterion and conclusion in the description.
+
+═════════════════════════════════════════════════════════════════
+OUTPUT FORMAT — JSON array
+═══════════════════════════════════════════════════════════════════════════
+
+[
+  {{
+    "vertices": ["<entity_name_1>", "<entity_name_2>", ...],
+    "relation_type": "COMPOSITION | OPERATION | DEGRADATION | COMPARISON",
+    "description": "<a detailed, smooth description covering all entities in this set>",
+    "generalization": "<one-sentence summary>",
+    "keywords": "<overarching concepts or themes>",
+    "strength": <0-10 integer>,
+    "evidence_span": "<verbatim quote from text, ≤ 120 chars>"
+  }}
+]
+
+═════════════════════════════════════════════════════════════════════════
+EXAMPLE
+═════════════════════════════════════════════════════════════════════════════
+
+Input text:
+"BET tests were conducted to analyze the specific surface area:
+RCC electrode: 0.614 m²/g; TCC electrode: 0.706 m²/g;
+BCC electrode: 0.800 m²/g; TBCC electrode: 0.904 m²/g."
+
+Expected output:
+[
+  {{
+    "vertices": ["RCC", "TCC", "BCC", "TBCC",
+             "BET 0.614 m²/g", "BET 0.706 m²/g",
+             "BET 0.800 m²/g", "BET 0.904 m²/g"],
+    "relation_type": "COMPARISON",
+    "description": "BET specific surface area comparison across four electrode states. TBCC has the highest value (0.904), attributed to intrinsic defects aiding catalyst deposition. RCC has the lowest (0.614) due to smooth surface.",
+    "generalization": "TBCC > BCC > TCC > RCC in BET surface area",
+    "keywords": "specific surface area, electrode modification, defect engineering",
+    "strength": 9,
+    "evidence_span": "RCC electrode: 0.614 m²/g; TCC electrode: 0.706 m²/g"
+  }}
+]
+
+═════════════════════════════════════════════════════════════════════════
+YOUR TASK
+═════════════════════════════════════════════════════════════════════
+
+Entities already extracted (K_v):
+{K_v_JSON}
+
+Original text:
+{CHUNK_TEXT}
+
+Output ONLY the JSON array. No prose before or after.

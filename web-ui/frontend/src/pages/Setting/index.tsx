@@ -41,6 +41,7 @@ const Setting: React.FC = () => {
   const [availableDatabases, setAvailableDatabases] = useState<any[]>([])
   const [testResults, setTestResults] = useState<any>({})
   const [isCustomEmbedding, setIsCustomEmbedding] = useState(false)
+  const [availableDomains, setAvailableDomains] = useState<any[]>([])
 
   // 默认配置
   const defaultSettings = {
@@ -57,7 +58,8 @@ const Setting: React.FC = () => {
     embeddingBaseUrl: '', // 嵌入模型的API地址
     embeddingApiKey: '', // 嵌入模型的API密钥
     // 新增Mode配置，默认显示所有modes（包含Cog-RAG）
-    availableModes: ['llm', 'naive', 'graph', 'hyper', 'hyper-lite', 'cog', 'cog-hybrid', 'cog-entity', 'cog-theme']
+    availableModes: ['llm', 'naive', 'graph', 'hyper', 'hyper-lite', 'cog', 'cog-hybrid', 'cog-entity', 'cog-theme'],
+    hyperrag_domain: 'default'
   }
 
   // 可用的查询模式配置
@@ -382,6 +384,22 @@ const Setting: React.FC = () => {
     }
   }
 
+  // 加载可用领域列表
+  const loadDomains = async () => {
+    try {
+      const response = await fetch(`${SERVER_URL}/domains`)
+      if (response.ok) {
+        const data = await response.json()
+        setAvailableDomains(data.domains || [])
+      }
+    } catch (error) {
+      console.error('加载领域列表失败:', error)
+      setAvailableDomains([
+        { name: 'default', description: '通用领域（分隔符格式）', output_format: 'delimiter' }
+      ])
+    }
+  }
+
   // 保存设置
   const saveSettings = async (values: any) => {
     setSaveLoading(true)
@@ -584,6 +602,7 @@ const Setting: React.FC = () => {
   useEffect(() => {
     loadSettings()
     loadDatabases()
+    loadDomains()
   }, [])
 
   return (
@@ -882,6 +901,51 @@ const Setting: React.FC = () => {
               type="error"
               showIcon
               style={{ marginTop: '16px' }}
+            />
+          </Card>
+
+          {/* 嵌入领域配置区块 */}
+          <Card
+            title={
+              <span>
+                <AppstoreOutlined style={{ marginRight: '8px' }} />
+                嵌入领域配置
+              </span>
+            }
+            style={{ marginBottom: '24px' }}
+          >
+            <Alert
+              message="嵌入领域配置"
+              description="选择文档嵌入时使用的知识提取领域。不同领域使用不同的实体类型、关系类型和输出格式。更换领域后需要清空数据库重新嵌入文档。"
+              type="info"
+              showIcon
+              style={{ marginBottom: '24px' }}
+            />
+            <Form.Item
+              name="hyperrag_domain"
+              label="嵌入领域"
+              extra="选择文档嵌入时使用的知识提取领域"
+            >
+              <Select placeholder="选择嵌入领域">
+                {availableDomains.map(domain => (
+                  <Option key={domain.name} value={domain.name}>
+                    <div>
+                      <div style={{ fontWeight: 'bold' }}>
+                        {domain.name === 'default' ? '通用领域 (Default)' : domain.name}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#666' }}>
+                        {domain.description || '无描述'} | 输出格式: {domain.output_format}
+                      </div>
+                    </div>
+                  </Option>
+                ))}
+              </Select>
+            </Form.Item>
+            <Alert
+              message="注意"
+              description="切换领域后，已有的嵌入数据不会自动更新。建议新建数据库并用新领域重新嵌入文档。"
+              type="warning"
+              showIcon
             />
           </Card>
 

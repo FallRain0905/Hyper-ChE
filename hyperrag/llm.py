@@ -9,6 +9,7 @@ import numpy as np
 from openai import (
     AsyncOpenAI,
     APIConnectionError,
+    APIStatusError,
     RateLimitError,
     Timeout,
     AsyncAzureOpenAI,
@@ -34,7 +35,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout)),
+    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout, APIStatusError)),
 )
 async def openai_complete_if_cache(
     model,
@@ -139,7 +140,7 @@ async def openai_complete_stream_if_cache(
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout)),
+    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout, APIStatusError)),
 )
 async def azure_openai_complete_if_cache(
     model,
@@ -328,7 +329,7 @@ async def bedrock_complete(
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=60),
-    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout)),
+    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout, APIStatusError)),
 )
 async def openai_embedding(
     texts: list[str],
@@ -352,7 +353,7 @@ async def openai_embedding(
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout)),
+    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout, APIStatusError)),
 )
 async def azure_openai_embedding(
     texts: list[str],
@@ -380,7 +381,7 @@ async def azure_openai_embedding(
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=60),
-    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout)),
+    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout, APIStatusError)),
 )
 async def siliconcloud_embedding(
     texts: list[str],
@@ -419,7 +420,7 @@ async def siliconcloud_embedding(
 # @retry(
 #     stop=stop_after_attempt(3),
 #     wait=wait_exponential(multiplier=1, min=4, max=10),
-#     retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout)),  # TODO: fix exceptions
+#     retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout, APIStatusError)),  # TODO: fix exceptions
 # )
 async def bedrock_embedding(
     texts: list[str],

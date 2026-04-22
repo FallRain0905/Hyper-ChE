@@ -38,9 +38,10 @@ Hyper-RAG 通过以下方式增强 RAG：
 ```
 Hyper-RAG/
 ├── hyperrag/              # 核心超图 RAG 库
-├── web-ui/               # Web 界面（React + FastAPI）
-├── gradio/               # Gradio 界面
-├── streamlit/            # Streamlit 界面
+│   ├── domains/           # 领域配置（支持自定义领域）
+│   │   ├── default/       # 默认领域（分隔符格式）
+│   │   └── flow_battery/  # 液流电池领域（JSON格式）
+├── web-ui/                # Web 界面（React + FastAPI）
 └── reproduce/             # 论文复现代码
 ```
 
@@ -79,6 +80,75 @@ docker-compose up
 ```
 
 **详细文档：** [Web-UI README](web-ui/README.md)
+
+---
+
+## 领域适配 / Domain Adaptation
+
+Hyper-RAG 支持领域定制，可为特定领域定义专用的实体类型、关系类型和提示词模板。
+
+### 领域配置结构
+
+```
+hyperrag/domains/
+├── default/                      # 默认领域
+│   ├── config.json               # 领域配置
+│   └── entity_extraction.txt     # 实体提取模板
+└── flow_battery/                 # 液流电池领域（示例）
+    ├── config.json               # 7种实体 + 4种关系
+    ├── entity_extraction.txt     # 实体提取模板
+    ├── low_order_extraction.txt  # 低阶关系提取模板
+    ├── high_order_extraction.txt # 高阶关系提取模板
+    └── query_keywords.txt        # 查询关键词模板
+```
+
+### 液流电池领域示例
+
+液流电池领域提取 **7 种实体类型**：
+
+| 实体类型 | 说明 |
+|---------|------|
+| ACTIVE_SPECIES | 氧化还原活性物质 |
+| MEMBRANE | 离子交换膜 |
+| ELECTRODE | 电极材料 |
+| CONDITION | 实验条件 |
+| METRIC | 性能指标 |
+| DEGRADATION | 退化机制 |
+| SYSTEM | 系统/装置 |
+
+提取 **4 种关系类型**：
+
+| 关系类型 | 说明 |
+|---------|------|
+| COMPOSITION | 组成/制备关系 |
+| OPERATION | 操作条件关系 |
+| DEGRADATION | 退化/失效关系 |
+| COMPARISON | 对比关系 |
+
+### 使用方法
+
+在 Web UI 的 **设置页面** 选择嵌入领域，或通过代码指定：
+
+```python
+from hyperrag import HyperRAG
+
+# 方式1: 通过配置
+rag = HyperRAG(
+    working_dir="./cache",
+    domain="flow_battery"  # 指定领域
+)
+
+# 方式2: 运行时设置
+from hyperrag.prompt import set_domain
+set_domain("flow_battery")
+```
+
+### 自定义新领域
+
+1. 在 `hyperrag/domains/` 下创建新目录
+2. 编写 `config.json` 定义本体（实体类型、关系类型）
+3. 编写提示词模板文件
+4. 后端自动识别新领域
 
 ---
 
@@ -207,7 +277,25 @@ python reproduce/Step_2_extract_question.py
 python reproduce/Step_3_response_question.py
 ```
 
-### 3. 查询模式
+### 3. 文档嵌入流程
+
+文档嵌入采用 **三步流水线**（领域适配时）：
+
+```
+文档 → 分块 → 并行处理每个块:
+  Step 1: 实体提取 (LLM) → JSON 解析
+  Step 2: 低阶关系提取 (LLM) → 二元关系
+  Step 3: 高阶关系提取 (LLM) → 超边
+       ↓
+实体合并 + 摘要 → 关系合并 + 摘要 → 写入超图
+```
+
+**数据库机制**：
+- 每个文档创建独立数据库（基于文件名）
+- 数据库支持增量写入，同名实体会合并
+- 存储位置：`web-ui/backend/hyperrag_cache/<数据库名>/`
+
+### 4. 查询模式
 
 支持多种查询模式：
 

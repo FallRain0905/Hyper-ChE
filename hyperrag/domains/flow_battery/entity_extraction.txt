@@ -1,0 +1,104 @@
+{DOMAIN_CONTEXT}
+
+Given the text chunk below, identify ALL entities relevant to redox flow battery research. For each entity, output a JSON object with the fields specified in OUTPUT FORMAT.
+
+═══════════════════════════════════════════════════════════════
+ONTOLOGY — 7 Entity Types (assign exactly one)
+═══════════════════════════════════════════════════════════════
+
+1. ACTIVE_SPECIES
+   Redox-active molecules/ions, redox couples, supporting electrolytes, additives, solvent precursors, salt reagents.
+   Examples: "VO²⁺", "Cr³⁺/Cr²⁺", "HCl", "FeCl₂·4H₂O", "bismuth nitrate", "TEMPO", "H₂SO₄"
+
+2. MEMBRANE
+   Ion-exchange membranes, porous separators, and modifications.
+   Examples: "Nafion 117", "Nafion 212", "SPEEK/PBI blend"
+
+3. ELECTRODE
+   Electrodes, bipolar plates, current collectors. INCLUDES every named derivative state (see Rule 1 below).
+   Examples: "graphite felt (GF)", "Bio-GF-O", "TBCC", "RCC"
+
+4. CONDITION — requires subtype field:
+   • "operating" — parameters during cell operation (temperature, current density, flow rate, SOC, cutoff voltage, cycle number, electrolyte volume ...)
+   • "processing" — parameters during synthesis/pretreatment (annealing temperature, heating rate, atmosphere, precursor concentration, soaking duration ...)
+
+5. METRIC — requires subtype field:
+   • "performance" — cell-level indicators (CE, VE, EE, capacity retention, peak power density, cycle life, energy density ...)
+   • "material_property" — intrinsic material characterization (BET surface area, contact angle, ID/IG ratio, Rct, ΔEp, IEC, conductivity, adsorption energy ...)
+
+6. DEGRADATION
+   Failure phenomena AND their underlying mechanisms, combined.
+   Includes: crossover, capacity fade, HER / gas evolution, electrode passivation, electrolyte imbalance, decomposition, as well as mechanistic explanations.
+
+7. SYSTEM
+   Physical device / equipment components.
+   Examples: "stack unit", "peristaltic pump", "tube furnace", "CHI 760E workstation", "CT-4008Tn testing system"
+
+═══════════════════════════════════════════════════════════════
+CRITICAL RULES
+═══════════════════════════════════════════════════════════════
+
+Rule 1 — Derived electrode names are SEPARATE entities.
+  "RCC", "TCC", "BCC", "TBCC" → four ELECTRODE entities.
+  "GF", "Bio-GF-O", "Bi-Bio-GF-O" → three ELECTRODE entities.
+  Do NOT merge them. Record base material + treatment chain in key_attribute.
+
+Rule 2 — Chemical identity precision.
+  Metal ≠ ion ≠ redox couple ≠ salt. Each is distinct:
+  "Bi" (metal) ≠ "Bi³⁺" (ion) ≠ "BiCl₃" (salt)
+  "Fe²⁺" ≠ "Fe²⁺/Fe³⁺" ≠ "FeCl₂·4H₂O"
+  Note relationships in key_attribute when relevant.
+
+Rule 3 — Numeric values MUST be split.
+  CONDITION and METRIC entities must have separate value, unit fields.
+  For ranges, use value_min + value_max. NEVER concatenate number and unit into a single string.
+
+Rule 4 — Preserve original names, do not canonicalize.
+  "石墨毡" stays "石墨毡"; "graphite felt" stays "graphite felt".
+  Canonicalization is a downstream pipeline step.
+
+═══════════════════════════════════════════════════════════════
+OUTPUT FORMAT — strict JSON array
+═══════════════════════════════════════════════════════════════
+
+[
+  {{
+    "name": "<original name from text>",
+    "type": "<one of 7 types above>",
+    "subtype": "<REQUIRED for CONDITION/METRIC; null otherwise>",
+    "value": <number or null>,
+    "value_min": <number or null>,
+    "value_max": <number or null>,
+    "unit": "<string or null>",
+    "description": "<1-2 sentences grounded in the text>",
+    "key_attribute": "<most identifying trait; REQUIRED for derived ELECTRODE entities; null if N/A>"
+  }}
+]
+
+═══════════════════════════════════════════════════════════════
+EXAMPLE
+═══════════════════════════════════════════════════════════════
+
+Input text:
+"The cathode and anode reaction electrolytes contain 1.2 mol/L FeCl₂·4H₂O, 1.4 mol/L CrCl₃·6H₂O, and 2.5 mol/L HCl. The Nafion 212 was used as the membrane. The flow rates were both 20 mL/min. Battery operates at current density from 80 to 200 mA/cm². Cut-off voltage: 0.7–1.2 V."
+
+Expected output:
+[
+  {{"name":"FeCl₂·4H₂O","type":"ACTIVE_SPECIES","subtype":null,"value":1.2,"value_min":null,"value_max":null,"unit":"mol/L","description":"Iron(II) chloride tetrahydrate, positive-side active species precursor.","key_attribute":"Fe(II) salt, source of Fe²⁺/Fe³⁺ couple"}},
+  {{"name":"CrCl₃·6H₂O","type":"ACTIVE_SPECIES","subtype":null,"value":1.4,"value_min":null,"value_max":null,"unit":"mol/L","description":"Chromium(III) chloride hexahydrate, negative-side active species precursor.","key_attribute":"Cr(III) salt, source of Cr²⁺/Cr³⁺ couple"}},
+  {{"name":"HCl","type":"ACTIVE_SPECIES","subtype":null,"value":2.5,"value_min":null,"value_max":null,"unit":"mol/L","description":"Hydrochloric acid as supporting electrolyte.","key_attribute":"supporting electrolyte, not redox-active"}},
+  {{"name":"Nafion 212","type":"MEMBRANE","subtype":null,"value":null,"value_min":null,"value_max":null,"unit":null,"description":"PFSA cation-exchange membrane separating positive and negative compartments.","key_attribute":"commercial PFSA membrane"}},
+  {{"name":"flow rate","type":"CONDITION","subtype":"operating","value":20,"value_min":null,"value_max":null,"unit":"mL/min","description":"Electrolyte circulation rate on both sides.","key_attribute":null}},
+  {{"name":"current density range","type":"CONDITION","subtype":"operating","value":null,"value_min":80,"value_max":200,"unit":"mA/cm²","description":"Current density swept from 80 to 200 mA/cm².","key_attribute":null}},
+  {{"name":"cutoff voltage (lower)","type":"CONDITION","subtype":"operating","value":0.7,"value_min":null,"value_max":null,"unit":"V","description":"Lower discharge cut-off voltage.","key_attribute":null}},
+  {{"name":"cutoff voltage (upper)","type":"CONDITION","subtype":"operating","value":1.2,"value_min":null,"value_max":null,"unit":"V","description":"Upper charge cut-off voltage.","key_attribute":null}}
+]
+
+═══════════════════════════════════════════════════════════════
+YOUR TASK
+═══════════════════════════════════════════════════════════════
+
+TEXT:
+{CHUNK_TEXT}
+
+Output ONLY the JSON array. No prose before or after.

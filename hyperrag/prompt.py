@@ -10,6 +10,25 @@ PROMPTS["process_tickers"] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "
 
 PROMPTS["DEFAULT_ENTITY_TYPES"] = ["organization", "person", "geo", "event", "role", "concept"]
 
+PROMPTS["domain_context"] = {
+    "default": "",
+    "flow_battery": "You are an expert in redox flow battery (RFB) research, with deep knowledge of vanadium (VRFB), iron-chromium (ICRFB), zinc-bromine, and organic flow battery systems. You understand electrochemistry, membrane science, electrode materials, and battery testing protocols.\n\nIn this task you will extract structured knowledge from RFB literature.\nFollow the ontology, rules, and output format specified below EXACTLY."
+}
+
+# Import domain manager for multi-domain support
+try:
+    # Try relative import first (when imported as package)
+    from .domains.domain_manager import domain_manager
+    DOMAIN_SUPPORT_AVAILABLE = True
+except ImportError:
+    try:
+        # Fallback to absolute import (when imported directly)
+        from domains.domain_manager import domain_manager
+        DOMAIN_SUPPORT_AVAILABLE = True
+    except ImportError:
+        DOMAIN_SUPPORT_AVAILABLE = False
+        domain_manager = None
+
 PROMPTS["entity_extraction"] = """-Goal-
 Given a text document related to some knowledge or story and a list of entity types, identify all entities of these types from the text. Then construct hyperedges by extracting complex relationships among the identified entities.
 Use {language} as output language.
@@ -399,3 +418,340 @@ Through the existing analysis, we can know that the potential keywords or theme 
 Please refer to keywords or theme information, combined with your own analysis, to select useful and relevant information from the prompts to help you answer accurately.
 Attention: Don't brainlessly splice knowledge items! The answer needs to be as accurate, detailed, comprehensive, and convincing as possible!
 """
+
+# ========== Multi-Domain Support Functions ==========
+
+def get_domain_config(domain='default'):
+    """
+    Get domain configuration
+
+    Args:
+        domain: Domain name ('default', 'flow_battery', etc.)
+
+    Returns:
+        Domain configuration dictionary
+    """
+    if not DOMAIN_SUPPORT_AVAILABLE:
+        # Fallback to default configuration if domain manager is not available
+        return {
+            'domain_name': 'default',
+            'entity_types': PROMPTS["DEFAULT_ENTITY_TYPES"],
+            'relation_types': ['generic'],
+            'output_format': 'delimiter_based',
+            'domain_context': ''
+        }
+
+    return domain_manager.load_domain_config(domain)
+
+def get_entity_types(domain='default'):
+    """
+    Get entity types for a specific domain
+
+    Args:
+        domain: Domain name
+
+    Returns:
+        List of entity type names
+    """
+    if not DOMAIN_SUPPORT_AVAILABLE:
+        return PROMPTS["DEFAULT_ENTITY_TYPES"]
+
+    return domain_manager.get_entity_types(domain)
+
+def get_relation_types(domain='default'):
+    """
+    Get relation types for a specific domain
+
+    Args:
+        domain: Domain name
+
+    Returns:
+        List of relation type names
+    """
+    if not DOMAIN_SUPPORT_AVAILABLE:
+        return ['generic']
+
+    return domain_manager.get_relation_types(domain)
+
+def get_domain_context(domain='default'):
+    """
+    Get domain context for a specific domain
+
+    Args:
+        domain: Domain name
+
+    Returns:
+        Domain context string
+    """
+    if not DOMAIN_SUPPORT_AVAILABLE:
+        return ''
+
+    return domain_manager.get_domain_context(domain)
+
+def get_output_format(domain='default'):
+    """
+    Get output format for a specific domain
+
+    Args:
+        domain: Domain name
+
+    Returns:
+        Output format ('json' or 'delimiter_based')
+    """
+    if not DOMAIN_SUPPORT_AVAILABLE:
+        return 'delimiter_based'
+
+    return domain_manager.get_output_format(domain)
+
+def get_entity_extraction_prompt(domain='default', **kwargs):
+    """
+    Get entity extraction prompt for a specific domain
+
+    Args:
+        domain: Domain name
+        **kwargs: Additional parameters for template formatting
+
+    Returns:
+        Formatted prompt string
+    """
+    if domain == 'default' or not DOMAIN_SUPPORT_AVAILABLE:
+        # Use the original delimiter-based prompt for default domain
+        return PROMPTS["entity_extraction"].format(**kwargs)
+    else:
+        # Use domain-specific template
+        try:
+            template = domain_manager.get_prompt_template('entity_extraction', domain)
+            domain_context = get_domain_context(domain)
+
+            # Add domain context to kwargs
+            kwargs['DOMAIN_CONTEXT'] = domain_context
+
+            return template.format(**kwargs)
+        except FileNotFoundError:
+            # Fallback to default template if domain template not found
+            print(f"Warning: entity_extraction template not found for domain '{domain}', using default")
+            return PROMPTS["entity_extraction"].format(**kwargs)
+
+def get_low_order_extraction_prompt(domain='default', **kwargs):
+    """
+    Get low-order relationship extraction prompt for a specific domain
+
+    Args:
+        domain: Domain name
+        **kwargs: Additional parameters for template formatting
+
+    Returns:
+        Formatted prompt string
+    """
+    if domain == 'default' or not DOMAIN_SUPPORT_AVAILABLE:
+        # For default domain, we'll need to extract the low-order part from the main prompt
+        # This is a simplified approach - in production, you might want to split the original prompt
+        return get_default_low_order_prompt(**kwargs)
+    else:
+        try:
+            template = domain_manager.get_prompt_template('low_order_extraction', domain)
+            domain_context = get_domain_context(domain)
+
+            kwargs['DOMAIN_CONTEXT'] = domain_context
+            return template.format(**kwargs)
+        except FileNotFoundError:
+            print(f"Warning: low_order_extraction template not found for domain '{domain}', using default")
+            return get_default_low_order_prompt(**kwargs)
+
+def get_high_order_extraction_prompt(domain='default', **kwargs):
+    """
+    Get high-order relationship extraction prompt for a specific domain
+
+    Args:
+        domain: Domain name
+        **kwargs: Additional parameters for template formatting
+
+    Returns:
+        Formatted prompt string
+    """
+    if domain == 'default' or not DOMAIN_SUPPORT_AVAILABLE:
+        # For default domain, extract the high-order part from the main prompt
+        return get_default_high_order_prompt(**kwargs)
+    else:
+        try:
+            template = domain_manager.get_prompt_template('high_order_extraction', domain)
+            domain_context = get_domain_context(domain)
+
+            kwargs['DOMAIN_CONTEXT'] = domain_context
+            return template.format(**kwargs)
+        except FileNotFoundError:
+            print(f"Warning: high_order_extraction template not found for domain '{domain}', using default")
+            return get_default_high_order_prompt(**kwargs)
+
+def get_query_keywords_prompt(domain='default', **kwargs):
+    """
+    Get query keywords extraction prompt for a specific domain
+
+    Args:
+        domain: Domain name
+        **kwargs: Additional parameters for template formatting
+
+    Returns:
+        Formatted prompt string
+    """
+    if domain == 'default' or not DOMAIN_SUPPORT_AVAILABLE:
+        # Default query keywords extraction
+        return get_default_query_keywords_prompt(**kwargs)
+    else:
+        try:
+            template = domain_manager.get_prompt_template('query_keywords', domain)
+            domain_context = get_domain_context(domain)
+
+            kwargs['DOMAIN_CONTEXT'] = domain_context
+            return template.format(**kwargs)
+        except FileNotFoundError:
+            print(f"Warning: query_keywords template not found for domain '{domain}', using default")
+            return get_default_query_keywords_prompt(**kwargs)
+
+def set_domain(domain_name):
+    """
+    Set the current active domain
+
+    Args:
+        domain_name: Domain name to set
+    """
+    if not DOMAIN_SUPPORT_AVAILABLE:
+        print("Warning: Domain support not available, cannot set domain")
+        return False
+
+    try:
+        domain_manager.set_domain(domain_name)
+        return True
+    except Exception as e:
+        print(f"Error setting domain '{domain_name}': {e}")
+        return False
+
+def get_current_domain():
+    """
+    Get the current active domain
+
+    Returns:
+        Current domain name
+    """
+    if not DOMAIN_SUPPORT_AVAILABLE:
+        return 'default'
+
+    return domain_manager.get_current_domain()
+
+def get_available_domains():
+    """
+    Get list of available domains
+
+    Returns:
+        List of domain names
+    """
+    if not DOMAIN_SUPPORT_AVAILABLE:
+        return ['default']
+
+    return domain_manager.get_available_domains()
+
+# ========== Helper Functions for Default Domain ==========
+
+def get_default_low_order_prompt(**kwargs):
+    """
+    Extract low-order relationship extraction from the default prompt
+    """
+    # This is a simplified version - in production, you might want to pre-process the original prompt
+    entity_types = kwargs.get('entity_types', PROMPTS["DEFAULT_ENTITY_TYPES"])
+    language = kwargs.get('language', PROMPTS["DEFAULT_LANGUAGE"])
+    tuple_delimiter = kwargs.get('tuple_delimiter', PROMPTS["DEFAULT_TUPLE_DELIMITER"])
+    record_delimiter = kwargs.get('record_delimiter', PROMPTS["DEFAULT_RECORD_DELIMITER"])
+    completion_delimiter = kwargs.get('completion_delimiter', PROMPTS["DEFAULT_COMPLETION_DELIMITER"])
+    input_text = kwargs.get('input_text', '')
+
+    prompt = f"""-Goal-
+Identify pairs of related entities from the text below.
+Use {language} as output language.
+
+-Steps-
+
+1. From the entities in the text, identify all pairs of (source_entity, target_entity) that are *clearly related* to each other.
+For each pair, extract:
+- source_entity: Name of the first entity
+- target_entity: Name of the second entity
+- description: Why these entities are related
+- keywords: Overarching concepts describing the relationship
+- strength: Numerical score (0-10) indicating relationship strength
+
+Format each relationship as ("Relation"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<description>{tuple_delimiter}<keywords>{tuple_delimiter}<strength>)
+
+2. Return output as a single list using {record_delimiter} as the list delimiter.
+
+3. When finished, output {completion_delimiter}.
+
+Text: {input_text}
+
+Output:"""
+
+    return prompt
+
+def get_default_high_order_prompt(**kwargs):
+    """
+    Extract high-order relationship extraction from the default prompt
+    """
+    entity_types = kwargs.get('entity_types', PROMPTS["DEFAULT_ENTITY_TYPES"])
+    language = kwargs.get('language', PROMPTS["DEFAULT_LANGUAGE"])
+    tuple_delimiter = kwargs.get('tuple_delimiter', PROMPTS["DEFAULT_TUPLE_DELIMITER"])
+    record_delimiter = kwargs.get('record_delimiter', PROMPTS["DEFAULT_RECORD_DELIMITER"])
+    completion_delimiter = kwargs.get('completion_delimiter', PROMPTS["DEFAULT_COMPLETION_DELIMITER"])
+    input_text = kwargs.get('input_text', '')
+
+    prompt = f"""-Goal-
+Find connections among multiple entities (3 or more) and construct high-order associations.
+Use {language} as output language.
+
+-Steps-
+
+1. Based on the entities in the text, find connections or commonalities among MULTIPLE entities.
+Avoid forcibly merging everything. Create separate associations for different themes.
+
+2. For each association, extract:
+- entities_set: Collection of entity names in this association
+- description: Detailed, smooth description covering all entities
+- generalization: One-sentence summary
+- keywords: Overarching concepts or themes
+- strength: Numerical score (0-10) indicating association strength
+
+Format each association as ("Association"{tuple_delimiter}<entity_name1>{tuple_delimiter}<entity_name2>{tuple_delimiter}...<entity_nameN>{tuple_delimiter}<description>{tuple_delimiter}<generalization>{tuple_delimiter}<keywords>{tuple_delimiter}<strength>)
+
+3. Return output as a single list using {record_delimiter} as the list delimiter.
+
+4. When finished, output {completion_delimiter}.
+
+Text: {input_text}
+
+Output:"""
+
+    return prompt
+
+def get_default_query_keywords_prompt(**kwargs):
+    """
+    Default query keywords extraction prompt
+    """
+    query = kwargs.get('query', '')
+
+    prompt = f"""-Goal-
+Extract structured keywords from the user's query.
+
+-Steps-
+
+1. Extract two types of keywords:
+- High-level keywords: Overarching research topics or themes
+- Low-level keywords: Specific entities, materials, or components
+
+2. Return output in JSON format:
+{{
+  "high_level_keywords": ["...", "..."],
+  "low_level_keywords": ["...", "..."]
+}}
+
+Query: {query}
+
+Output:"""
+
+    return prompt

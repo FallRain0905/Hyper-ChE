@@ -75,7 +75,11 @@
     "api_test_success": "API connection test successful",
     "database_test_success": "Database connection test successful",
     "backend_save_failed": "Backend save failed, saved to local settings",
-    "database_load_failed": "Failed to load database list"
+    "database_load_failed": "Failed to load database list",
+    "domain_config": "Embedding Domain",
+    "domain_description": "Select the knowledge extraction domain for document embedding",
+    "domain_select": "Embedding Domain",
+    "domain_select_placeholder": "Select embedding domain"
   },
   "database": {
     "title": "Database Management",

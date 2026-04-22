@@ -1,0 +1,205 @@
+{
+  "domain_name": "flow_battery",
+  "domain_description": "液流电池（Redox Flow Battery）研究领域",
+  "domain_context": "You are an expert in redox flow battery (RFB) research, with deep knowledge of vanadium (VRFB), iron-chromium (ICRFB), zinc-bromine, and organic flow battery systems. You understand electrochemistry, membrane science, electrode materials, and battery testing protocols.\n\nIn this task you will extract structured knowledge from RFB literature.\nFollow the ontology, rules, and output format specified below EXACTLY.",
+
+  "entity_types": [
+    {
+      "name": "ACTIVE_SPECIES",
+      "description": "Redox-active molecules/ions, redox couples, supporting electrolytes, additives, solvent precursors, salt reagents",
+      "examples": ["VO²⁺", "Cr³⁺/Cr²⁺", "HCl", "FeCl₂·4H₂O", "bismuth nitrate", "TEMPO", "H₂SO₄"]
+    },
+    {
+      "name": "MEMBRANE",
+      "description": "Ion-exchange membranes, porous separators, and modifications",
+      "examples": ["Nafion 117", "Nafion 212", "SPEEK/PBI blend"]
+    },
+    {
+      "name": "ELECTRODE",
+      "description": "Electrodes, bipolar plates, current collectors. INCLUDES every named derivative state",
+      "examples": ["graphite felt (GF)", "Bio-GF-O", "TBCC", "RCC"]
+    },
+    {
+      "name": "CONDITION",
+      "description": "Parameters during cell operation or synthesis/pretreatment",
+      "subtypes": ["operating", "processing"],
+      "examples": ["temperature", "current density", "flow rate", "SOC"]
+    },
+    {
+      "name": "METRIC",
+      "description": "Cell-level indicators or intrinsic material characterization",
+      "subtypes": ["performance", "material_property"],
+      "examples": ["CE", "VE", "EE", "capacity retention", "BET surface area", "Rct"]
+    },
+    {
+      "name": "DEGRADATION",
+      "description": "Failure phenomena AND their underlying mechanisms, combined",
+      "examples": ["crossover", "capacity fade", "HER / gas evolution", "electrode passivation"]
+    },
+    {
+      "name": "SYSTEM",
+      "description": "Physical device / equipment components",
+      "examples": ["stack unit", "peristaltic pump", "tube furnace", "CHI 760E workstation"]
+    }
+  ],
+
+  "relation_types": [
+    {
+      "name": "COMPOSITION",
+      "description": "A is a component / precursor / product of B",
+      "examples": ["electrolyte formulations", "electrode synthesis routes", "membrane modifications"]
+    },
+    {
+      "name": "OPERATION",
+      "description": "A and B are co-present in the same experimental setup or test condition",
+      "examples": ["material tested under specific conditions", "metrics measured in setup"]
+    },
+    {
+      "name": "DEGRADATION",
+      "description": "A causes / explains / suffers B",
+      "examples": ["failure mechanisms", "efficiency loss causes"]
+    },
+    {
+      "name": "COMPARISON",
+      "description": "A and B are compared under a shared criterion",
+      "examples": ["material performance comparison", "parameter optimization"]
+    }
+  ],
+
+  "output_format": "json",
+  "language": "English",
+
+  "critical_rules": [
+    "Derived electrode names are SEPARATE entities",
+    "Chemical identity precision (metal ≠ ion ≠ redox couple ≠ salt)",
+    "Numeric values MUST be split (value, unit fields)",
+    "Preserve original names, do not canonicalize"
+  ],
+
+  "entity_fields": [
+    {
+      "name": "name",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "type",
+      "type": "enum",
+      "required": true,
+      "values": ["ACTIVE_SPECIES", "MEMBRANE", "ELECTRODE", "CONDITION", "METRIC", "DEGRADATION", "SYSTEM"]
+    },
+    {
+      "name": "subtype",
+      "type": "enum",
+      "required": "conditional",
+      "condition": "type in ['CONDITION', 'METRIC']",
+      "values": ["operating", "processing", "performance", "material_property"]
+    },
+    {
+      "name": "value",
+      "type": "number",
+      "required": false
+    },
+    {
+      "name": "value_min",
+      "type": "number",
+      "required": false
+    },
+    {
+      "name": "value_max",
+      "type": "number",
+      "required": false
+    },
+    {
+      "name": "unit",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "key_attribute",
+      "type": "string",
+      "required": "conditional",
+      "condition": "type == 'ELECTRODE'"
+    }
+  ],
+
+  "relation_fields": [
+    {
+      "name": "source",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "target",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "relation_type",
+      "type": "enum",
+      "required": true,
+      "values": ["COMPOSITION", "OPERATION", "DEGRADATION", "COMPARISON"]
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "keywords",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "strength",
+      "type": "integer",
+      "required": true,
+      "range": [0, 10]
+    }
+  ],
+
+  "hyperedge_fields": [
+    {
+      "name": "vertices",
+      "type": "array",
+      "required": true
+    },
+    {
+      "name": "relation_type",
+      "type": "enum",
+      "required": true,
+      "values": ["COMPOSITION", "OPERATION", "DEGRADATION", "COMPARISON"]
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "generalization",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "keywords",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "strength",
+      "type": "integer",
+      "required": true,
+      "range": [0, 10]
+    },
+    {
+      "name": "evidence_span",
+      "type": "string",
+      "required": false
+    }
+  ]
+}

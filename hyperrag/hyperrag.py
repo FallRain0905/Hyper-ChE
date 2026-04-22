@@ -104,6 +104,7 @@ class HyperRAG:
     # extension
     addon_params: dict = field(default_factory=dict)
     convert_response_to_json_func: callable = convert_response_to_json
+    domain: str = "default"
 
     def __post_init__(self):
         log_file = os.path.join(self.working_dir, "HyperRAG.log")

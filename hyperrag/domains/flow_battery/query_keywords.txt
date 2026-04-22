@@ -1,0 +1,75 @@
+{DOMAIN_CONTEXT}
+
+You are tasked with extracting structured keywords from a user's query about redox flow battery research.
+
+---Goal---
+
+Given the query, list both high-level and low-level keywords. High-level keywords focus on overarching concepts or themes, while low-level keywords focus on specific entities, materials, or components.
+
+---Instructions---
+
+1. Extract two types of keywords:
+- **High-level keywords**: Overarching research topics or themes
+  Map to known RFB research themes when possible:
+  electrolyte design, membrane selection, electrode modification,
+  stack engineering, operating optimization, degradation/failure,
+  system integration, techno-economic analysis.
+
+- **Entity keywords**: Specific entities, materials, or components
+  mentioned or implied in the query. These will be matched
+  to VERTICES in the hypergraph database.
+
+- **Condition keywords**: Numeric constraints or ranges mentioned
+  or implied in the query. These will be used
+  for structured filtering.
+
+2. Return output in JSON format:
+{{
+  "theme_keywords": ["...", "..."],
+  "entity_keywords": ["...", "..."],
+  "condition_keywords": ["...", "..."]
+}}
+
+---Examples---
+
+Example 1:
+
+Query: "How does temperature affect the performance of vanadium redox flow batteries?"
+################
+Output:
+{{
+  "theme_keywords": ["temperature effects", "battery performance", "operating conditions"],
+  "entity_keywords": ["vanadium redox flow battery", "VRFB"],
+  "condition_keywords": ["temperature", "operating temperature"]
+}}
+
+#############################
+Example 2:
+
+Query: "Compare the efficiency of different membrane materials for flow batteries"
+################
+Output:
+{{
+  "theme_keywords": ["membrane comparison", "efficiency analysis", "material selection"],
+  "entity_keywords": ["membrane", "Nafion", "SPEEK", "ion-exchange membrane"],
+  "condition_keywords": []
+}}
+
+#############################
+Example 3:
+
+Query: "What causes capacity fade in iron-chromium flow batteries?"
+################
+Output:
+{{
+  "theme_keywords": ["capacity degradation", "failure mechanisms", "battery lifetime"],
+  "entity_keywords": ["iron-chromium flow battery", "ICRFB", "capacity fade"],
+  "condition_keywords": []
+}}
+
+---Real Data---
+
+Query: {QUERY}
+
+Output:
+

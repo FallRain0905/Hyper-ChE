@@ -1,0 +1,79 @@
+{DOMAIN_CONTEXT}
+
+From the entities identified below, identify all pairs of (source_entity, target_entity) that are *clearly related* to each other in the original text.
+
+For each pair, extract the following information as a JSON object.
+
+═══════════════════════════════════════════════════
+RELATION TYPE — assign exactly one per pair
+═══════════════════════════════════════════════════════════════
+
+COMPOSITION  — "A is a component / precursor / product of B"
+               e.g., (FeCl₂·4H₂O, HCl) → "both part of the same electrolyte formulation"
+               or (graphite felt, thermal treatment) → "thermally treated electrode"
+
+OPERATION    — "A and B are co-present in the same experimental setup or test condition"
+               e.g., (TBCC electrode, 140 mA/cm²) → "battery tested with TBCC at this current density"
+
+DEGRADATION  — "A causes / explains / suffers B"
+               e.g., (HER, Cr³⁺/Cr²⁺) → "hydrogen evolution competes with Cr redox, causing efficiency loss"
+
+COMPARISON   — "A and B are compared under a shared criterion"
+               e.g., (TBCC, BCC) → "compared in BET surface area"
+               Note: comparisons involving 3+ candidates belong in high-order extraction.
+
+═════════════════════════════════════════════════════════════════════
+OUTPUT FORMAT — JSON array
+═══════════════════════════════════════════════════════════════════════════════════════════
+
+[
+  {{
+    "source": "<entity name from K_v>",
+    "target": "<entity name from K_v>",
+    "relation_type": "COMPOSITION | OPERATION | DEGRADATION | COMPARISON",
+    "description": "<why these two entities are related>",
+    "keywords": "<overarching concepts describing the relationship>",
+    "strength": <0-10 integer>
+  }}
+]
+
+═══════════════════════════════════════════════════════════════════════════════
+EXAMPLE
+═════════════════════════════════════════════════════════════════════════════════════════════
+
+Input text:
+"The TBCC electrode shows enhanced performance with a CE of 95.2% at 140 mA/cm²,
+while maintaining good stability over 200 cycles. The electrode was prepared
+by thermal treatment at 400°C for 6h in air atmosphere."
+
+Expected output:
+[
+  {{
+    "source": "TBCC electrode",
+    "target": "thermal treatment at 400°C for 6h in air atmosphere",
+    "relation_type": "COMPOSITION",
+    "description": "TBCC electrode was produced by thermal treatment process",
+    "keywords": "electrode synthesis, thermal modification",
+    "strength": 8
+  }},
+  {{
+    "source": "TBCC electrode",
+    "target": "95.2% CE at 140 mA/cm²",
+    "relation_type": "OPERATION",
+    "description": "TBCC electrode achieved 95.2% CE when tested at 140 mA/cm² current density",
+    "keywords": "performance, current density, coulombic efficiency",
+    "strength": 9
+  }}
+]
+
+═════════════════════════════════════════════════════════════════════════════════
+YOUR TASK
+═══════════════════════════════════════════════════════════════════════════
+
+Entities already extracted (K_v):
+{K_v_JSON}
+
+Original text:
+{CHUNK_TEXT}
+
+Output ONLY the JSON array. No prose before or after.

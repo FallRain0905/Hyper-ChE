@@ -1,0 +1,68 @@
+{
+  "domain_name": "default",
+  "domain_description": "通用领域，支持组织、人物、地点等通用实体",
+  "domain_context": "",
+  "entity_types": [
+    "organization",
+    "person",
+    "geo",
+    "event",
+    "role",
+    "concept"
+  ],
+  "relation_types": [
+    "generic"
+  ],
+  "output_format": "delimiter_based",
+  "language": "English",
+  "critical_rules": [],
+  "entity_fields": [
+    {
+      "name": "entity_name",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "entity_type",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "entity_description",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "additional_properties",
+      "type": "string",
+      "required": false
+    }
+  ],
+  "relation_fields": [
+    {
+      "name": "source",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "target",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "keywords",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "strength",
+      "type": "integer",
+      "required": true
+    }
+  ]
+}
