@@ -21,7 +21,13 @@ logger = logging.getLogger("hyper_rag")
 
 
 def set_logger(log_file: str):
+    """设置日志文件，每次都更新到新的日志文件"""
     logger.setLevel(logging.DEBUG)
+
+    # 移除所有现有的handlers（避免日志写入到旧文件）
+    for handler in logger.handlers[:]:  # 使用切片复制，避免修改正在遍历的列表
+        handler.close()
+        logger.removeHandler(handler)
 
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.DEBUG)
@@ -31,8 +37,7 @@ def set_logger(log_file: str):
     )
     file_handler.setFormatter(formatter)
 
-    if not logger.handlers:
-        logger.addHandler(file_handler)
+    logger.addHandler(file_handler)
 
 
 @dataclass
