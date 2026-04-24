@@ -879,8 +879,15 @@ async def _merge_edges_then_upsert(
     all_relation_types = relation_types + already_relation_types
     relation_type = GRAPH_FIELD_SEP.join(sorted(set(all_relation_types))) if all_relation_types else ""
 
+    # Track UNKNOWN vertex creation
+    unknown_count = 0
+    unknown_names = []
+
     for need_insert_id in id_set:
         if not (await knowledge_hypergraph_inst.has_vertex(need_insert_id)):
+            logger.warning(f"[{source_id}] Creating UNKNOWN vertex for: {need_insert_id}")
+            unknown_count += 1
+            unknown_names.append(need_insert_id)
             await knowledge_hypergraph_inst.upsert_vertex(
                 need_insert_id,
                 {
@@ -890,6 +897,17 @@ async def _merge_edges_then_upsert(
                     "entity_type": "UNKNOWN",
                 },
             )
+
+    # Log UNKNOWN vertex statistics with context
+    if unknown_count > 0:
+        logger.warning(f"[{source_id}] Created {unknown_count} UNKNOWN vertices out of {len(id_set)} total ({unknown_count/len(id_set)*100:.1f}%)")
+        logger.warning(f"[{source_id}] Hyperedge vertices: {list(id_set)}")
+        if relation_type:
+            logger.warning(f"[{source_id}] Hyperedge type: {relation_type}")
+        if unknown_count > len(id_set) * 0.5:
+            logger.error(f"[{source_id}] CRITICAL: More than 50% vertices are UNKNOWN! Check high_order_extraction.txt")
+            logger.error(f"[{source_id}] Unknown vertex names: {unknown_names[:10]}")  # Log first 10 to avoid flooding
+            logger.error(f"[{source_id}] This likely indicates composite names (e.g., 'CP + MEMBr') or numeric suffixes (e.g., 'CE 99.1%')")
     description = await _handle_relation_summary(  # 应该重新写一个针对超边描述进行合并的函数
         id_set, description, global_config
     )

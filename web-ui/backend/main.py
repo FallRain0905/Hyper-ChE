@@ -467,8 +467,22 @@ async def get_settings():
     """
     try:
         if os.path.exists(SETTINGS_FILE):
-            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
+            try:
+                with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    if not content:
+                        main_logger.error(f"设置文件为空: {SETTINGS_FILE}")
+                        return {
+                            "success": False,
+                            "message": "设置文件为空，请重新配置"
+                        }
+                    settings = json.loads(content)
+            except json.JSONDecodeError as e:
+                main_logger.error(f"设置文件JSON解析错误: {SETTINGS_FILE}, 错误: {e}")
+                return {
+                    "success": False,
+                    "message": f"设置文件格式错误: {str(e)}"
+                }
             # 不返回敏感信息如API Key
             settings_safe = settings.copy()
             if 'apiKey' in settings_safe:

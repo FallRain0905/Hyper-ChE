@@ -138,8 +138,24 @@ class FileManager:
         if self.metadata_file.exists():
             try:
                 with open(self.metadata_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except:
+                    content = f.read().strip()
+                    if not content:
+                        logger.warning(f"元数据文件为空: {self.metadata_file}")
+                        return {}
+                    return json.loads(content)
+            except json.JSONDecodeError as e:
+                logger.error(f"元数据文件JSON解析错误: {self.metadata_file}, 错误: {e}")
+                # 备份损坏的文件
+                backup_file = self.metadata_file.with_suffix('.json.bak')
+                try:
+                    import shutil
+                    shutil.copy(self.metadata_file, backup_file)
+                    logger.info(f"已备份损坏的元数据文件到: {backup_file}")
+                except:
+                    pass
+                return {}
+            except Exception as e:
+                logger.error(f"加载元数据文件失败: {self.metadata_file}, 错误: {e}")
                 return {}
         return {}
 
