@@ -143,10 +143,10 @@ class DomainValidator:
             if not isinstance(strength, int) or strength < 0 or strength > 10:
                 errors.append("Strength must be integer between 0 and 10")
 
-        # 检查evidence_span长度
+        # 检查evidence_span长度（提高到500字符以适应复杂引用）
         if 'evidence_span' in hyperedge and hyperedge['evidence_span']:
-            if len(hyperedge['evidence_span']) > 120:
-                errors.append("Field 'evidence_span' should not exceed 120 characters")
+            if len(hyperedge['evidence_span']) > 500:
+                errors.append("Field 'evidence_span' should not exceed 500 characters")
 
         return errors
 
