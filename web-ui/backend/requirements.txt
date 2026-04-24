@@ -11,5 +11,5 @@ pydantic
 python-multipart
 websockets
 aiofiles
-PyPDF2
-docx2txt
+PyMuPDF
+python-docx
