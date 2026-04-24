@@ -45,7 +45,7 @@ from .prompt import GRAPH_FIELD_SEP, PROMPTS
 
 def parse_json_entities(json_str: str, chunk_key: str = "") -> list:
     """
-    Parse JSON format entity output from LLM
+    Parse JSON format entity output from LLM with enhanced error handling
 
     Args:
         json_str: JSON string from LLM
@@ -56,26 +56,70 @@ def parse_json_entities(json_str: str, chunk_key: str = "") -> list:
     """
     import re
 
+    # Log the raw response for debugging
+    logger.debug(f"[{chunk_key}] parse_json_entities: Raw response (first 500 chars): {json_str[:500]}")
+
+    # Remove markdown code blocks if present
+    json_str = re.sub(r'```json\s*', '', json_str)
+    json_str = re.sub(r'```\s*', '', json_str)
+    json_str = json_str.strip()
+
     # Try to extract JSON array from the response
     json_match = re.search(r'\[.*\]', json_str, re.DOTALL)
     if not json_match:
         logger.warning(f"[{chunk_key}] parse_json_entities: No JSON array found in response (first 200 chars): {json_str[:200]}")
+        # Try to find JSON object instead
+        json_match = re.search(r'\{.*\}', json_str, re.DOTALL)
+        if json_match:
+            logger.info(f"[{chunk_key}] parse_json_entities: Found JSON object instead of array, wrapping in array")
+            json_str = f"[{json_match.group()}]"
+            json_match = re.search(r'\[.*\]', json_str, re.DOTALL)
+
+    if not json_match:
+        logger.error(f"[{chunk_key}] parse_json_entities: No valid JSON found, full response (first 1000 chars): {json_str[:1000]}")
         return []
 
     try:
-        entities = json.loads(json_match.group())
+        extracted_json = json_match.group()
+        logger.debug(f"[{chunk_key}] parse_json_entities: Extracted JSON (first 500 chars): {extracted_json[:500]}")
+        entities = json.loads(extracted_json)
         if not isinstance(entities, list):
+            logger.info(f"[{chunk_key}] parse_json_entities: JSON is not an array, wrapping in list")
             entities = [entities]
         logger.debug(f"[{chunk_key}] parse_json_entities: Successfully parsed {len(entities)} entities")
         return entities
     except json.JSONDecodeError as e:
         logger.warning(f"[{chunk_key}] parse_json_entities: JSON decode error at position {e.pos}: {e.msg}")
         logger.debug(f"[{chunk_key}] parse_json_entities: Problematic JSON (first 500 chars): {json_match.group()[:500]}")
+
+        # Try to fix common JSON issues
+        try:
+            fixed_json = json_match.group()
+
+            # Fix 1: Remove trailing commas
+            fixed_json = re.sub(r',\s*([}\]])', r'\1', fixed_json)
+
+            # Fix 2: Remove backticks and markdown
+            fixed_json = re.sub(r'```[a-z]*', '', fixed_json)
+            fixed_json = re.sub(r'```', '', fixed_json)
+
+            # Fix 3: Remove extra whitespace
+            fixed_json = re.sub(r'\s+', ' ', fixed_json)
+
+            logger.debug(f"[{chunk_key}] parse_json_entities: Attempting to fix JSON...")
+            entities = json.loads(fixed_json)
+            if not isinstance(entities, list):
+                entities = [entities]
+            logger.info(f"[{chunk_key}] parse_json_entities: Successfully parsed after fixing: {len(entities)} entities")
+            return entities
+        except Exception as e2:
+            logger.warning(f"[{chunk_key}] parse_json_entities: Fix attempt failed: {e2}")
+            logger.error(f"[{chunk_key}] parse_json_entities: LLM returned invalid JSON format. Consider switching to a model with better JSON output support.")
         return []
 
 def parse_json_relations(json_str: str, chunk_key: str = "") -> list:
     """
-    Parse JSON format relationship output from LLM
+    Parse JSON format relationship output from LLM with enhanced error handling
 
     Args:
         json_str: JSON string from LLM
@@ -86,26 +130,69 @@ def parse_json_relations(json_str: str, chunk_key: str = "") -> list:
     """
     import re
 
+    # Log the raw response for debugging
+    logger.debug(f"[{chunk_key}] parse_json_relations: Raw response (first 500 chars): {json_str[:500]}")
+
+    # Remove markdown code blocks if present
+    json_str = re.sub(r'```json\s*', '', json_str)
+    json_str = re.sub(r'```\s*', '', json_str)
+    json_str = json_str.strip()
+
     # Try to extract JSON array from the response
     json_match = re.search(r'\[.*\]', json_str, re.DOTALL)
     if not json_match:
         logger.warning(f"[{chunk_key}] parse_json_relations: No JSON array found in response (first 200 chars): {json_str[:200]}")
+        # Try to find JSON object instead
+        json_match = re.search(r'\{.*\}', json_str, re.DOTALL)
+        if json_match:
+            logger.info(f"[{chunk_key}] parse_json_relations: Found JSON object instead of array, wrapping in array")
+            json_str = f"[{json_match.group()}]"
+            json_match = re.search(r'\[.*\]', json_str, re.DOTALL)
+
+    if not json_match:
+        logger.error(f"[{chunk_key}] parse_json_relations: No valid JSON found, full response (first 1000 chars): {json_str[:1000]}")
         return []
 
     try:
-        relations = json.loads(json_match.group())
+        extracted_json = json_match.group()
+        logger.debug(f"[{chunk_key}] parse_json_relations: Extracted JSON (first 500 chars): {extracted_json[:500]}")
+        relations = json.loads(extracted_json)
         if not isinstance(relations, list):
+            logger.info(f"[{chunk_key}] parse_json_relations: JSON is not an array, wrapping in list")
             relations = [relations]
         logger.debug(f"[{chunk_key}] parse_json_relations: Successfully parsed {len(relations)} relations")
         return relations
     except json.JSONDecodeError as e:
         logger.warning(f"[{chunk_key}] parse_json_relations: JSON decode error at position {e.pos}: {e.msg}")
         logger.debug(f"[{chunk_key}] parse_json_relations: Problematic JSON (first 500 chars): {json_match.group()[:500]}")
+
+        # Try to fix common JSON issues
+        try:
+            fixed_json = json_match.group()
+
+            # Fix 1: Remove trailing commas
+            fixed_json = re.sub(r',\s*([}\]])', r'\1', fixed_json)
+
+            # Fix 2: Remove backticks and markdown
+            fixed_json = re.sub(r'```[a-z]*', '', fixed_json)
+            fixed_json = re.sub(r'```', '', fixed_json)
+
+            # Fix 3: Remove extra whitespace
+            fixed_json = re.sub(r'\s+', ' ', fixed_json)
+
+            logger.debug(f"[{chunk_key}] parse_json_relations: Attempting to fix JSON...")
+            relations = json.loads(fixed_json)
+            if not isinstance(relations, list):
+                relations = [relations]
+            logger.info(f"[{chunk_key}] parse_json_relations: Successfully parsed after fixing: {len(relations)} relations")
+            return relations
+        except Exception as e2:
+            logger.warning(f"[{chunk_key}] parse_json_relations: Fix attempt failed: {e2}")
         return []
 
 def parse_json_hyperedges(json_str: str, chunk_key: str = "") -> list:
     """
-    Parse JSON format hyperedge output from LLM
+    Parse JSON format hyperedge output from LLM with enhanced error handling
 
     Args:
         json_str: JSON string from LLM
@@ -116,57 +203,99 @@ def parse_json_hyperedges(json_str: str, chunk_key: str = "") -> list:
     """
     import re
 
+    # Log the raw response for debugging
+    logger.debug(f"[{chunk_key}] parse_json_hyperedges: Raw response (first 500 chars): {json_str[:500]}")
+
+    # Remove markdown code blocks if present
+    json_str = re.sub(r'```json\s*', '', json_str)
+    json_str = re.sub(r'```\s*', '', json_str)
+    json_str = json_str.strip()
+
     # Try to extract JSON array from the response
     json_match = re.search(r'\[.*\]', json_str, re.DOTALL)
     if not json_match:
         logger.warning(f"[{chunk_key}] parse_json_hyperedges: No JSON array found in response (first 200 chars): {json_str[:200]}")
+        # Try to find JSON object instead
+        json_match = re.search(r'\{.*\}', json_str, re.DOTALL)
+        if json_match:
+            logger.info(f"[{chunk_key}] parse_json_hyperedges: Found JSON object instead of array, wrapping in array")
+            json_str = f"[{json_match.group()}]"
+            json_match = re.search(r'\[.*\]', json_str, re.DOTALL)
+
+    if not json_match:
+        logger.error(f"[{chunk_key}] parse_json_hyperedges: No valid JSON found, full response (first 1000 chars): {json_str[:1000]}")
         return []
 
     try:
-        hyperedges = json.loads(json_match.group())
+        extracted_json = json_match.group()
+        logger.debug(f"[{chunk_key}] parse_json_hyperedges: Extracted JSON (first 500 chars): {extracted_json[:500]}")
+        hyperedges = json.loads(extracted_json)
         if not isinstance(hyperedges, list):
+            logger.info(f"[{chunk_key}] parse_json_hyperedges: JSON is not an array, wrapping in list")
             hyperedges = [hyperedges]
         logger.debug(f"[{chunk_key}] parse_json_hyperedges: Successfully parsed {len(hyperedges)} hyperedges")
         return hyperedges
     except json.JSONDecodeError as e:
         logger.warning(f"[{chunk_key}] parse_json_hyperedges: JSON decode error at position {e.pos}: {e.msg}")
         logger.debug(f"[{chunk_key}] parse_json_hyperedges: Problematic JSON (first 500 chars): {json_match.group()[:500]}")
+
+        # Try to fix common JSON issues
+        try:
+            fixed_json = json_match.group()
+
+            # Fix 1: Remove trailing commas
+            fixed_json = re.sub(r',\s*([}\]])', r'\1', fixed_json)
+
+            # Fix 2: Remove backticks and markdown
+            fixed_json = re.sub(r'```[a-z]*', '', fixed_json)
+            fixed_json = re.sub(r'```', '', fixed_json)
+
+            # Fix 3: Remove extra whitespace
+            fixed_json = re.sub(r'\s+', ' ', fixed_json)
+
+            logger.debug(f"[{chunk_key}] parse_json_hyperedges: Attempting to fix JSON...")
+            hyperedges = json.loads(fixed_json)
+            if not isinstance(hyperedges, list):
+                hyperedges = [hyperedges]
+            logger.info(f"[{chunk_key}] parse_json_hyperedges: Successfully parsed after fixing: {len(hyperedges)} hyperedges")
+            return hyperedges
+        except Exception as e2:
+            logger.warning(f"[{chunk_key}] parse_json_hyperedges: Fix attempt failed: {e2}")
         return []
 
 def convert_json_entity_to_standard_format(entity: dict, chunk_key: str = "") -> dict:
     """
     Convert JSON entity format to standard Hyper-RAG entity format
-    Preserves all domain-specific fields with key names for retrieval
+    Preserves structured fields (subtype, value, unit, etc.) as native types
+    for structured queries (e.g., "find temperature > 40°C")
     """
-    additional_props = []
-
-    # Preserve subtype with key name
-    if entity.get("subtype"):
-        additional_props.append(f"subtype={entity['subtype']}")
-
-    # Handle value or value range
-    if entity.get("value") is not None:
-        additional_props.append(f"value={entity['value']}")
-    elif entity.get("value_min") is not None or entity.get("value_max") is not None:
-        # Range values - critical for CONDITION and METRIC entities
-        if entity.get("value_min") is not None:
-            additional_props.append(f"value_min={entity['value_min']}")
-        if entity.get("value_max") is not None:
-            additional_props.append(f"value_max={entity['value_max']}")
-
-    if entity.get("unit"):
-        additional_props.append(f"unit={entity['unit']}")
-
-    if entity.get("key_attribute"):
-        additional_props.append(f"key_attribute={entity['key_attribute']}")
-
-    return {
+    result = {
         "entity_name": entity.get("name", ""),
         "entity_type": entity.get("type", ""),
         "description": entity.get("description", ""),
         "source_id": chunk_key,
-        "additional_properties": additional_props,
     }
+
+    # Preserve structured fields as native types (not flattened strings)
+    if entity.get("subtype") is not None:
+        result["subtype"] = entity["subtype"]
+
+    # Handle value or value range - keep as numbers for comparisons
+    if entity.get("value") is not None:
+        result["value"] = entity["value"]
+    elif entity.get("value_min") is not None or entity.get("value_max") is not None:
+        if entity.get("value_min") is not None:
+            result["value_min"] = entity["value_min"]
+        if entity.get("value_max") is not None:
+            result["value_max"] = entity["value_max"]
+
+    if entity.get("unit") is not None:
+        result["unit"] = entity["unit"]
+
+    if entity.get("key_attribute") is not None:
+        result["key_attribute"] = entity["key_attribute"]
+
+    return result
 
 def convert_json_relation_to_standard_format(relation: dict, chunk_key: str = "") -> dict:
     """
@@ -515,6 +644,116 @@ async def _handle_single_relationship_extraction_high(
     )
 
 
+def _format_structured_fields_as_string(structured_fields: dict) -> str:
+    """
+    Format structured fields into a human-readable string for display.
+
+    Example output: "subtype=operating, value=40, unit=°C"
+    """
+    parts = []
+
+    # Order for consistent display
+    field_order = ["subtype", "value", "value_min", "value_max", "unit", "key_attribute"]
+
+    for field in field_order:
+        if field in structured_fields and structured_fields[field] is not None:
+            value = structured_fields[field]
+            if isinstance(value, list):
+                # Join multiple values with commas
+                value_str = ", ".join(str(v) for v in value)
+            else:
+                value_str = str(value)
+            parts.append(f"{field}={value_str}")
+
+    return GRAPH_FIELD_SEP.join(sorted(parts))
+
+
+def _merge_structured_fields(nodes_data: list[dict], already_fields: dict) -> dict:
+    """
+    Merge structured fields from multiple node data instances.
+
+    Strategy:
+    - For categorical fields (subtype, unit, key_attribute): keep all unique values
+    - For numeric fields (value, value_min, value_max): use smart aggregation
+      * If all same: use that value
+      * If different: use range (min/max)
+    """
+    merged = {}
+
+    # Collect all values for each field (统一使用 list)
+    all_values = {
+        "subtype": [],
+        "unit": [],
+        "key_attribute": [],
+        "value": [],
+        "value_min": [],
+        "value_max": [],
+    }
+
+    # Add values from new nodes
+    for node in nodes_data:
+        for field in all_values.keys():
+            if field in node and node[field] is not None:
+                value = node[field]
+                # Handle case where value might be a set or other iterable
+                if isinstance(value, (list, set)):
+                    all_values[field].extend(list(value))
+                else:
+                    all_values[field].append(value)
+
+    # Add values from existing node
+    for field, value in already_fields.items():
+        if value is not None and field in all_values:
+            # Handle case where value might be a set or other iterable
+            if isinstance(value, (list, set)):
+                all_values[field].extend(list(value))
+            else:
+                all_values[field].append(value)
+
+    # Merge categorical fields (keep unique values as list)
+    for field in ["subtype", "unit", "key_attribute"]:
+        if all_values[field]:
+            # Convert all values to strings to avoid type mixing
+            string_values = [str(v) if v is not None else "" for v in all_values[field]]
+            unique_values = set(string_values)
+            if len(unique_values) == 1:
+                merged[field] = list(unique_values)[0]
+            else:
+                merged[field] = list(unique_values)
+
+    # Merge numeric fields with range strategy
+    for field in ["value", "value_min", "value_max"]:
+        if all_values[field]:
+            # Filter only numeric values
+            values = []
+            for v in all_values[field]:
+                if isinstance(v, (int, float)):
+                    values.append(v)
+                elif isinstance(v, str) and v.replace('.', '', 1).isdigit():
+                    # Try to convert string to number
+                    try:
+                        if '.' in v:
+                            values.append(float(v))
+                        else:
+                            values.append(int(v))
+                    except ValueError:
+                        pass
+
+            if values:
+                if len(values) == 1:
+                    merged[field] = values[0]
+                else:
+                    # Use range for different values
+                    if field == "value":
+                        merged["value_min"] = min(values)
+                        merged["value_max"] = max(values)
+                        merged[field] = None  # Remove single value when using range
+                    else:
+                        merged[field] = min(values) if "min" in field else max(values)
+
+    return merged
+
+
 async def _merge_nodes_then_upsert(
     entity_name: str,
     nodes_data: list[dict],
@@ -524,24 +763,27 @@ async def _merge_nodes_then_upsert(
     already_entity_types = []
     already_source_ids = []
     already_description = []
-    already_additional_properties = []
+    already_structured_fields = {}
 
     already_node = await knowledge_hypergraph_inst.get_vertex(entity_name)
     if already_node is not None:
-    #     """------------------------------------------------------------------"""
-    #     if already_node["entity_type"] is None:
-    #         print(f"The entity_type of {already_node['entity_name']} is None")
-    #     if already_node["description"] is None:
-    #         print(f"The description of {already_node['entity_name']} is None")
-    #     if already_node["additional_properties"] is None:
-    #         print(f"The additional_properties of {already_node['entity_name']} is None")
-    #     """------------------------------------------------------------------"""
         already_entity_types.append(already_node["entity_type"])
         already_source_ids.extend(
             split_string_by_multi_markers(already_node["source_id"], [GRAPH_FIELD_SEP])
         )
         already_description.append(already_node["description"])
-        already_additional_properties.append(already_node["additional_properties"])
+
+        # Extract structured fields from existing node if available
+        for field in ["subtype", "value", "value_min", "value_max", "unit", "key_attribute"]:
+            if field in already_node and already_node[field] is not None:
+                # Convert to list to avoid type errors during merging
+                value = already_node[field]
+                if isinstance(value, set):
+                    already_structured_fields[field] = list(value)
+                elif not isinstance(value, list):
+                    already_structured_fields[field] = [value]
+                else:
+                    already_structured_fields[field] = value
 
     entity_type = sorted(
         Counter(
@@ -550,42 +792,35 @@ async def _merge_nodes_then_upsert(
         key=lambda x: x[1],
         reverse=True,
     )[0][0]
-    # """------------------------------------------------------------------"""
-    # for node in nodes_data:
-    #     if node["entity_type"] is None:
-    #         print(f"The entity_type of {entity_name} is None")
-    #     if node["description"] is None:
-    #         print(f"The description of {entity_name} is None")
-    #     if node["additional_properties"] is None:
-    #         print(f"The additional_properties of {entity_name} is None")
-    # """------------------------------------------------------------------"""
 
-    # nodes_data = [dp["description"] for dp in nodes_data if dp["description"] is not None]
     description = GRAPH_FIELD_SEP.join(
         sorted(set([dp["description"] for dp in nodes_data] + already_description))
-    )
-    additional_properties = GRAPH_FIELD_SEP.join(
-        sorted(set(
-            prop
-            for dp in nodes_data
-            for prop in dp["additional_properties"]
-        ) | set(already_additional_properties))
     )
     source_id = GRAPH_FIELD_SEP.join(
         set([dp["source_id"] for dp in nodes_data] + already_source_ids)
     )
+
+    # Merge structured fields with smart strategy
+    merged_structured_fields = _merge_structured_fields(nodes_data, already_structured_fields)
+
     description = await _handle_entity_summary(
         entity_name, description, global_config
     )
-    additional_properties = await _handle_entity_additional_properties(  # 应该新建一个合并附属信息的函数，以及prompt
-        entity_name, additional_properties, global_config
-    )
+
+    # Build human-readable additional_properties string from structured fields
+    additional_properties = _format_structured_fields_as_string(merged_structured_fields)
+
+    # Build node data with structured fields
     node_data = dict(
         entity_type=entity_type,
         description=description,
         source_id=source_id,
-        additional_properties=additional_properties,
+        additional_properties=additional_properties,  # For display and backward compatibility
     )
+
+    # Add merged structured fields (for structured queries)
+    node_data.update(merged_structured_fields)
+
     await knowledge_hypergraph_inst.upsert_vertex(
         entity_name,
         node_data,

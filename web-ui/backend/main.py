@@ -112,7 +112,7 @@ if sys.platform == 'win32' and 'uvicorn' not in sys.modules:
         # If wrapping fails, continue without it - better to have encoding issues than crash
         pass
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect, Form
 from fastapi.middleware.cors import CORSMiddleware
 from db import get_hypergraph, getFrequentVertices, get_vertices, get_hyperedges, get_vertice, get_vertice_neighbor, get_hyperedge_neighbor_server, add_vertex, add_hyperedge, delete_vertex, delete_hyperedge, update_vertex, update_hyperedge, get_hyperedge_detail, db_manager, get_theme_hypergraph, get_theme_vertices, get_theme_hyperedges, get_theme_vertex_neighbor
 from file_manager import file_manager
@@ -123,7 +123,7 @@ import numpy as np
 import importlib.util
 from pathlib import Path
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from io import StringIO
 
 # 添加 HyperRAG 相关导入
@@ -749,6 +749,10 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
         main_logger.info(f"使用模型: {model_name}, API地址: {base_url}")
         main_logger.info(f"历史消息数量: {len(cleaned_history)} (原始: {len(history_messages)})")
 
+        # 设置超时参数（默认600秒，适应Moonshot慢速响应）
+        timeout = kwargs.get('timeout', 600.0)
+        main_logger.info(f"超时设置: {timeout} 秒")
+
         response = await openai_complete_if_cache(
             model_name,
             prompt,
@@ -756,6 +760,7 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
             history_messages=cleaned_history,
             api_key=api_key,
             base_url=base_url,
+            timeout=timeout,
             **kwargs,
         )
 
@@ -764,6 +769,11 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
 
     except Exception as e:
         main_logger.error(f"LLM调用失败: {safe_str(e)}")
+        main_logger.error(f"错误类型: {type(e).__name__}")
+        if hasattr(e, '__cause__'):
+            main_logger.error(f"根本原因: {safe_str(e.__cause__)}")
+        import traceback
+        main_logger.error(f"详细错误: {traceback.format_exc()}")
         raise
 
 async def get_hyperrag_embedding_func(texts: list[str]) -> np.ndarray:
@@ -1267,6 +1277,8 @@ class FileEmbedRequest(BaseModel):
     chunk_size: int = 500  # 减小chunk_size避免超时
     chunk_overlap: int = 100  # 相应减小overlap
     rag_system: str = "hyperrag"  # 新增：选择RAG系统 (hyperrag 或 cograg)
+    target_database: Optional[str] = None  # 目标数据库名称，None则使用文件关联的数据库
+    update_file_database: bool = False  # 是否更新文件关联的数据库
 
 @app.get("/files")
 async def get_files():
@@ -1280,18 +1292,24 @@ async def get_files():
         raise HTTPException(status_code=500, detail=f"获取文件列表失败: {safe_str(e)}")
 
 @app.post("/files/upload")
-async def upload_files(files: List[UploadFile] = File(...)):
+async def upload_files(
+    files: List[UploadFile] = File(...),
+    target_database: str = Form(default=None)
+):
     """
     上传文件接口
 
     Args:
         files: 上传的文件列表
+        target_database: 目标数据库名称（可选），如果指定则所有文件都关联到此数据库
 
     Returns:
         包含上传结果的字典
     """
     print(f"\n{'='*50}")
     print(f"开始文件上传，文件数量: {len(files)}")
+    if target_database:
+        print(f"目标数据库: {target_database}")
     print(f"{'='*50}")
 
     # 检查是否有文件
@@ -1319,9 +1337,9 @@ async def upload_files(files: List[UploadFile] = File(...)):
             if len(content) == 0:
                 raise ValueError("文件内容为空")
 
-            # 保存文件
+            # 保存文件 - 传入目标数据库
             print("正在保存文件到本地...")
-            file_info = await file_manager.save_uploaded_file(content, file.filename)
+            file_info = await file_manager.save_uploaded_file(content, file.filename, target_database=target_database)
             file_info["status"] = "uploaded"
             file_info["size"] = len(content)
             print(f"[OK] 文件保存成功: {file_info['filename']}")
@@ -2050,12 +2068,25 @@ async def websocket_endpoint(websocket: WebSocket):
 async def embed_files_with_progress(request: FileEmbedRequest):
     """
     批量嵌入文档到HyperRAG，带实时进度通知
+
+    参数:
+        file_ids: 文件ID列表
+        chunk_size: 分块大小
+        chunk_overlap: 分块重叠
+        rag_system: RAG系统 (hyperrag/cograg)
+        target_database: 目标数据库名称（可选），如果指定则所有文档嵌入到此数据库
+        update_file_database: 是否更新文件关联的数据库
     """
     if not HYPERRAG_AVAILABLE:
         raise HTTPException(status_code=500, detail="HyperRAG is not available")
-    
+
     # 立即返回处理开始的响应
     total_files = len(request.file_ids)
+
+    # 记录目标数据库信息
+    if request.target_database:
+        main_logger.info(f"目标数据库已指定: {request.target_database}")
+        print(f"目标数据库: {request.target_database}")
     
     # 异步处理文件嵌入
     asyncio.create_task(process_files_with_progress(request, total_files))
@@ -2125,9 +2156,16 @@ async def process_files_with_progress(request: FileEmbedRequest, total_files: in
                 print(f"  - 文件名: {file_info['filename']}")
                 print(f"  - 文件大小: {file_info['file_size']} bytes")
                 print(f"  - 上传时间: {file_info['upload_time']}")
-                
-                # 使用文件对应的数据库名
-                database_name = file_info["database_name"]
+
+                # 使用目标数据库（如果指定）或文件对应的数据库名
+                if request.target_database:
+                    database_name = file_manager.sanitize_database_name(request.target_database)
+                    # 更新文件关联的数据库
+                    if request.update_file_database:
+                        file_manager.update_file_database(file_id, database_name)
+                        print(f"  - 更新文件关联数据库为: {database_name}")
+                else:
+                    database_name = file_info["database_name"]
                 print(f"  - 目标数据库: {database_name}")
                 
                 main_logger.info(f"开始处理文件: {file_info['filename']} ({file_info['file_size']} bytes)，使用数据库: {database_name}")

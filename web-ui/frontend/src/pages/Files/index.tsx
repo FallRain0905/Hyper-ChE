@@ -19,7 +19,9 @@ import {
   Typography,
   Checkbox,
   InputNumber,
-  Drawer
+  Drawer,
+  Input,
+  Radio
 } from 'antd'
 import {
   DeleteOutlined,
@@ -28,7 +30,8 @@ import {
   ReloadOutlined,
   ClearOutlined,
   InboxOutlined,
-  ThunderboltOutlined
+  ThunderboltOutlined,
+  PlusOutlined
 } from '@ant-design/icons'
 import { SERVER_URL } from '../../utils'
 import type { ColumnsType } from 'antd/es/table'
@@ -36,6 +39,7 @@ import type { UploadFile, UploadProps } from 'antd/es/upload/interface'
 
 const { Dragger } = Upload
 const { Text } = Typography
+const { Group: RadioGroup } = Radio
 
 interface FileInfo {
   file_id: string
@@ -68,6 +72,11 @@ const Files: React.FC = () => {
   const [uploadModalVisible, setUploadModalVisible] = useState(false)
   const [fileList, setFileList] = useState<UploadFile[]>([])
 
+  // 上传时的数据库选择
+  const [uploadDatabaseMode, setUploadDatabaseMode] = useState<'auto' | 'existing' | 'new'>('auto')
+  const [uploadTargetDatabase, setUploadTargetDatabase] = useState<string>('')
+  const [uploadNewDatabaseName, setUploadNewDatabaseName] = useState<string>('')
+
   // 嵌入功能相关状态
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
   const [isEmbedding, setIsEmbedding] = useState(false)
@@ -80,6 +89,11 @@ const Files: React.FC = () => {
     percentage: number
     message: string
   }>({} as any)
+
+  // 数据库选择相关状态
+  const [embedDatabaseMode, setEmbedDatabaseMode] = useState<'file' | 'existing' | 'new'>('file')
+  const [targetDatabase, setTargetDatabase] = useState<string>('')
+  const [newDatabaseName, setNewDatabaseName] = useState<string>('')
   const [progressDetails, setProgressDetails] = useState<Record<string, any>>({})
   const [logs, setLogs] = useState<any[]>([])
   const [showLogs, setShowLogs] = useState(false)
@@ -404,6 +418,22 @@ const Files: React.FC = () => {
       return
     }
 
+    // 验证数据库选择
+    let finalTargetDatabase: string | null = null
+    if (uploadDatabaseMode === 'existing') {
+      if (!uploadTargetDatabase) {
+        message.warning('请选择目标数据库')
+        return
+      }
+      finalTargetDatabase = uploadTargetDatabase
+    } else if (uploadDatabaseMode === 'new') {
+      if (!uploadNewDatabaseName.trim()) {
+        message.warning('请输入新数据库名称')
+        return
+      }
+      finalTargetDatabase = uploadNewDatabaseName.trim()
+    }
+
     console.log('开始上传，fileList:', fileList)
     console.log('fileList详情:', fileList.map(f => ({
       name: f.name,
@@ -435,6 +465,12 @@ const Files: React.FC = () => {
           console.log('添加文件到FormData:', file.name, '大小:', file.originFileObj.size)
         }
       })
+
+      // 添加目标数据库参数（如果指定）
+      if (finalTargetDatabase) {
+        formData.append('target_database', finalTargetDatabase)
+        console.log('目标数据库:', finalTargetDatabase)
+      }
 
       console.log('FormData构建完成，包含文件数:', formData.getAll('files').length)
 
@@ -506,6 +542,22 @@ const Files: React.FC = () => {
       return
     }
 
+    // 验证数据库选择
+    let finalTargetDatabase: string | null = null
+    if (embedDatabaseMode === 'existing') {
+      if (!targetDatabase) {
+        message.warning('请选择目标数据库')
+        return
+      }
+      finalTargetDatabase = targetDatabase
+    } else if (embedDatabaseMode === 'new') {
+      if (!newDatabaseName.trim()) {
+        message.warning('请输入新数据库名称')
+        return
+      }
+      finalTargetDatabase = newDatabaseName.trim()
+    }
+
     setIsEmbedding(true)
     setEmbeddingProgress({} as any)
     setProgressDetails({})
@@ -522,7 +574,9 @@ const Files: React.FC = () => {
           file_ids: Array.from(selectedFileIds),
           chunk_size: chunkSize,
           chunk_overlap: chunkOverlap,
-          rag_system: selectedRAGSystem
+          rag_system: selectedRAGSystem,
+          target_database: finalTargetDatabase,
+          update_file_database: embedDatabaseMode !== 'file'
         }),
       })
 
@@ -610,8 +664,8 @@ const Files: React.FC = () => {
     },
     {
       title: '文件名',
-      dataIndex: 'filename',
-      key: 'filename',
+      dataIndex: 'original_filename',
+      key: 'original_filename',
       ellipsis: true,
       render: (filename: string) => (
         <Tooltip title={filename}>
@@ -880,6 +934,55 @@ const Files: React.FC = () => {
             </span>
           }
         >
+          {/* 数据库选择模式 */}
+          <div style={{ marginBottom: 16 }}>
+            <Text strong>目标数据库:</Text>
+            <RadioGroup
+              value={embedDatabaseMode}
+              onChange={(e) => setEmbedDatabaseMode(e.target.value)}
+              style={{ marginLeft: 12 }}
+              disabled={isEmbedding}
+            >
+              <Radio value="file">使用文件关联数据库</Radio>
+              <Radio value="existing">嵌入到已有数据库</Radio>
+              <Radio value="new">创建新数据库</Radio>
+            </RadioGroup>
+          </div>
+
+          {/* 根据模式显示不同的选择器 */}
+          {embedDatabaseMode === 'existing' && (
+            <div style={{ marginBottom: 16 }}>
+              <Text strong>选择数据库:</Text>
+              <Select
+                value={targetDatabase}
+                onChange={setTargetDatabase}
+                style={{ width: '100%', marginTop: 4 }}
+                placeholder="选择目标数据库"
+                disabled={isEmbedding}
+              >
+                {availableDatabases.map((db) => (
+                  <Select.Option key={db.name} value={db.name}>
+                    {db.description || db.name}
+                  </Select.Option>
+                ))}
+              </Select>
+            </div>
+          )}
+
+          {embedDatabaseMode === 'new' && (
+            <div style={{ marginBottom: 16 }}>
+              <Text strong>新数据库名称:</Text>
+              <Input
+                value={newDatabaseName}
+                onChange={(e) => setNewDatabaseName(e.target.value)}
+                placeholder="输入新数据库名称（字母、数字、下划线、中文）"
+                style={{ marginTop: 4 }}
+                disabled={isEmbedding}
+                prefix={<PlusOutlined />}
+              />
+            </div>
+          )}
+
           <Row gutter={16} align="middle">
             <Col span={6}>
               <div>
@@ -1032,6 +1135,9 @@ const Files: React.FC = () => {
           setUploadModalVisible(false)
           setFileList([])
           setUploadProgress(0)
+          setUploadDatabaseMode('auto')
+          setUploadTargetDatabase('')
+          setUploadNewDatabaseName('')
         }}
         okText="开始上传"
         cancelText="取消"
@@ -1051,6 +1157,47 @@ const Files: React.FC = () => {
             <Text strong>文件大小限制：</Text>
             <Text type="secondary">单个文件最大 50MB</Text>
           </div>
+
+          {/* 数据库选择 */}
+          <div>
+            <Text strong>目标数据库:</Text>
+            <RadioGroup
+              value={uploadDatabaseMode}
+              onChange={(e) => setUploadDatabaseMode(e.target.value)}
+              style={{ marginLeft: 12 }}
+              disabled={uploadLoading}
+            >
+              <Radio value="auto">自动（文件名）</Radio>
+              <Radio value="existing">已有数据库</Radio>
+              <Radio value="new">新建数据库</Radio>
+            </RadioGroup>
+          </div>
+
+          {uploadDatabaseMode === 'existing' && (
+            <Select
+              value={uploadTargetDatabase}
+              onChange={setUploadTargetDatabase}
+              style={{ width: '100%' }}
+              placeholder="选择目标数据库"
+              disabled={uploadLoading}
+            >
+              {availableDatabases.map((db) => (
+                <Select.Option key={db.name} value={db.name}>
+                  {db.description || db.name}
+                </Select.Option>
+              ))}
+            </Select>
+          )}
+
+          {uploadDatabaseMode === 'new' && (
+            <Input
+              value={uploadNewDatabaseName}
+              onChange={(e) => setUploadNewDatabaseName(e.target.value)}
+              placeholder="输入新数据库名称（字母、数字、下划线、中文）"
+              disabled={uploadLoading}
+              prefix={<PlusOutlined />}
+            />
+          )}
 
           <Dragger {...uploadProps} style={{ padding: '20px' }}>
             <p className="ant-upload-drag-icon">

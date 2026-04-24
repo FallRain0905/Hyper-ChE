@@ -1,0 +1,49 @@
+{DOMAIN_CONTEXT}
+
+Extract ALL entities from the text below. Output a JSON array.
+
+ENTITY TYPES (assign exactly one):
+
+1. ACTIVE_SPECIES — redox-active molecules/ions, supporting electrolytes, additives, solvents
+2. MEMBRANE — ion-exchange membranes, porous separators, modifications
+3. ELECTRODE — electrodes, bipolar plates, current collectors (each derived name = separate entity)
+4. CONDITION (subtype required: "operating" | "processing") — cell operation or synthesis parameters
+5. METRIC (subtype required: "performance" | "material_property") — cell indicators or material characterization
+6. DEGRADATION — failure phenomena and underlying mechanisms
+7. SYSTEM — physical devices / equipment
+
+RULES:
+R1: Derived electrode names are SEPARATE entities. "GF", "Bio-GF-O", "Bi-Bio-GF-O" → 3 entities. Record base+treatment in key_attribute.
+R2: Chemical identity precision. Metal ≠ ion ≠ couple ≠ salt. "Bi" ≠ "Bi³⁺" ≠ "BiCl₃".
+R3: Numeric values MUST split into value + unit fields. Ranges use value_min + value_max.
+R4: Preserve original names. Canonicalization is downstream.
+
+OUTPUT FORMAT — JSON array, nothing else:
+[
+  {{
+    "name": "<original name>",
+    "type": "<one of 7 types>",
+    "subtype": "<for CONDITION/METRIC only; null otherwise>",
+    "value": <number or null>,
+    "value_min": <number or null>,
+    "value_max": <number or null>,
+    "unit": "<string or null>",
+    "description": "<1-2 sentences>",
+    "key_attribute": "<identifying trait; REQUIRED for ELECTRODE; null if N/A>"
+  }}
+]
+
+EXAMPLE:
+Text: "The electrolytes contain 1.2 mol/L FeCl₂·4H₂O and 2.5 mol/L HCl. Nafion 212 membrane. Current density 80-200 mA/cm²."
+Output:
+[
+  {{"name":"FeCl₂·4H₂O","type":"ACTIVE_SPECIES","subtype":null,"value":1.2,"value_min":null,"value_max":null,"unit":"mol/L","description":"Iron(II) chloride tetrahydrate, positive-side active species precursor.","key_attribute":"Fe(II) salt, source of Fe²⁺/Fe³⁺ couple"}},
+  {{"name":"HCl","type":"ACTIVE_SPECIES","subtype":null,"value":2.5,"value_min":null,"value_max":null,"unit":"mol/L","description":"Hydrochloric acid as supporting electrolyte.","key_attribute":"supporting electrolyte"}},
+  {{"name":"Nafion 212","type":"MEMBRANE","subtype":null,"value":null,"value_min":null,"value_max":null,"unit":null,"description":"PFSA cation-exchange membrane.","key_attribute":"commercial PFSA membrane"}},
+  {{"name":"current density","type":"CONDITION","subtype":"operating","value":null,"value_min":80,"value_max":200,"unit":"mA/cm²","description":"Current density range for testing.","key_attribute":null}}
+]
+
+TEXT:
+{CHUNK_TEXT}
+
+Output ONLY the JSON array. No prose before or after.

@@ -39,7 +39,7 @@ class FileManager:
             return hashlib.md5(f.read()).hexdigest()
 
     def generate_database_name(self, filename: str) -> str:
-        """使用完整文件名（去除扩展名）作为数据库名"""
+        """使用完整文件名（去除扩展名）作为数据库名 - 默认行为"""
         # 去除文件扩展名
         name_without_ext = Path(filename).stem
         # 只保留字母、数字、下划线、连字符和中文字符
@@ -49,7 +49,18 @@ class FileManager:
             clean_name = "default"
         return clean_name
 
-    async def save_uploaded_file(self, file_content: bytes, original_filename: str) -> Dict:
+    def sanitize_database_name(self, name: str) -> str:
+        """清理数据库名称，确保合法"""
+        # 只保留字母、数字、下划线、连字符和中文字符
+        clean_name = re.sub(r'[^\w一-鿿\-]', '_', name)
+        # 移除开头的数字
+        clean_name = re.sub(r'^\d+', '', clean_name)
+        # 如果清理后为空或太短，使用默认名
+        if len(clean_name) < 1:
+            clean_name = "default"
+        return clean_name
+
+    async def save_uploaded_file(self, file_content: bytes, original_filename: str, target_database: str = None) -> Dict:
         """保存上传的文件"""
         try:
             # 根据文件扩展名推断MIME类型
@@ -66,8 +77,11 @@ class FileManager:
             if not self.is_supported_file(original_filename, mime_type):
                 raise ValueError(f"不支持的文件类型: {original_filename}")
 
-            # 生成数据库名
-            database_name = self.generate_database_name(original_filename)
+            # 生成数据库名 - 如果指定了目标数据库则使用，否则使用文件名
+            if target_database:
+                database_name = self.sanitize_database_name(target_database)
+            else:
+                database_name = self.generate_database_name(original_filename)
 
             # 生成文件ID和存储路径
             file_id = self.generate_file_id()
@@ -151,6 +165,24 @@ class FileManager:
             if error_message:
                 metadata[file_id]["error_message"] = error_message
             self._save_metadata(metadata)
+
+    def get_file_by_id(self, file_id: str) -> Optional[Dict]:
+        """根据ID获取文件信息（别名）"""
+        return self.get_file_info(file_id)
+
+    def update_file_database(self, file_id: str, database_name: str) -> bool:
+        """更新文件的目标数据库"""
+        metadata = self._load_metadata()
+        if file_id in metadata:
+            metadata[file_id]["database_name"] = self.sanitize_database_name(database_name)
+            self._save_metadata(metadata)
+            return True
+        return False
+
+    def get_files_by_database(self, database_name: str) -> List[Dict]:
+        """获取指定数据库的所有文件"""
+        metadata = self._load_metadata()
+        return [f for f in metadata.values() if f.get("database_name") == database_name]
 
     async def read_file_content(self, file_path: str) -> str:
         """读取文件内容"""

@@ -1,0 +1,48 @@
+{DOMAIN_CONTEXT}
+
+From the entities below, find connections among 3+ entities and construct hyperedges. If themes are not strongly associated, create separate hyperedges.
+
+RELATION TYPES:
+- COMPOSITION: components form/produce X (ACTIVE_SPECIES + CONDITION[processing] → product). Typical: 3-8 vertices.
+- OPERATION: material+condition setup → measured metrics. Highest cardinality: 5-15 vertices.
+- DEGRADATION: under conditions, failure/mechanism occurred. Typical: 3-7 vertices.
+- COMPARISON: same-type candidates show different values under shared criterion. Typical: 4-10 vertices.
+
+CRITICAL — COMPARISON trigger:
+When text presents a SERIES of same-type entities with measured values (e.g., "A: x; B: y; C: z" or data tables), you MUST create a COMPARISON hyperedge including ALL candidates and ALL their metric values.
+
+OUTPUT FORMAT — JSON array, nothing else:
+[
+  {{
+    "vertices": ["<entity_1>", "<entity_2>", ...],
+    "relation_type": "COMPOSITION | OPERATION | DEGRADATION | COMPARISON",
+    "description": "<detailed description covering all entities>",
+    "generalization": "<one-sentence summary>",
+    "keywords": "<overarching concepts>",
+    "strength": <0-10 integer>,
+    "evidence_span": "<verbatim quote ≤120 chars>"
+  }}
+]
+
+EXAMPLE:
+Text: "BET: RCC 0.614 m²/g; TCC 0.706 m²/g; BCC 0.800 m²/g; TBCC 0.904 m²/g."
+Output:
+[
+  {{
+    "vertices":["RCC","TCC","BCC","TBCC","BET 0.614 m²/g","BET 0.706 m²/g","BET 0.800 m²/g","BET 0.904 m²/g"],
+    "relation_type":"COMPARISON",
+    "description":"BET surface area comparison. TBCC highest (0.904), RCC lowest (0.614).",
+    "generalization":"TBCC > BCC > TCC > RCC in BET surface area",
+    "keywords":"specific surface area, electrode modification",
+    "strength":9,
+    "evidence_span":"RCC electrode: 0.614 m²/g; TCC electrode: 0.706 m²/g"
+  }}
+]
+
+Entities (K_v):
+{K_v_JSON}
+
+Text:
+{CHUNK_TEXT}
+
+Output ONLY the JSON array. No prose before or after.

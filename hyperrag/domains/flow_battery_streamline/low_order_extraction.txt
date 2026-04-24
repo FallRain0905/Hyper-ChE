@@ -1,0 +1,37 @@
+{DOMAIN_CONTEXT}
+
+From the entities below, identify all clearly related pairs. Output a JSON array.
+
+RELATION TYPES (assign one per pair):
+- COMPOSITION: A is component/precursor/product of B (e.g., electrolyte formulation, electrode synthesis)
+- OPERATION: A and B co-present in same experimental setup (e.g., material tested under condition)
+- DEGRADATION: A causes/explains/suffers B (e.g., failure mechanism, efficiency loss)
+- COMPARISON: A and B compared under shared criterion (note: 3+ candidates → high-order extraction)
+
+OUTPUT FORMAT — JSON array, nothing else:
+[
+  {{
+    "source": "<entity name from K_v>",
+    "target": "<entity name from K_v>",
+    "relation_type": "COMPOSITION | OPERATION | DEGRADATION | COMPARISON",
+    "description": "<why related>",
+    "keywords": "<overarching concepts>",
+    "strength": <0-10 integer>
+  }}
+]
+
+EXAMPLE:
+Text: "TBCC electrode shows CE of 95.2% at 140 mA/cm². Prepared by thermal treatment at 400°C for 6h."
+Output:
+[
+  {{"source":"TBCC electrode","target":"thermal treatment at 400°C","relation_type":"COMPOSITION","description":"TBCC produced by thermal treatment","keywords":"electrode synthesis, thermal modification","strength":8}},
+  {{"source":"TBCC electrode","target":"95.2% CE at 140 mA/cm²","relation_type":"OPERATION","description":"TBCC achieved 95.2% CE at 140 mA/cm²","keywords":"performance, coulombic efficiency","strength":9}}
+]
+
+Entities (K_v):
+{K_v_JSON}
+
+Text:
+{CHUNK_TEXT}
+
+Output ONLY the JSON array. No prose before or after.

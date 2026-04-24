@@ -33,8 +33,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=10),
+    stop=stop_after_attempt(1),  # 只重试1次，避免长时间等待
+    wait=wait_exponential(multiplier=2, min=10, max=60),
     retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout, APIStatusError)),
 )
 async def openai_complete_if_cache(
@@ -44,13 +44,14 @@ async def openai_complete_if_cache(
     history_messages=[],
     base_url=None,
     api_key=None,
+    timeout: float = 600.0,  # 增加到600秒（10分钟）
     **kwargs,
 ) -> str:
     if api_key:
         os.environ["OPENAI_API_KEY"] = api_key
 
     openai_async_client = (
-        AsyncOpenAI() if base_url is None else AsyncOpenAI(base_url=base_url)
+        AsyncOpenAI(timeout=timeout) if base_url is None else AsyncOpenAI(base_url=base_url, timeout=timeout)
     )
     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
     messages = []
@@ -82,6 +83,7 @@ async def openai_complete_stream_if_cache(
     base_url=None,
     api_key=None,
     chunk_size: int = 32,
+    timeout: float = 300.0,
     **kwargs,
 ):
     """
@@ -93,7 +95,7 @@ async def openai_complete_stream_if_cache(
         os.environ["OPENAI_API_KEY"] = api_key
 
     openai_async_client = (
-        AsyncOpenAI() if base_url is None else AsyncOpenAI(base_url=base_url)
+        AsyncOpenAI(timeout=timeout) if base_url is None else AsyncOpenAI(base_url=base_url, timeout=timeout)
     )
 
     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
@@ -138,8 +140,8 @@ async def openai_complete_stream_if_cache(
         await hashing_kv.upsert({args_hash: {"return": text, "model": model}})
 
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=10),
+    stop=stop_after_attempt(1),
+    wait=wait_exponential(multiplier=2, min=10, max=60),
     retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout, APIStatusError)),
 )
 async def azure_openai_complete_if_cache(
@@ -149,6 +151,7 @@ async def azure_openai_complete_if_cache(
     history_messages=[],
     base_url=None,
     api_key=None,
+    timeout: float = 600.0,
     **kwargs,
 ):
     if api_key:
@@ -160,6 +163,7 @@ async def azure_openai_complete_if_cache(
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+        timeout=timeout,
     )
 
     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
@@ -336,12 +340,13 @@ async def openai_embedding(
     model: str = "embedding-3",
     base_url: str = None,
     api_key: str = None,
+    timeout: float = 60.0,
 ) -> np.ndarray:
     if api_key:
         os.environ["OPENAI_API_KEY"] = api_key
 
     openai_async_client = (
-        AsyncOpenAI() if base_url is None else AsyncOpenAI(base_url=base_url)
+        AsyncOpenAI(timeout=timeout) if base_url is None else AsyncOpenAI(base_url=base_url, timeout=timeout)
     )
     response = await openai_async_client.embeddings.create(
         model=model, input=texts, encoding_format="float"
@@ -360,6 +365,7 @@ async def azure_openai_embedding(
     model: str = "embedding-3",
     base_url: str = None,
     api_key: str = None,
+    timeout: float = 60.0,
 ) -> np.ndarray:
     if api_key:
         os.environ["AZURE_OPENAI_API_KEY"] = api_key
@@ -370,6 +376,7 @@ async def azure_openai_embedding(
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+        timeout=timeout,
     )
 
     response = await openai_async_client.embeddings.create(
