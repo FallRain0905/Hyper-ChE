@@ -1,0 +1,28 @@
+{DOMAIN_CONTEXT}
+
+Extract structured keywords from the query. Output JSON only.
+
+Keyword types:
+- theme_keywords: overarching research topics (e.g., electrolyte design, membrane selection, electrode modification, degradation/failure, operating optimization, techno-economic analysis)
+- entity_keywords: specific materials, components, or entities mentioned/implied
+- condition_keywords: numeric constraints or parameter names mentioned/implied
+
+OUTPUT FORMAT — JSON object, nothing else:
+{{
+  "theme_keywords": ["...", "..."],
+  "entity_keywords": ["...", "..."],
+  "condition_keywords": ["...", "..."]
+}}
+
+EXAMPLE:
+Query: "How does temperature affect vanadium redox flow battery performance?"
+Output:
+{{
+  "theme_keywords": ["temperature effects", "operating conditions"],
+  "entity_keywords": ["vanadium redox flow battery", "VRFB"],
+  "condition_keywords": ["temperature"]
+}}
+
+Query: {QUERY}
+
+Output:
