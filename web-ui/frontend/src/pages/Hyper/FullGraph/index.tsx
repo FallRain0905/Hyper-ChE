@@ -393,7 +393,7 @@ const FullGraphPage = observer(() => {
   }, [vertices, hyperedges, graphMode]);
 
   return (
-    <div style={{ padding: '16px' }}>
+    <div className="p-6">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 style={{ margin: 0 }}>
           <DatabaseOutlined style={{ marginRight: 8, fontSize: '24px', color: '#1890ff' }} />

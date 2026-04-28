@@ -606,8 +606,8 @@ const Setting: React.FC = () => {
   }, [])
 
   return (
-    <div className="m-2">
-      <Card>
+    <div className="p-6">
+      <Card className="border-gray-200 rounded-xl">
         <div className="mb-4">
           <div className="flex items-center text-2xl font-bold">
             <SettingOutlined style={{ marginRight: '8px' }} />

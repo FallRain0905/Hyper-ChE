@@ -16,8 +16,7 @@ const APIPage = () => {
     }
 
     return (
-        <div className='h-screen'
-        >
+        <div className='h-screen'>
             {error && (
                 <Alert
                     message="无法加载API文档"

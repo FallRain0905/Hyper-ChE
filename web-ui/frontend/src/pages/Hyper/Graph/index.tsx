@@ -291,7 +291,7 @@ const GraphPage = () => {
 
   return (
     <>
-      <div className='m-4' style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 5 }}>
+      <div className='p-6 pb-0' style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
         <span>{t('graph.hypergraph_database')}</span>
         <DatabaseSelector
           mode="compact"
@@ -346,7 +346,7 @@ const GraphPage = () => {
         </Select>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between' }}>
+      <div className='px-6' style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between' }}>
         {/* 使用HyperGraph组件展示超图 */}
         <div style={{ width: '70%' }}>
           <HyperGraph
@@ -361,8 +361,9 @@ const GraphPage = () => {
         </div>
 
         {/* 实体详情卡片 */}
-        <Card 
+        <Card
           title={t('graph.entity_details')}
+          className="border-gray-200 rounded-xl"
           style={{ width: '28%', height: '600px', overflow: 'auto' }}
         >
           <p><strong>{t('graph.entity_name')}:</strong> {item.entity_name}</p>

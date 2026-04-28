@@ -462,7 +462,7 @@ return
     }, [availableModes, compareMode1, compareMode2])
 
     return (
-        <div className="flex bg-gray-50">
+        <div className="flex h-screen bg-gray-50">
             {/* Sidebar */}
             <div className="w-52 bg-gray-100 border-r border-gray-200 flex flex-col">
 
@@ -652,12 +652,11 @@ return
                             <Database className="w-5 h-5 text-gray-500" />
                             <span className="font-medium text-gray-700">Database:</span>
                             <DatabaseSelector
-                                mode="buttons"
-                                showCurrent={true}
+                                mode="select"
                                 showRefresh={true}
-                                placeholder=""
+                                placeholder="选择数据库"
                                 style={{}}
-                                size="small"
+                                size="middle"
                                 disabled={false}
                             />
                         </div>

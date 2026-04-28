@@ -1,44 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
-  Card,
-  Table,
   Button,
   message,
-  Space,
-  Tag,
-  Popconfirm,
-  Statistic,
-  Row,
-  Col,
-  Alert,
-  Tooltip,
   Select,
   Upload,
   Modal,
   Progress,
-  Typography,
-  Checkbox,
   InputNumber,
   Drawer,
   Input,
-  Radio
+  Radio,
+  Dropdown
 } from 'antd'
 import {
-  DeleteOutlined,
   DatabaseOutlined,
   CloudUploadOutlined,
   ReloadOutlined,
   ClearOutlined,
   InboxOutlined,
   ThunderboltOutlined,
-  PlusOutlined
+  PlusOutlined,
+  FileTextOutlined,
+  FilePdfOutlined,
+  FileWordOutlined,
+  FileMarkdownOutlined,
+  DeleteOutlined
 } from '@ant-design/icons'
 import { SERVER_URL } from '../../utils'
-import type { ColumnsType } from 'antd/es/table'
 import type { UploadFile, UploadProps } from 'antd/es/upload/interface'
 
 const { Dragger } = Upload
-const { Text } = Typography
 const { Group: RadioGroup } = Radio
 
 interface FileInfo {
@@ -48,6 +40,16 @@ interface FileInfo {
   upload_time: string
   file_size: number
   status: string
+  original_filename?: string
+  file_type?: string
+  database_name?: string
+  processed_time?: string
+  error_message?: string
+}
+
+interface DatabaseInfo {
+  name: string
+  description: string
 }
 
 interface DatabaseStatus {
@@ -60,6 +62,7 @@ interface DatabaseStatus {
 }
 
 const Files: React.FC = () => {
+  const navigate = useNavigate()
   const [files, setFiles] = useState<FileInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
@@ -72,12 +75,12 @@ const Files: React.FC = () => {
   const [uploadModalVisible, setUploadModalVisible] = useState(false)
   const [fileList, setFileList] = useState<UploadFile[]>([])
 
-  // 上传时的数据库选择
+  // upload database selection
   const [uploadDatabaseMode, setUploadDatabaseMode] = useState<'auto' | 'existing' | 'new'>('auto')
   const [uploadTargetDatabase, setUploadTargetDatabase] = useState<string>('')
   const [uploadNewDatabaseName, setUploadNewDatabaseName] = useState<string>('')
 
-  // 嵌入功能相关状态
+  // embed states
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
   const [isEmbedding, setIsEmbedding] = useState(false)
   const [selectedRAGSystem, setSelectedRAGSystem] = useState('hyperrag')
@@ -90,25 +93,22 @@ const Files: React.FC = () => {
     message: string
   }>({} as any)
 
-  // 数据库选择相关状态
+  // embed database selection
   const [embedDatabaseMode, setEmbedDatabaseMode] = useState<'file' | 'existing' | 'new'>('file')
   const [targetDatabase, setTargetDatabase] = useState<string>('')
   const [newDatabaseName, setNewDatabaseName] = useState<string>('')
   const [progressDetails, setProgressDetails] = useState<Record<string, any>>({})
   const [logs, setLogs] = useState<any[]>([])
-  const [showLogs, setShowLogs] = useState(false)
   const [logsVisible, setLogsVisible] = useState(false)
   const [availableDatabases, setAvailableDatabases] = useState<DatabaseInfo[]>([])
 
-  interface DatabaseInfo {
-    name: string
-    description: string
-  }
+  // tab state
+  const [activeTab, setActiveTab] = useState<'files' | 'embed'>('files')
 
   const wsRef = useRef<WebSocket | null>(null)
   const logsEndRef = useRef<HTMLDivElement>(null)
 
-  // 加载文件列表
+  // load files
   const loadFiles = async () => {
     setLoading(true)
     try {
@@ -127,13 +127,12 @@ const Files: React.FC = () => {
     }
   }
 
-  // 加载数据库状态
+  // load database status
   const loadDatabaseStatus = async () => {
     if (!selectedDatabase) {
       setDbStatus(null)
       return
     }
-
     try {
       const response = await fetch(`${SERVER_URL}/database/status?database=${selectedDatabase}`)
       if (response.ok) {
@@ -145,25 +144,22 @@ const Files: React.FC = () => {
     }
   }
 
-  // 加载数据库列表
+  // load databases
   const loadDatabases = async () => {
     try {
       const { storeGlobalUser } = await import('../../store/globalUser')
       await storeGlobalUser.loadDatabases()
-      console.log('数据库列表已更新:', storeGlobalUser.availableDatabases)
-
-      // 同时更新本地的数据库列表状态
       setAvailableDatabases(storeGlobalUser.availableDatabases)
     } catch (error) {
       console.error('加载数据库列表失败:', error)
     }
   }
 
-  // 数据库删除处理函数
+  // delete database
   const handleDeleteDatabase = async (databaseName: string) => {
     Modal.confirm({
       title: '确认删除数据库',
-      content: `确定要删除数据库 "${databaseName}" 吗？此操作将永久删除HyperRAG和Cog-RAG中的所有相关数据，无法恢复。`,
+      content: `确定要删除数据库 "${databaseName}" 吗？此操作将永久删除所有相关数据，无法恢复。`,
       okText: '确认删除',
       okType: 'danger',
       cancelText: '取消',
@@ -172,21 +168,13 @@ const Files: React.FC = () => {
           const response = await fetch(`${SERVER_URL}/databases/${encodeURIComponent(databaseName)}`, {
             method: 'DELETE',
           });
-
           const result = await response.json();
-
           if (result.success) {
             message.success(`数据库 "${databaseName}" 删除成功`);
-
-            // 如果删除的是当前选中的数据库，清除选择
             if (selectedDatabase === databaseName) {
               setSelectedDatabase('');
             }
-
-            // WebSocket会自动刷新列表，但手动刷新作为备份
             await loadDatabases();
-
-            // 清空文件列表（因为这些文件关联的数据库已被删除）
             setFiles([]);
           } else {
             message.error(`删除失败: ${result.message}`);
@@ -199,10 +187,9 @@ const Files: React.FC = () => {
     });
   };
 
-  // WebSocket连接和进度处理
+  // WebSocket
   useEffect(() => {
     connectWebSocket()
-
     return () => {
       if (wsRef.current) {
         wsRef.current.close()
@@ -213,8 +200,6 @@ const Files: React.FC = () => {
   const connectWebSocket = () => {
     try {
       const wsUrl = SERVER_URL.replace('http', 'ws') + '/ws'
-      console.log('连接WebSocket:', wsUrl)
-
       wsRef.current = new WebSocket(wsUrl)
 
       wsRef.current.onopen = () => {
@@ -224,7 +209,6 @@ const Files: React.FC = () => {
       wsRef.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
-          console.log('WebSocket消息:', data)
           handleProgressUpdate(data)
         } catch (error) {
           console.error('解析WebSocket消息失败:', error)
@@ -232,7 +216,6 @@ const Files: React.FC = () => {
       }
 
       wsRef.current.onclose = () => {
-        console.log('WebSocket连接已关闭')
         setTimeout(connectWebSocket, 3000)
       }
 
@@ -254,7 +237,6 @@ const Files: React.FC = () => {
           message: data.message || '处理中...'
         })
         break
-
       case 'file_processing':
         setProgressDetails(prev => ({
           ...prev,
@@ -265,23 +247,19 @@ const Files: React.FC = () => {
           }
         }))
         break
-
       case 'file_completed':
         setProgressDetails(prev => {
           const updated = { ...prev }
           delete updated[data.file_id]
           return updated
         })
-        // 更新文件列表中的状态
         setFiles(prev => prev.map(file =>
           file.file_id === data.file_id
             ? { ...file, status: 'embedded' }
             : file
         ))
-        // 文件嵌入完成后，刷新数据库列表
         loadDatabases()
         break
-
       case 'file_error':
         setProgressDetails(prev => ({
           ...prev,
@@ -296,7 +274,6 @@ const Files: React.FC = () => {
             : file
         ))
         break
-
       case 'all_completed':
         setIsEmbedding(false)
         setEmbeddingProgress({} as any)
@@ -305,14 +282,12 @@ const Files: React.FC = () => {
         message.success('所有文档嵌入完成')
         loadFiles()
         break
-
       case 'error':
         setIsEmbedding(false)
         setEmbeddingProgress({} as any)
         setProgressDetails({})
         message.error(data.error || '嵌入过程出错')
         break
-
       case 'log': {
         const logEntry = {
           id: Date.now() + Math.random(),
@@ -323,71 +298,57 @@ const Files: React.FC = () => {
         setLogs(prev => [...prev.slice(-49), logEntry])
         break
       }
-
       default:
         break
     }
   }
 
-  // 删除文件
+  // delete file
   const deleteFile = async (fileId: string) => {
     setDeleteLoading(true)
     try {
       const response = await fetch(`${SERVER_URL}/files/${fileId}?clean_database=${cleanDatabase}`, {
         method: 'DELETE'
       })
-
       if (response.ok) {
         const data = await response.json()
         message.success(data.message || '文件删除成功')
-        loadFiles() // 重新加载文件列表
-        loadDatabaseStatus() // 更新数据库状态
+        loadFiles()
+        loadDatabaseStatus()
       } else {
         const error = await response.json()
         message.error(error.detail || '文件删除失败')
       }
     } catch (error) {
       console.error('删除文件失败:', error)
-      message.error('删除文件失败')
+      message.error('文件删除失败')
     } finally {
       setDeleteLoading(false)
     }
   }
 
-  // 清空数据库
+  // clear database
   const clearDatabase = async () => {
     setClearLoading(true)
     try {
       const response = await fetch(`${SERVER_URL}/database/clear?database=${selectedDatabase}`, {
         method: 'POST'
       })
-
       if (response.ok) {
-        const data = await response.json()
-        message.success(data.message || '数据库已清空')
-
-        // 清空数据库后，需要刷新数据库列表
+        message.success('数据库已清空')
         try {
-          // 动态导入全局用户状态
           const { storeGlobalUser } = await import('../../store/globalUser')
           await storeGlobalUser.loadDatabases()
-
-          // 刷新本地数据库列表
           await loadDatabases()
-
-          // 如果当前选择的数据库被清空了，清除选择
           if (storeGlobalUser.selectedDatabase === selectedDatabase) {
-            storeGlobalUser.selectedDatabase = ''
-            storeGlobalUser.lastSetDbValue = ''
-            localStorage.removeItem('selectedDatabase')
-            setSelectedDatabase('') // 同时更新本地状态
+            storeGlobalUser.setSelectedDatabase('')
+            setSelectedDatabase('')
           }
         } catch (error) {
           console.error('刷新数据库列表失败:', error)
         }
-
-        loadDatabaseStatus() // 更新数据库状态
-        loadFiles() // 重新加载文件列表
+        loadDatabaseStatus()
+        loadFiles()
       } else {
         const error = await response.json()
         message.error(error.detail || '清空数据库失败')
@@ -400,25 +361,22 @@ const Files: React.FC = () => {
     }
   }
 
-  // 格式化文件大小
+  // format file size
   const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) {
-      return '0 B'
-    }
+    if (bytes === 0) return '0 B'
     const k = 1024
     const sizes = ['B', 'KB', 'MB', 'GB']
     const i = Math.floor(Math.log(bytes) / Math.log(k))
     return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
   }
 
-  // 处理文件上传
+  // handle upload
   const handleUpload = async () => {
     if (fileList.length === 0) {
       message.warning('请选择要上传的文件')
       return
     }
 
-    // 验证数据库选择
     let finalTargetDatabase: string | null = null
     if (uploadDatabaseMode === 'existing') {
       if (!uploadTargetDatabase) {
@@ -434,27 +392,15 @@ const Files: React.FC = () => {
       finalTargetDatabase = uploadNewDatabaseName.trim()
     }
 
-    console.log('开始上传，fileList:', fileList)
-    console.log('fileList详情:', fileList.map(f => ({
-      name: f.name,
-      hasOriginFileObj: !!f.originFileObj,
-      originFileObjType: f.originFileObj?.constructor.name,
-      fileSize: f.originFileObj?.size
-    })))
-
     setUploadLoading(true)
     setUploadProgress(0)
 
     try {
       const formData = new FormData()
-
-      // 确保每个文件都有originFileObj
       const validFiles = fileList.filter(file => file.originFileObj)
 
-      console.log('有效的文件:', validFiles.map(f => f.name))
-
       if (validFiles.length === 0) {
-        message.error('没有有效的文件可以上传，请重新选择文件')
+        message.error('没有有效的文件可以上传')
         setUploadLoading(false)
         return
       }
@@ -462,19 +408,13 @@ const Files: React.FC = () => {
       validFiles.forEach((file) => {
         if (file.originFileObj) {
           formData.append('files', file.originFileObj)
-          console.log('添加文件到FormData:', file.name, '大小:', file.originFileObj.size)
         }
       })
 
-      // 添加目标数据库参数（如果指定）
       if (finalTargetDatabase) {
         formData.append('target_database', finalTargetDatabase)
-        console.log('目标数据库:', finalTargetDatabase)
       }
 
-      console.log('FormData构建完成，包含文件数:', formData.getAll('files').length)
-
-      // 模拟上传进度
       const progressInterval = setInterval(() => {
         setUploadProgress((prev) => {
           if (prev >= 90) {
@@ -488,23 +428,17 @@ const Files: React.FC = () => {
       const response = await fetch(`${SERVER_URL}/files/upload`, {
         method: 'POST',
         body: formData,
-        // 不设置Content-Type，让浏览器自动设置multipart/form-data边界
       })
 
       clearInterval(progressInterval)
       setUploadProgress(100)
 
-      console.log('上传响应状态:', response.status, response.statusText)
-
       if (response.ok) {
         const data = await response.json()
-        console.log('上传响应数据:', data)
-
         const successCount = data.files?.filter((f: any) => f.status === 'uploaded').length || 0
         const errorCount = data.files?.filter((f: any) => f.status === 'error').length || 0
 
         if (errorCount > 0) {
-          // 显示具体错误信息
           const errorFiles = data.files?.filter((f: any) => f.status === 'error')
           const errorDetails = errorFiles?.map((f: any) => `${f.filename}: ${f.error}`).join('\n') || ''
           message.warning(`上传完成：成功 ${successCount} 个，失败 ${errorCount} 个${errorDetails ? '\n' + errorDetails : ''}`)
@@ -512,13 +446,11 @@ const Files: React.FC = () => {
           message.success(`成功上传 ${successCount} 个文件`)
         }
 
-        // 清空文件列表并关闭弹窗
         setFileList([])
         setUploadModalVisible(false)
         loadFiles()
       } else {
         const errorText = await response.text()
-        console.error('上传失败响应:', errorText)
         try {
           const errorData = JSON.parse(errorText)
           message.error(`文件上传失败: ${errorData.detail || errorData.message || '未知错误'}`)
@@ -535,14 +467,13 @@ const Files: React.FC = () => {
     }
   }
 
-  // 处理文档嵌入
+  // handle embed
   const handleEmbedDocuments = async () => {
     if (selectedFileIds.size === 0) {
       message.warning('请先选择要嵌入的文档')
       return
     }
 
-    // 验证数据库选择
     let finalTargetDatabase: string | null = null
     if (embedDatabaseMode === 'existing') {
       if (!targetDatabase) {
@@ -567,9 +498,7 @@ const Files: React.FC = () => {
     try {
       const response = await fetch(`${SERVER_URL}/files/embed-with-progress`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           file_ids: Array.from(selectedFileIds),
           chunk_size: chunkSize,
@@ -594,7 +523,7 @@ const Files: React.FC = () => {
     }
   }
 
-  // 处理文件选择
+  // file selection
   const handleFileSelection = (fileId: string, checked: boolean) => {
     setSelectedFileIds(prev => {
       const newSet = new Set(prev)
@@ -607,7 +536,16 @@ const Files: React.FC = () => {
     })
   }
 
-  // 上传组件配置
+  // select all
+  const handleSelectAll = () => {
+    if (selectedFileIds.size === files.length) {
+      setSelectedFileIds(new Set())
+    } else {
+      setSelectedFileIds(new Set(files.map(f => f.file_id)))
+    }
+  }
+
+  // upload props
   const uploadProps: UploadProps = {
     multiple: true,
     fileList,
@@ -618,9 +556,6 @@ const Files: React.FC = () => {
       setFileList(newFileList)
     },
     beforeUpload: (file) => {
-      console.log('beforeUpload 被调用, file:', file.name, 'size:', file.size, 'type:', file.type)
-
-      // 检查文件类型
       const allowedExtensions = ['txt', 'md', 'pdf', 'doc', 'docx', 'csv']
       const fileExtension = file.name.split('.').pop()?.toLowerCase()
 
@@ -629,150 +564,66 @@ const Files: React.FC = () => {
         return false
       }
 
-      // 检查文件大小 (限制为50MB)
       const isLt50M = file.size / 1024 / 1024 < 50
       if (!isLt50M) {
         message.error('文件大小不能超过 50MB')
         return false
       }
 
-      // 返回false阻止自动上传，文件会被添加到fileList中
       return false
     },
     onChange: (info) => {
-      console.log('Upload onChange:', info)
-      console.log('当前fileList:', info.fileList)
-      // 更新fileList状态
       setFileList(info.fileList)
     },
-    // 移除customRequest，让Upload组件正常处理文件
   }
 
-  // 表格列定义
-  const columns: ColumnsType<FileInfo> = [
-    {
-      title: '选择',
-      key: 'selection',
-      width: 60,
-      render: (_: any, record: FileInfo) => (
-        <Checkbox
-          checked={selectedFileIds.has(record.file_id)}
-          onChange={(e) => handleFileSelection(record.file_id, e.target.checked)}
-          disabled={isEmbedding}
-        />
-      )
-    },
-    {
-      title: '文件名',
-      dataIndex: 'original_filename',
-      key: 'original_filename',
-      ellipsis: true,
-      render: (filename: string) => (
-        <Tooltip title={filename}>
-          <span>{filename}</span>
-        </Tooltip>
-      )
-    },
-    {
-      title: '文件大小',
-      dataIndex: 'file_size',
-      key: 'file_size',
-      width: 120,
-      render: (size: number) => formatFileSize(size)
-    },
-    {
-      title: '上传时间',
-      dataIndex: 'upload_time',
-      key: 'upload_time',
-      width: 180,
-      render: (time: string) => new Date(time).toLocaleString('zh-CN')
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 100,
-      render: (status: string, record: FileInfo) => {
-        const statusConfig: Record<string, { color: string; text: string }> = {
-          'uploaded': { color: 'default', text: '已上传' },
-          'embedded': { color: 'success', text: '已嵌入' },
-          'error': { color: 'error', text: '错误' }
-        }
-        const config = statusConfig[status] || { color: 'default', text: status }
-
-        // 如果正在嵌入，显示处理状态
-        if (progressDetails[record.file_id]) {
-          return (
-            <Space direction="vertical" size="small">
-              <Tag color="processing">处理中</Tag>
-              <Text type="secondary" style={{ fontSize: '12px' }}>
-                {progressDetails[record.file_id].message}
-              </Text>
-            </Space>
-          )
-        }
-
-        return <Tag color={config.color}>{config.text}</Tag>
-      }
-    },
-    {
-      title: '操作',
-      key: 'action',
-      width: 150,
-      render: (_: any, record: FileInfo) => (
-        <Space>
-          <Popconfirm
-            title="删除文件"
-            description={
-              <div>
-                <p>确定要删除文件 &quot;{record.filename}&quot; 吗？</p>
-                <div style={{ marginTop: 8 }}>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={cleanDatabase}
-                      onChange={(e) => setCleanDatabase(e.target.checked)}
-                      style={{ marginRight: 4 }}
-                    />
-                    同时清理数据库中的嵌入数据
-                  </label>
-                </div>
-              </div>
-            }
-            onConfirm={() => deleteFile(record.file_id)}
-            okText="确定"
-            cancelText="取消"
-          >
-            <Button
-              type="text"
-              danger
-              size="small"
-              icon={<DeleteOutlined />}
-              loading={deleteLoading}
-            >
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
-      )
+  // get file type icon and label
+  const getFileTypeInfo = (filename: string) => {
+    const ext = filename?.split('.').pop()?.toLowerCase() || ''
+    switch (ext) {
+      case 'pdf':
+        return { label: 'PDF', color: 'text-red-500', bg: 'bg-red-50' }
+      case 'doc':
+      case 'docx':
+        return { label: 'DOC', color: 'text-blue-500', bg: 'bg-blue-50' }
+      case 'md':
+        return { label: 'MD', color: 'text-purple-500', bg: 'bg-purple-50' }
+      case 'txt':
+        return { label: 'TXT', color: 'text-gray-500', bg: 'bg-gray-50' }
+      case 'csv':
+        return { label: 'CSV', color: 'text-green-500', bg: 'bg-green-50' }
+      default:
+        return { label: ext.toUpperCase() || 'FILE', color: 'text-gray-500', bg: 'bg-gray-50' }
     }
-  ]
+  }
+
+  // status config
+  const getStatusInfo = (status: string, fileId: string) => {
+    if (progressDetails[fileId]) {
+      return { label: '处理中', className: 'text-blue-600', dot: 'bg-blue-500' }
+    }
+    switch (status) {
+      case 'embedded':
+        return { label: '已嵌入', className: 'text-green-600', dot: 'bg-green-500' }
+      case 'error':
+        return { label: '错误', className: 'text-red-500', dot: 'bg-red-500' }
+      default:
+        return { label: '已上传', className: 'text-gray-400', dot: 'bg-gray-300' }
+    }
+  }
 
   useEffect(() => {
     loadFiles()
     loadDatabaseStatus()
-    // 加载数据库列表
     loadDatabases()
   }, [])
 
-  // 当数据库列表更新时，如果当前没有选择数据库，自动选择第一个
   useEffect(() => {
     if (!selectedDatabase && availableDatabases.length > 0) {
       setSelectedDatabase(availableDatabases[0].name)
     }
   }, [availableDatabases])
 
-  // 当数据库列表更新时，如果当前选择的数据库不存在了，清除选择
   useEffect(() => {
     if (selectedDatabase && availableDatabases.length > 0) {
       const exists = availableDatabases.find(db => db.name === selectedDatabase)
@@ -782,351 +633,535 @@ const Files: React.FC = () => {
     }
   }, [availableDatabases, selectedDatabase])
 
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [logs])
+
+  const tabs = [
+    { key: 'files' as const, label: '文档' },
+    { key: 'embed' as const, label: '嵌入配置' },
+  ]
+
   return (
-    <div className="m-2">
-      <Card>
-        <div className="mb-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center text-2xl font-bold">
-              <DatabaseOutlined style={{ marginRight: '8px' }} />
-              文件管理
-            </div>
-            <Space>
-              <Button
-                type="primary"
-                icon={<CloudUploadOutlined />}
-                onClick={() => setUploadModalVisible(true)}
-              >
-                上传文档
-              </Button>
-              <Select
-                value={selectedDatabase}
-                onChange={setSelectedDatabase}
-                style={{ width: 200 }}
-                placeholder="选择数据库"
-                loading={availableDatabases.length === 0}
-              >
-                {availableDatabases.map((db) => (
-                  <Select.Option key={db.name} value={db.name}>
-                    {db.description}
-                  </Select.Option>
-                ))}
-              </Select>
-              {selectedDatabase && (
-                <Button
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={() => handleDeleteDatabase(selectedDatabase)}
-                >
-                  删除数据库
-                </Button>
-              )}
-              <Button
-                icon={<ReloadOutlined />}
+    <div className="px-6 py-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">文件管理</h1>
+          <p className="text-sm text-gray-500 mt-1">上传文档，AI 解析构建知识图谱</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select
+            value={selectedDatabase}
+            onChange={setSelectedDatabase}
+            style={{ width: 200 }}
+            placeholder="选择数据库"
+            loading={availableDatabases.length === 0}
+            size="middle"
+          >
+            {availableDatabases.map((db) => (
+              <Select.Option key={db.name} value={db.name}>
+                {db.description}
+              </Select.Option>
+            ))}
+          </Select>
+          <button
+            onClick={() => {
+              loadFiles()
+              loadDatabaseStatus()
+              loadDatabases()
+            }}
+            className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            title="刷新"
+          >
+            <ReloadOutlined />
+          </button>
+        </div>
+      </div>
+
+      {/* Database Status Card */}
+      {dbStatus && (
+        <div className="bg-white border border-gray-100 rounded-xl p-5 mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-gray-700 flex items-center gap-2">
+              <DatabaseOutlined className="text-blue-500" />
+              数据库: {selectedDatabase}
+            </h3>
+            <div className="flex items-center gap-2">
+              <button
                 onClick={() => {
-                  loadFiles()
-                  loadDatabaseStatus()
-                  loadDatabases() // 添加数据库列表刷新
+                  Modal.confirm({
+                    title: '确认清空数据库',
+                    content: '这将清空数据库中的所有数据，包括所有文档的嵌入数据、实体关系等。此操作不可恢复！',
+                    okText: '确定清空',
+                    okType: 'danger',
+                    cancelText: '取消',
+                    onOk: clearDatabase,
+                  });
                 }}
+                disabled={clearLoading}
+                className="px-3 py-1.5 text-xs text-red-500 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
               >
-                刷新
-              </Button>
-            </Space>
+                {clearLoading ? '清空中...' : '清空'}
+              </button>
+              <button
+                onClick={() => handleDeleteDatabase(selectedDatabase)}
+                disabled={deleteLoading}
+                className="px-3 py-1.5 text-xs text-red-500 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+              >
+                删除数据库
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-3">
+            <div className="text-center p-3 bg-gray-50 rounded-lg">
+              <div className={`text-lg font-bold ${dbStatus.exists ? 'text-green-600' : 'text-red-500'}`}>
+                {dbStatus.exists ? '存在' : '不存在'}
+              </div>
+              <div className="text-xs text-gray-500">状态</div>
+            </div>
+            <div className="text-center p-3 bg-gray-50 rounded-lg">
+              <div className={`text-lg font-bold ${dbStatus.has_instance ? 'text-green-600' : 'text-amber-500'}`}>
+                {dbStatus.has_instance ? '已加载' : '未加载'}
+              </div>
+              <div className="text-xs text-gray-500">内存实例</div>
+            </div>
+            <div className="text-center p-3 bg-gray-50 rounded-lg">
+              <div className="text-lg font-bold text-gray-900">{dbStatus.size_mb?.toFixed(2)}</div>
+              <div className="text-xs text-gray-500">MB 占用</div>
+            </div>
+            <div className="text-center p-3 bg-gray-50 rounded-lg">
+              <div className="text-lg font-bold text-gray-900">{files.length}</div>
+              <div className="text-xs text-gray-500">个文件</div>
+            </div>
           </div>
         </div>
+      )}
 
-        {/* 数据库状态信息 */}
-        {dbStatus && (
-          <Card
-            size="small"
-            style={{ marginBottom: 16 }}
-            title={
-              <span>
-                <DatabaseOutlined style={{ marginRight: 8 }} />
-                数据库状态: {selectedDatabase}
-              </span>
-            }
-            extra={
-              <Popconfirm
-                title="清空数据库"
-                description={
-                  <Alert
-                    message="危险操作"
-                    description="这将清空数据库中的所有数据，包括所有文档的嵌入数据、实体关系等。此操作不可恢复！"
-                    type="error"
-                    showIcon
-                    style={{ marginTop: 8 }}
-                  />
-                }
-                onConfirm={clearDatabase}
-                okText="确定清空"
-                cancelText="取消"
-                okButtonProps={{ danger: true }}
-              >
-                <Button
-                  danger
-                  size="small"
-                  icon={<ClearOutlined />}
-                  loading={clearLoading}
-                >
-                  清空数据库
-                </Button>
-              </Popconfirm>
-            }
+      {/* Tab Bar */}
+      <div className="flex border-b border-gray-200 mb-6">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === tab.key
+                ? 'border-gray-900 text-gray-900'
+                : 'border-transparent text-gray-400 hover:text-gray-600'
+            }`}
           >
-            <Row gutter={16}>
-              <Col span={6}>
-                <Statistic
-                  title="状态"
-                  value={dbStatus.exists ? '存在' : '不存在'}
-                  valueStyle={{ color: dbStatus.exists ? '#3f8600' : '#cf1322' }}
-                />
-              </Col>
-              <Col span={6}>
-                <Statistic
-                  title="内存实例"
-                  value={dbStatus.has_instance ? '已加载' : '未加载'}
-                  valueStyle={{ color: dbStatus.has_instance ? '#3f8600' : '#faad14' }}
-                />
-              </Col>
-              <Col span={6}>
-                <Statistic
-                  title="占用空间"
-                  value={dbStatus.size_mb}
-                  suffix="MB"
-                  precision={2}
-                />
-              </Col>
-              <Col span={6}>
-                <Statistic
-                  title="文件数量"
-                  value={files.length}
-                  suffix="个"
-                />
-              </Col>
-            </Row>
-          </Card>
-        )}
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-        {/* 重要提示 */}
-        <Alert
-          message="重要提示"
-          description={
-            <div>
-              <p>• 删除文件时，建议勾选&quot;同时清理数据库中的嵌入数据&quot;以保持数据一致性</p>
-              <p>• 清空数据库将删除所有嵌入数据，需要重新嵌入文档</p>
-              <p>• 切换嵌入模型维度时，必须清空数据库并重新嵌入</p>
+      {/* Files Tab */}
+      {activeTab === 'files' && (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <p className="text-sm text-gray-500">{files.length} 个文档</p>
+              {files.length > 0 && (
+                    <button
+                    onClick={handleSelectAll}
+                    className="text-xs text-blue-600 hover:text-blue-700 transition-colors"
+                  >
+                    {selectedFileIds.size === files.length ? '取消全选' : '全选'}
+                  </button>
+                )}
+              {selectedFileIds.size > 0 && (
+                <span className="text-xs text-gray-400">
+                  已选 {selectedFileIds.size} 个
+                </span>
+              )}
             </div>
-          }
-          type="warning"
-          showIcon
-          style={{ marginBottom: 16 }}
-        />
+            <div className="flex gap-2">
+              {selectedFileIds.size > 0 && (
+                <button
+                  onClick={handleEmbedDocuments}
+                  disabled={isEmbedding}
+                  className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                >
+                  <ThunderboltOutlined />
+                  {isEmbedding ? '嵌入中...' : `嵌入 (${selectedFileIds.size})`}
+                </button>
+              )}
+              <button
+                onClick={() => setUploadModalVisible(true)}
+                className="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-1.5"
+              >
+                <CloudUploadOutlined />
+                上传文档
+              </button>
+            </div>
+          </div>
 
-        {/* 嵌入功能面板 */}
-        <Card
-          size="small"
-          style={{ marginBottom: 16 }}
-          title={
-            <span>
-              <ThunderboltOutlined style={{ marginRight: 8 }} />
-              文档嵌入
-            </span>
-          }
-        >
-          {/* 数据库选择模式 */}
-          <div style={{ marginBottom: 16 }}>
-            <Text strong>目标数据库:</Text>
+          {/* Embedding Progress */}
+          {isEmbedding && embeddingProgress.total > 0 && (
+            <div className="bg-white border border-gray-100 rounded-xl p-5 mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-gray-700">嵌入进度</span>
+                <span className="text-xs text-gray-500">
+                  {embeddingProgress.current || 0}/{embeddingProgress.total}
+                </span>
+              </div>
+              <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden mb-2">
+                <div
+                  className="h-full bg-green-500 rounded-full transition-all"
+                  style={{ width: `${embeddingProgress.percentage || 0}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-400">{embeddingProgress.message || '处理中...'}</p>
+
+              {Object.keys(progressDetails).length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {Object.entries(progressDetails).map(([fileId, details]: [string, any]) => (
+                    <div key={fileId} className="text-xs p-2 bg-gray-50 rounded-lg">
+                      <span className="font-medium text-gray-700">{details.filename}</span>
+                      <span className="text-gray-400 ml-2">{details.message}</span>
+                      {details.error && (
+                        <span className="text-red-500 ml-2">{details.error}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between mt-3">
+                <button
+                  onClick={() => setLogsVisible(true)}
+                  className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  查看日志 ({logs.length})
+                </button>
+                <button
+                  onClick={() => {
+                    setIsEmbedding(false)
+                    setEmbeddingProgress({} as any)
+                    setProgressDetails({})
+                    setLogs([])
+                  }}
+                  className="text-xs text-red-400 hover:text-red-600 transition-colors"
+                >
+                  取消嵌入
+                </button>
+              </div>
+            </div>
+          )}
+
+          {loading ? (
+            <div className="text-center py-12 text-gray-400">加载中...</div>
+          ) : files.length === 0 ? (
+            <div className="text-center py-16 bg-white border border-gray-100 rounded-xl">
+              <p className="text-gray-400 mb-2">还没有文档</p>
+              <p className="text-xs text-gray-300 mb-4">支持 TXT, MD, PDF, DOC, DOCX, CSV 格式</p>
+              <button
+                onClick={() => setUploadModalVisible(true)}
+                className="text-blue-600 text-sm hover:text-blue-700 transition-colors"
+              >
+                上传第一个文档
+              </button>
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {files.map((file) => {
+                const typeInfo = getFileTypeInfo(file.original_filename || file.filename)
+                const statusInfo = getStatusInfo(file.status, file.file_id)
+                const isSelected = selectedFileIds.has(file.file_id)
+
+                return (
+                  <div
+                    key={file.file_id}
+                    className={`bg-white border rounded-xl p-4 hover:shadow-sm transition-all cursor-pointer flex flex-col group ${
+                      isSelected ? 'border-blue-300 bg-blue-50/30' : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    onClick={() => handleFileSelection(file.file_id, !isSelected)}
+                  >
+                    {/* Header: type badge + filename + actions */}
+                    <div className="flex items-start gap-3 mb-3">
+                      <div className={`w-10 h-10 rounded-lg ${typeInfo.bg} flex items-center justify-center text-xs font-medium ${typeInfo.color} uppercase shrink-0`}>
+                        {typeInfo.label}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-medium text-gray-900 truncate text-sm" title={file.original_filename || file.filename}>
+                          {file.original_filename || file.filename}
+                        </h3>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {formatFileSize(file.file_size)}
+                          {file.database_name && (
+                            <>
+                              {' · '}
+                              <span className="text-blue-500">{file.database_name}</span>
+                            </>
+                          )}
+                        </p>
+                      </div>
+                      {/* ... menu */}
+                      <Dropdown
+                        menu={{
+                          items: [
+                            ...(file.database_name ? [{
+                              key: 'graph',
+                              label: '查看图谱',
+                              onClick: () => navigate(`/Hyper/show`),
+                            }] : []),
+                            ...(file.database_name ? [{
+                              key: 'chat',
+                              label: '开始检索',
+                              onClick: async () => {
+                                const { storeGlobalUser } = await import('../../store/globalUser')
+                                storeGlobalUser.setSelectedDatabase(file.database_name || '')
+                                navigate('/Hyper/chat')
+                              },
+                            }] : []),
+                            { type: 'divider' as const },
+                            {
+                              key: 'delete',
+                              label: '删除文件',
+                              danger: true,
+                              onClick: () => {
+                                Modal.confirm({
+                                  title: '删除文件',
+                                  content: (
+                                    <div>
+                                      <p>确定要删除文件 &quot;{file.filename}&quot; 吗？</p>
+                                      <div style={{ marginTop: 8 }}>
+                                        <label className="flex items-center gap-1.5 text-sm text-gray-500">
+                                          <input
+                                            type="checkbox"
+                                            checked={cleanDatabase}
+                                            onChange={(e) => setCleanDatabase(e.target.checked)}
+                                          />
+                                          同时清理数据库中的嵌入数据
+                                        </label>
+                                      </div>
+                                    </div>
+                                  ),
+                                  onOk: () => deleteFile(file.file_id),
+                                  okText: '确定',
+                                  cancelText: '取消',
+                                });
+                              },
+                            },
+                          ],
+                        }}
+                        trigger={['click']}
+                      >
+                        <button
+                          onClick={(e) => e.stopPropagation()}
+                          className="p-1 text-gray-300 hover:text-gray-500 transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                          </svg>
+                        </button>
+                      </Dropdown>
+                    </div>
+
+                    {/* Status bar */}
+                    <div className="mt-auto pt-2 border-t border-gray-50">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          {/* Status indicator: thin bar */}
+                          <div className={`h-1 w-8 rounded-full ${
+                            file.status === 'embedded' ? 'bg-green-400' :
+                            file.status === 'error' ? 'bg-red-400' :
+                            progressDetails[file.file_id] ? 'bg-blue-400 animate-pulse' :
+                            'bg-gray-200'
+                          }`} />
+                          <span className={`text-xs ${
+                            file.status === 'embedded' ? 'text-green-600' :
+                            file.status === 'error' ? 'text-red-500' :
+                            progressDetails[file.file_id] ? 'text-blue-600' :
+                            'text-gray-400'
+                          }`}>
+                            {statusInfo.label}
+                          </span>
+                        </div>
+                        <span className="text-xs text-gray-300">
+                          {new Date(file.upload_time).toLocaleDateString('zh-CN')}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Embed Tab */}
+      {activeTab === 'embed' && (
+        <div className="space-y-4">
+          {/* Target Database */}
+          <div className="bg-white border border-gray-100 rounded-xl p-5">
+            <h3 className="text-sm font-medium text-gray-700 mb-3">目标数据库</h3>
             <RadioGroup
               value={embedDatabaseMode}
               onChange={(e) => setEmbedDatabaseMode(e.target.value)}
-              style={{ marginLeft: 12 }}
               disabled={isEmbedding}
             >
               <Radio value="file">使用文件关联数据库</Radio>
               <Radio value="existing">嵌入到已有数据库</Radio>
               <Radio value="new">创建新数据库</Radio>
             </RadioGroup>
+
+            {embedDatabaseMode === 'existing' && (
+              <div className="mt-3">
+                <Select
+                  value={targetDatabase}
+                  onChange={setTargetDatabase}
+                  style={{ width: '100%' }}
+                  placeholder="选择目标数据库"
+                  disabled={isEmbedding}
+                >
+                  {availableDatabases.map((db) => (
+                    <Select.Option key={db.name} value={db.name}>
+                      {db.description || db.name}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </div>
+            )}
+
+            {embedDatabaseMode === 'new' && (
+              <div className="mt-3">
+                <Input
+                  value={newDatabaseName}
+                  onChange={(e) => setNewDatabaseName(e.target.value)}
+                  placeholder="输入新数据库名称"
+                  disabled={isEmbedding}
+                  prefix={<PlusOutlined />}
+                />
+              </div>
+            )}
           </div>
 
-          {/* 根据模式显示不同的选择器 */}
-          {embedDatabaseMode === 'existing' && (
-            <div style={{ marginBottom: 16 }}>
-              <Text strong>选择数据库:</Text>
-              <Select
-                value={targetDatabase}
-                onChange={setTargetDatabase}
-                style={{ width: '100%', marginTop: 4 }}
-                placeholder="选择目标数据库"
-                disabled={isEmbedding}
-              >
-                {availableDatabases.map((db) => (
-                  <Select.Option key={db.name} value={db.name}>
-                    {db.description || db.name}
-                  </Select.Option>
-                ))}
-              </Select>
-            </div>
-          )}
-
-          {embedDatabaseMode === 'new' && (
-            <div style={{ marginBottom: 16 }}>
-              <Text strong>新数据库名称:</Text>
-              <Input
-                value={newDatabaseName}
-                onChange={(e) => setNewDatabaseName(e.target.value)}
-                placeholder="输入新数据库名称（字母、数字、下划线、中文）"
-                style={{ marginTop: 4 }}
-                disabled={isEmbedding}
-                prefix={<PlusOutlined />}
-              />
-            </div>
-          )}
-
-          <Row gutter={16} align="middle">
-            <Col span={6}>
+          {/* Parameters */}
+          <div className="bg-white border border-gray-100 rounded-xl p-5">
+            <h3 className="text-sm font-medium text-gray-700 mb-3">嵌入参数</h3>
+            <div className="grid grid-cols-3 gap-4">
               <div>
-                <Text strong>RAG系统:</Text>
+                <label className="text-xs text-gray-500 block mb-1">RAG 系统</label>
                 <Select
                   value={selectedRAGSystem}
                   onChange={setSelectedRAGSystem}
-                  style={{ width: '100%', marginTop: 4 }}
+                  style={{ width: '100%' }}
                   disabled={isEmbedding}
                 >
                   <Select.Option value="hyperrag">HyperRAG</Select.Option>
                   <Select.Option value="cograg">Cog-RAG</Select.Option>
                 </Select>
               </div>
-            </Col>
-            <Col span={6}>
               <div>
-                <Text strong>分块大小:</Text>
+                <label className="text-xs text-gray-500 block mb-1">分块大小</label>
                 <InputNumber
                   value={chunkSize}
-                  onChange={setChunkSize}
+                  onChange={(v) => setChunkSize(v || 1000)}
                   min={100}
                   max={5000}
                   step={100}
-                  style={{ width: '100%', marginTop: 4 }}
+                  style={{ width: '100%' }}
                   disabled={isEmbedding}
                 />
               </div>
-            </Col>
-            <Col span={6}>
               <div>
-                <Text strong>重叠大小:</Text>
+                <label className="text-xs text-gray-500 block mb-1">重叠大小</label>
                 <InputNumber
                   value={chunkOverlap}
-                  onChange={setChunkOverlap}
+                  onChange={(v) => setChunkOverlap(v || 0)}
                   min={0}
                   max={1000}
                   step={50}
-                  style={{ width: '100%', marginTop: 4 }}
+                  style={{ width: '100%' }}
                   disabled={isEmbedding}
                 />
               </div>
-            </Col>
-            <Col span={6}>
-              <Button
-                type="primary"
-                icon={<ThunderboltOutlined />}
-                onClick={handleEmbedDocuments}
-                disabled={selectedFileIds.size === 0 || isEmbedding}
-                loading={isEmbedding}
-                block
-              >
-                {isEmbedding ? '嵌入中...' : `嵌入文档 (${selectedFileIds.size})`}
-              </Button>
-            </Col>
-          </Row>
+            </div>
+          </div>
 
-          {/* 嵌入进度显示 */}
+          {/* Embedding Progress in Embed Tab */}
           {isEmbedding && embeddingProgress.total > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <Row gutter={16}>
-                <Col span={18}>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <Text strong>嵌入进度:</Text>
-                      <Text>{embeddingProgress.current || 0}/{embeddingProgress.total}</Text>
-                    </div>
-                    <Progress
-                      percent={embeddingProgress.percentage || 0}
-                      status={embeddingProgress.percentage === 100 ? 'success' : 'active'}
-                    />
-                    <Text type="secondary" style={{ fontSize: '12px' }}>
-                      {embeddingProgress.message || '处理中...'}
-                    </Text>
-                  </div>
-                </Col>
-                <Col span={6}>
-                  <Button
-                    danger
-                    onClick={() => {
-                      setIsEmbedding(false)
-                      setEmbeddingProgress({} as any)
-                      setProgressDetails({})
-                      setLogs([])
-                    }}
-                    block
-                  >
-                    取消嵌入
-                  </Button>
-                </Col>
-              </Row>
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium text-gray-300">嵌入进度</h3>
+                {isEmbedding && (
+                  <span className="text-xs text-amber-400 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse" />
+                    文档嵌入需要调用 AI 模型，请耐心等待
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-green-500 rounded-full transition-all"
+                    style={{ width: `${embeddingProgress.percentage || 0}%` }}
+                  />
+                </div>
+                <span className="text-xs text-gray-400">
+                  {embeddingProgress.percentage?.toFixed(1) || 0}%
+                </span>
+              </div>
+              <p className="text-xs text-gray-400 mb-2">
+                {embeddingProgress.current || 0}/{embeddingProgress.total} — {embeddingProgress.message || '处理中...'}
+              </p>
 
-              {/* 处理中的文件详情 */}
               {Object.keys(progressDetails).length > 0 && (
-                <div style={{ marginTop: 12 }}>
-                  <Text strong>处理中的文件:</Text>
-                  <div style={{ marginTop: 8, maxHeight: 150, overflowY: 'auto' }}>
-                    {Object.entries(progressDetails).map(([fileId, details]: [string, any]) => (
-                      <div key={fileId} style={{ padding: '8px', borderBottom: '1px solid #f0f0f0' }}>
-                        <Text strong>{details.filename}</Text>
-                        <br />
-                        <Text type="secondary" style={{ fontSize: '12px' }}>
-                          {details.message}
-                        </Text>
-                        {details.error && (
-                          <Text type="danger" style={{ fontSize: '12px', display: 'block' }}>
-                            {details.error}
-                          </Text>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                <div className="space-y-1 mt-2">
+                  {Object.entries(progressDetails).map(([fileId, details]: [string, any]) => (
+                    <div key={fileId} className={`text-xs ${
+                      details.error ? 'text-red-400' : 'text-gray-400'
+                    }`}>
+                      {details.filename}: {details.message}
+                      {details.error && ` — ${details.error}`}
+                    </div>
+                  ))}
                 </div>
               )}
 
-              {/* 日志显示按钮 */}
-              <div style={{ marginTop: 8 }}>
-                <Button
-                  size="small"
+              <div className="flex items-center justify-between mt-3">
+                <button
                   onClick={() => setLogsVisible(true)}
-                  icon={<DatabaseOutlined />}
+                  className="text-xs text-gray-400 hover:text-gray-300 transition-colors"
                 >
-                  查看详细日志 ({logs.length})
-                </Button>
+                  查看完整日志 ({logs.length})
+                </button>
+                <button
+                  onClick={() => {
+                    setIsEmbedding(false)
+                    setEmbeddingProgress({} as any)
+                    setProgressDetails({})
+                    setLogs([])
+                  }}
+                  className="text-xs text-red-400 hover:text-red-300 transition-colors"
+                >
+                  取消嵌入
+                </button>
               </div>
             </div>
           )}
-        </Card>
 
-        {/* 文件列表 */}
-        <Table
-          columns={columns}
-          dataSource={files}
-          rowKey="file_id"
-          loading={loading}
-          pagination={{
-            pageSize: 10,
-            showSizeChanger: true,
-            showTotal: (total) => `共 ${total} 个文件`
-          }}
-        />
-      </Card>
+          {/* Action */}
+          <button
+            onClick={handleEmbedDocuments}
+            disabled={selectedFileIds.size === 0 || isEmbedding}
+            className="w-full px-4 py-2.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+          >
+            <ThunderboltOutlined />
+            {isEmbedding ? '嵌入中...' : `嵌入选中文档 (${selectedFileIds.size})`}
+          </button>
 
-      {/* 上传文件弹窗 */}
+          {selectedFileIds.size === 0 && (
+            <p className="text-xs text-gray-400 text-center">
+              请先在「文档」标签页中选择要嵌入的文件
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Upload Modal */}
       <Modal
         title="上传文档"
         open={uploadModalVisible}
@@ -1147,24 +1182,20 @@ const Files: React.FC = () => {
         }}
         width={600}
       >
-        <Space direction="vertical" style={{ width: '100%' }} size="large">
-          <div>
-            <Text strong>支持文件类型：</Text>
-            <Text type="secondary">TXT, MD, PDF, DOC, DOCX, CSV</Text>
+        <div className="space-y-4">
+          <div className="flex items-center gap-4 text-sm">
+            <span className="text-gray-500">支持格式：</span>
+            <span className="text-gray-400">TXT, MD, PDF, DOC, DOCX, CSV</span>
+            <span className="text-gray-400">·</span>
+            <span className="text-gray-400">单文件最大 50MB</span>
           </div>
 
+          {/* Database Selection */}
           <div>
-            <Text strong>文件大小限制：</Text>
-            <Text type="secondary">单个文件最大 50MB</Text>
-          </div>
-
-          {/* 数据库选择 */}
-          <div>
-            <Text strong>目标数据库:</Text>
+            <label className="text-sm font-medium text-gray-700 block mb-2">目标数据库</label>
             <RadioGroup
               value={uploadDatabaseMode}
               onChange={(e) => setUploadDatabaseMode(e.target.value)}
-              style={{ marginLeft: 12 }}
               disabled={uploadLoading}
             >
               <Radio value="auto">自动（文件名）</Radio>
@@ -1193,7 +1224,7 @@ const Files: React.FC = () => {
             <Input
               value={uploadNewDatabaseName}
               onChange={(e) => setUploadNewDatabaseName(e.target.value)}
-              placeholder="输入新数据库名称（字母、数字、下划线、中文）"
+              placeholder="输入新数据库名称"
               disabled={uploadLoading}
               prefix={<PlusOutlined />}
             />
@@ -1205,36 +1236,28 @@ const Files: React.FC = () => {
             </p>
             <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
             <p className="ant-upload-hint">
-              支持单个或批量上传。严禁上传公司数据或其他敏感文件。
+              支持单个或批量上传
             </p>
           </Dragger>
 
           {uploadLoading && (
             <div>
-              <Text strong>上传进度：</Text>
+              <span className="text-sm text-gray-500">上传进度：</span>
               <Progress percent={uploadProgress} status={uploadProgress === 100 ? 'success' : 'active'} />
             </div>
           )}
 
           {fileList.length > 0 && !uploadLoading && (
-            <Alert
-              message={`已选择 ${fileList.length} 个文件`}
-              description={fileList.map(f => f.name).join(', ')}
-              type="info"
-              showIcon
-            />
+            <div className="text-sm text-gray-500">
+              已选择 {fileList.length} 个文件：{fileList.map(f => f.name).join(', ')}
+            </div>
           )}
-        </Space>
+        </div>
       </Modal>
 
-      {/* 日志面板 */}
+      {/* Log Drawer */}
       <Drawer
-        title={
-          <span>
-            <DatabaseOutlined style={{ marginRight: 8 }} />
-            嵌入处理日志
-          </span>
-        }
+        title="嵌入处理日志"
         placement="right"
         width={600}
         open={logsVisible}
@@ -1246,7 +1269,7 @@ const Files: React.FC = () => {
             backgroundColor: '#1e1e1e',
             color: '#d4d4d4',
             padding: '12px',
-            borderRadius: '4px',
+            borderRadius: '8px',
             fontFamily: 'monospace',
             fontSize: '12px',
             minHeight: '400px',

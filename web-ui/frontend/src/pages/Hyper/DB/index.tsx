@@ -666,9 +666,9 @@ return;
     };
 
     return (
-        <div>
+        <div className="p-6">
             {/* 顶部数据库选择器 */}
-            <Card style={{ marginBottom: 24 }}>
+            <Card className="border-gray-200 rounded-xl" style={{ marginBottom: 24 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                         <h3 style={{ margin: 0 }}>{t('database.title')}</h3>
@@ -695,9 +695,9 @@ return;
 
             {/* 数据表格区域 */}
             {storeGlobalUser.selectedDatabase ? (
-                <div className='flex  gap-4'>
+                <div className='flex gap-4'>
                     {/* Vertices表格 */}
-                    <Card title={t('database.vertices')} style={{ marginBottom: 24 }}
+                    <Card title={t('database.vertices')} className="border-gray-200 rounded-xl flex-1" style={{ marginBottom: 24 }}
                         extra={
                             <Button
                                 type="primary"
