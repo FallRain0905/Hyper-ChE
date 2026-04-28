@@ -116,6 +116,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSock
 from fastapi.middleware.cors import CORSMiddleware
 from db import get_hypergraph, getFrequentVertices, get_vertices, get_hyperedges, get_vertice, get_vertice_neighbor, get_hyperedge_neighbor_server, add_vertex, add_hyperedge, delete_vertex, delete_hyperedge, update_vertex, update_hyperedge, get_hyperedge_detail, db_manager, get_theme_hypergraph, get_theme_vertices, get_theme_hyperedges, get_theme_vertex_neighbor
 from file_manager import file_manager
+from kb_manager import KnowledgeBaseManager
 import json
 import os
 import asyncio
@@ -192,6 +193,120 @@ app.add_middleware(
 @app.get("/")
 async def root():
     return {"message": "Hyper-RAG"}
+
+
+# ============ Knowledge Base Management ============
+
+kb_manager = KnowledgeBaseManager()
+
+class KBCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+    rag_system: str = "hyperrag"
+    domain: str = "default"
+    chunk_size: int = 1000
+    chunk_overlap: int = 200
+
+class KBUpdateRequest(BaseModel):
+    description: Optional[str] = None
+    rag_system: Optional[str] = None
+    domain: Optional[str] = None
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
+    name: Optional[str] = None
+
+@app.post("/kb")
+async def create_kb(req: KBCreateRequest):
+    """创建知识库"""
+    try:
+        kb = await kb_manager.create_kb(
+            name=req.name,
+            description=req.description,
+            rag_system=req.rag_system,
+            domain=req.domain,
+            chunk_size=req.chunk_size,
+            chunk_overlap=req.chunk_overlap,
+        )
+        return {"success": True, "data": kb}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=safe_str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=safe_str(e))
+
+@app.get("/kb")
+async def list_kbs():
+    """列出所有知识库（含统计）"""
+    try:
+        kbs = await kb_manager.list_kbs()
+        result = []
+        for kb in kbs:
+            stats = await kb_manager.get_kb_stats(kb["database_name"], file_manager)
+            result.append({**kb, "stats": stats})
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=safe_str(e))
+
+@app.get("/kb/{kb_name}")
+async def get_kb(kb_name: str):
+    """获取知识库详情"""
+    try:
+        kb = await kb_manager.get_kb(kb_name)
+        if not kb:
+            raise HTTPException(status_code=404, detail="知识库不存在")
+        stats = await kb_manager.get_kb_stats(kb["database_name"], file_manager)
+        return {**kb, "stats": stats}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=safe_str(e))
+
+@app.put("/kb/{kb_name}")
+async def update_kb(kb_name: str, req: KBUpdateRequest):
+    """更新知识库设置"""
+    try:
+        updates = {k: v for k, v in req.dict().items() if v is not None}
+        kb = await kb_manager.update_kb(kb_name, **updates)
+        if not kb:
+            raise HTTPException(status_code=404, detail="知识库不存在")
+        return {"success": True, "data": kb}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=safe_str(e))
+
+@app.delete("/kb/{kb_name}")
+async def delete_kb(kb_name: str):
+    """删除知识库及其文件和数据库"""
+    try:
+        kb = await kb_manager.get_kb(kb_name)
+        if not kb:
+            raise HTTPException(status_code=404, detail="知识库不存在")
+
+        database_name = kb["database_name"]
+
+        # 删除关联文件
+        all_files = file_manager.get_all_files()
+        kb_files = [f for f in all_files if f.get("kb_name") == database_name]
+        for f in kb_files:
+            try:
+                file_manager.delete_file(f["file_id"])
+            except Exception:
+                pass
+
+        # 删除数据库
+        try:
+            db_manager.delete_database(database_name)
+        except Exception:
+            pass
+
+        # 删除KB元数据
+        await kb_manager.delete_kb(kb_name)
+
+        return {"success": True, "message": f"知识库 '{kb_name}' 已删除"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=safe_str(e))
 
 
 @app.get("/db")
@@ -1293,6 +1408,7 @@ class FileEmbedRequest(BaseModel):
     rag_system: str = "hyperrag"  # 新增：选择RAG系统 (hyperrag 或 cograg)
     target_database: Optional[str] = None  # 目标数据库名称，None则使用文件关联的数据库
     update_file_database: bool = False  # 是否更新文件关联的数据库
+    kb_name: Optional[str] = None  # 知识库名称，自动填充嵌入配置
 
 @app.get("/files")
 async def get_files():
@@ -1308,7 +1424,8 @@ async def get_files():
 @app.post("/files/upload")
 async def upload_files(
     files: List[UploadFile] = File(...),
-    target_database: str = Form(default=None)
+    target_database: str = Form(default=None),
+    kb_name: str = Form(default=None)
 ):
     """
     上传文件接口
@@ -1353,7 +1470,20 @@ async def upload_files(
 
             # 保存文件 - 传入目标数据库
             print("正在保存文件到本地...")
-            file_info = await file_manager.save_uploaded_file(content, file.filename, target_database=target_database)
+
+            # 如果指定了kb_name，使用KB的数据库名
+            effective_target_db = target_database
+            if kb_name:
+                kb = await kb_manager.get_kb(kb_name)
+                if kb:
+                    effective_target_db = kb["database_name"]
+
+            file_info = await file_manager.save_uploaded_file(content, file.filename, target_database=effective_target_db)
+
+            # 关联知识库
+            if kb_name:
+                file_manager.update_file_kb(file_info["file_id"], kb_name)
+
             file_info["status"] = "uploaded"
             file_info["size"] = len(content)
             print(f"[OK] 文件保存成功: {file_info['filename']}")
@@ -2093,6 +2223,29 @@ async def embed_files_with_progress(request: FileEmbedRequest):
     """
     if not HYPERRAG_AVAILABLE:
         raise HTTPException(status_code=500, detail="HyperRAG is not available")
+
+    # 如果指定了kb_name，从KB配置中读取默认参数
+    if request.kb_name:
+        kb = await kb_manager.get_kb(request.kb_name)
+        if kb:
+            if not request.target_database:
+                request.target_database = kb["database_name"]
+            request.rag_system = kb.get("rag_system", request.rag_system)
+            request.chunk_size = kb.get("chunk_size", request.chunk_size)
+            request.chunk_overlap = kb.get("chunk_overlap", request.chunk_overlap)
+            request.update_file_database = True
+            # 设置领域 - 直接更新设置文件中的 domain
+            try:
+                if os.path.exists(SETTINGS_FILE):
+                    with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                        _settings = json.load(f)
+                else:
+                    _settings = {}
+                _settings["hyperrag_domain"] = kb.get("domain", "default")
+                with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(_settings, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                main_logger.warning(f"更新领域设置失败: {safe_str(e)}")
 
     # 立即返回处理开始的响应
     total_files = len(request.file_ids)

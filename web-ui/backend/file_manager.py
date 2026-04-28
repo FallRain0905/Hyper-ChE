@@ -195,10 +195,49 @@ class FileManager:
             return True
         return False
 
+    def update_file_kb(self, file_id: str, kb_name: str) -> bool:
+        """关联文件到知识库"""
+        metadata = self._load_metadata()
+        if file_id in metadata:
+            metadata[file_id]["kb_name"] = kb_name
+            self._save_metadata(metadata)
+            return True
+        return False
+
     def get_files_by_database(self, database_name: str) -> List[Dict]:
         """获取指定数据库的所有文件"""
         metadata = self._load_metadata()
         return [f for f in metadata.values() if f.get("database_name") == database_name]
+
+    def delete_file(self, file_id: str, clean_database: bool = False, rag_instance=None) -> bool:
+        """删除文件及其元数据，可选清理数据库中的嵌入数据"""
+        metadata = self._load_metadata()
+        if file_id not in metadata:
+            return False
+
+        file_info = metadata[file_id]
+
+        # 删除磁盘文件
+        file_path = file_info.get("file_path")
+        if file_path and Path(file_path).exists():
+            try:
+                Path(file_path).unlink()
+            except Exception as e:
+                print(f"Warning: failed to delete file {file_path}: {e}")
+
+        # 清理数据库中的嵌入数据
+        if clean_database and rag_instance:
+            try:
+                database_name = file_info.get("database_name", "default")
+                doc_name = file_info.get("original_filename", "")
+                rag_instance.delete_document(database_name, doc_name)
+            except Exception as e:
+                print(f"Warning: failed to clean database for file {file_id}: {e}")
+
+        # 删除元数据记录
+        del metadata[file_id]
+        self._save_metadata(metadata)
+        return True
 
     async def read_file_content(self, file_path: str) -> str:
         """读取文件内容"""
