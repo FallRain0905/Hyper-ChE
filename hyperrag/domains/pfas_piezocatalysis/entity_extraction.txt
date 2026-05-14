@@ -1,0 +1,57 @@
+{DOMAIN_CONTEXT}
+
+Extract ALL entities relevant to PFAS piezocatalytic degradation, defluorination, mineralization, and mechanism reasoning. Output a JSON array.
+
+ENTITY TYPES (assign exactly one):
+1. PFAS_TARGET - PFAS pollutants or fluorinated targets: PFOA, PFOS, PFBA, PFBS, GenX, PTFE, fluorotelomers.
+2. CATALYST_MATERIAL - catalysts, adsorbents, membranes, electrodes, or composites: BaTiO3, BiFeO3, Fe/ZnO, MoS2/Fe3O4, BDD.
+3. MATERIAL_FEATURE - material variables: composition, crystal phase, morphology, defect, oxygen vacancy, heterojunction, surface group, local electric field.
+4. PIEZO_PROPERTY - piezoelectric/electronic/interfacial properties: d33, polarization, band gap, charge separation, conductivity, zeta potential.
+5. PROCESS_STRATEGY - treatment strategy; subtype required: "piezo", "piezo_photo", "piezo_electro", "piezo_fenton", "contact_electro", "adsorption", "electrochemical", "photocatalytic", "mechanochemical", or "other".
+6. CONDITION - reaction, synthesis, or matrix condition; subtype required: "reaction", "synthesis", or "matrix".
+7. METRIC - performance or characterization metric; subtype required: "performance", "mechanistic", or "material_property".
+8. ACTIVE_SPECIES - radicals, charge carriers, oxidants, or reductants: hydroxyl radical, sulfate radical, superoxide radical, hole, electron, hydrated electron, H2O2.
+9. MECHANISM_EVIDENCE - evidence supporting C-F cleavage, charge transfer, ROS pathway, or mineralization: EPR, scavenger test, DFT, LC-MS intermediates, fluoride release.
+10. WATER_MATRIX - pure water, groundwater, AFFF, landfill leachate, wastewater, soil, or co-contaminated matrix.
+
+RULES:
+R1: PFAS identity precision. PFOA, PFOS, PFBA, PFBS, GenX, PTFE, and fluorotelomers are separate PFAS_TARGET entities.
+R2: Material variables are separate entities. Extract composition, phase, morphology, defect, oxygen vacancy, d33, band gap, conductive phase, and surface group separately when mentioned.
+R3: Numeric values MUST be split into value + unit. Ranges use value_min + value_max. Do not put numbers into entity names when a base metric/condition name exists.
+R4: Mechanism evidence MUST be extracted when it supports C-F cleavage, direct electron transfer, ROS pathway, fluoride release, intermediate formation, or mineralization.
+R5: Preserve original entity names. Do not translate or canonicalize names. Descriptions must be in English.
+
+OUTPUT FORMAT - JSON array, nothing else:
+[
+  {{
+    "name": "<original name from text>",
+    "type": "<one of the 10 entity types>",
+    "subtype": "<required for PROCESS_STRATEGY/CONDITION/METRIC; null otherwise>",
+    "value": <number or null>,
+    "value_min": <number or null>,
+    "value_max": <number or null>,
+    "unit": "<string or null>",
+    "description": "<1-2 English sentences grounded in the text>",
+    "key_attribute": "<identifying trait for material/features/properties/evidence; null if N/A>"
+  }}
+]
+
+EXAMPLE:
+Text: "BaTiO3 nanoparticles decomposed PFOS under 40 kHz ultrasound. The defluorination ratio reached 31.2% after 120 min. EPR and scavenger tests indicated hydroxyl radicals and piezo-generated electrons."
+Output:
+[
+  {{"name":"BaTiO3 nanoparticles","type":"CATALYST_MATERIAL","subtype":null,"value":null,"value_min":null,"value_max":null,"unit":null,"description":"BaTiO3 nanoparticles used as the piezocatalyst for PFOS decomposition.","key_attribute":"piezoelectric perovskite catalyst"}},
+  {{"name":"PFOS","type":"PFAS_TARGET","subtype":null,"value":null,"value_min":null,"value_max":null,"unit":null,"description":"Perfluorooctane sulfonate targeted for piezocatalytic decomposition.","key_attribute":null}},
+  {{"name":"ultrasound frequency","type":"CONDITION","subtype":"reaction","value":40,"value_min":null,"value_max":null,"unit":"kHz","description":"Ultrasound frequency used to drive piezocatalysis.","key_attribute":null}},
+  {{"name":"reaction time","type":"CONDITION","subtype":"reaction","value":120,"value_min":null,"value_max":null,"unit":"min","description":"Treatment duration for PFOS decomposition.","key_attribute":null}},
+  {{"name":"defluorination ratio","type":"METRIC","subtype":"performance","value":31.2,"value_min":null,"value_max":null,"unit":"%","description":"Measured fluorine removal from PFOS after treatment.","key_attribute":null}},
+  {{"name":"EPR","type":"MECHANISM_EVIDENCE","subtype":null,"value":null,"value_min":null,"value_max":null,"unit":null,"description":"Spectroscopic evidence used to identify reactive species in the PFOS degradation pathway.","key_attribute":"radical detection"}},
+  {{"name":"scavenger tests","type":"MECHANISM_EVIDENCE","subtype":null,"value":null,"value_min":null,"value_max":null,"unit":null,"description":"Control experiments used to evaluate the contribution of reactive species.","key_attribute":"pathway validation"}},
+  {{"name":"hydroxyl radicals","type":"ACTIVE_SPECIES","subtype":null,"value":null,"value_min":null,"value_max":null,"unit":null,"description":"Reactive oxygen species implicated in the degradation process.","key_attribute":null}},
+  {{"name":"piezo-generated electrons","type":"ACTIVE_SPECIES","subtype":null,"value":null,"value_min":null,"value_max":null,"unit":null,"description":"Charge carriers generated by piezoelectric polarization under ultrasound.","key_attribute":null}}
+]
+
+TEXT:
+{CHUNK_TEXT}
+
+Output ONLY the JSON array. No prose before or after.

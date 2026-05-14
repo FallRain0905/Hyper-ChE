@@ -1,0 +1,65 @@
+{DOMAIN_CONTEXT}
+
+From the entities below, extract BOTH low-order relations and high-order hyperedges in ONE pass.
+
+Use the low-order relations as the reasoning scaffold for high-order hyperedges:
+1. First identify direct pairwise relations between entities.
+2. Then group strongly connected pairs into 3+ entity hyperedges.
+3. High-order hyperedges should be logical summaries of the low-order relations, not independent new facts.
+
+CRITICAL - Vertex Name Matching:
+You MUST use the EXACT entity names from the Entities (K_v) list below.
+NEVER create new vertex names.
+NEVER append numbers, units, or values to vertex names.
+All numeric values belong in the entity fields shown in K_v, NOT in relation vertex names.
+
+Wrong: "CE 99.1%", "temperature 60C", "3 M HCl", "CP + MEMBr"
+Correct: "CE", "temperature", "HCl", "CP", "MEMBr"
+
+CRITICAL - If a useful concept is absent from K_v:
+Do NOT invent a vertex for it.
+Mention the missing concept in description/evidence_span if needed, but omit it from vertices.
+
+RELATION TYPES:
+- COMPOSITION: A is component/precursor/product of B (electrolyte formulation, electrode synthesis, membrane modification)
+- OPERATION: A and B co-present in same experimental setup (material + condition + metric)
+- DEGRADATION: A causes/explains/suffers B (failure mechanism, efficiency loss)
+- COMPARISON: same-type candidates compared under shared criterion
+
+COMPARISON trigger:
+When text presents a series of same-type entities with measured values, create:
+1. low_order_relations for the compared pairs when useful
+2. one COMPARISON high_order_hyperedge including all candidate entity names and the shared metric entity name
+
+Entities (K_v):
+{K_v_JSON}
+
+Text:
+{CHUNK_TEXT}
+
+OUTPUT FORMAT - strict JSON object, nothing else:
+{{
+  "low_order_relations": [
+    {{
+      "source": "<entity name from K_v>",
+      "target": "<entity name from K_v>",
+      "relation_type": "COMPOSITION | OPERATION | DEGRADATION | COMPARISON",
+      "description": "<why related>",
+      "keywords": "<overarching concepts>",
+      "strength": <0-10 integer>
+    }}
+  ],
+  "high_order_hyperedges": [
+    {{
+      "vertices": ["<entity name from K_v>", "<entity name from K_v>", "..."],
+      "relation_type": "COMPOSITION | OPERATION | DEGRADATION | COMPARISON",
+      "description": "<detailed description covering all entities>",
+      "generalization": "<one-sentence summary>",
+      "keywords": "<overarching concepts>",
+      "strength": <0-10 integer>,
+      "evidence_span": "<verbatim quote from text, <=120 chars>"
+    }}
+  ]
+}}
+
+Output ONLY the JSON object. No prose before or after.

@@ -3,6 +3,8 @@ import sys
 import io
 import re
 import logging  # Import logging early for SafeLogFilter class definition
+import traceback
+from logging.handlers import RotatingFileHandler
 
 # Safe string conversion function for Windows encoding
 def safe_str(obj):
@@ -45,21 +47,32 @@ def safe_print(*args, **kwargs):
             # Ultimate fallback
             print("[UNABLE TO PRINT MESSAGE DUE TO ENCODING ERROR]")
 
+def redact_text_for_log(text: str) -> str:
+    """Mask common API key/token patterns in free-form log strings."""
+    try:
+        text = re.sub(r"sk-[A-Za-z0-9_\-]{8,}", "sk-[REDACTED]", text)
+        text = re.sub(
+            r"(?i)(api[_-]?key|apikey|embeddingApiKey|authorization|token|secret)(\s*[:=]\s*)(['\"]?)[^,'\"\s}]+",
+            r"\1\2\3[REDACTED]",
+            text,
+        )
+    except Exception:
+        pass
+    return text
+
 # Safe log filter for Windows encoding
 class SafeLogFilter(logging.Filter):
     """Log filter that handles Unicode encoding issues"""
 
     def filter(self, record):
         try:
-            # Safe-ify the log message
-            if hasattr(record, 'msg') and record.msg:
-                record.msg = safe_str(record.msg)
-            if hasattr(record, 'getMessage'):
-                try:
-                    message = record.getMessage()
-                    record.msg = safe_str(message)
-                except Exception:
-                    record.msg = safe_str(str(record.msg))
+            # Safe-ify the fully formatted log message and remove args to avoid double interpolation.
+            try:
+                message = record.getMessage()
+            except Exception:
+                message = str(record.msg)
+            record.msg = redact_text_for_log(safe_str(message))
+            record.args = ()
         except Exception:
             # If filtering fails, at least don't break the logging
             pass
@@ -69,7 +82,13 @@ def extract_user_friendly_error(error_message: str) -> str:
     """提取用户友好的错误信息"""
     error_lower = error_message.lower()
 
-    if "500" in error_message:
+    if "insufficient" in error_lower or "balance" in error_lower or "余额" in error_message:
+        return "API账户余额不足，请充值或更换可用的嵌入模型 API Key"
+    elif "permissiondenied" in error_lower or "permission denied" in error_lower or "403" in error_message:
+        return "API权限不足或账户不可用，请检查嵌入模型权限、账户余额和 API Key"
+    elif "401" in error_message or "unauthorized" in error_lower:
+        return "API密钥无效或未授权，请检查设置"
+    elif "500" in error_message:
         return "API服务器暂时不可用，请稍后重试"
     elif "502" in error_message or "503" in error_message:
         return "API服务暂时过载，请等待片刻后重试"
@@ -99,6 +118,99 @@ def extract_user_friendly_error(error_message: str) -> str:
                 pass
         return f"处理失败: {error_message[:100]}..."
 
+def extract_detailed_exception_message(error: Exception) -> str:
+    """从 RetryError/OpenAI 异常中提取真实底层错误，避免日志只显示 RetryError。"""
+    messages = [safe_str(error)]
+
+    try:
+        last_attempt = getattr(error, "last_attempt", None)
+        inner_error = last_attempt.exception() if last_attempt else None
+        if inner_error is not None:
+            messages.append(f"{type(inner_error).__name__}: {safe_str(inner_error)}")
+            body = getattr(inner_error, "body", None)
+            if body:
+                messages.append(f"body={safe_str(body)}")
+            status_code = getattr(inner_error, "status_code", None)
+            if status_code:
+                messages.append(f"status_code={status_code}")
+            code = getattr(inner_error, "code", None)
+            if code:
+                messages.append(f"code={code}")
+    except Exception:
+        pass
+
+    for chain_attr in ("__cause__", "__context__"):
+        try:
+            chained = getattr(error, chain_attr, None)
+            if chained is not None:
+                messages.append(f"{chain_attr}={type(chained).__name__}: {safe_str(chained)}")
+                body = getattr(chained, "body", None)
+                if body:
+                    messages.append(f"{chain_attr}.body={safe_str(body)}")
+                status_code = getattr(chained, "status_code", None)
+                if status_code:
+                    messages.append(f"{chain_attr}.status_code={status_code}")
+                code = getattr(chained, "code", None)
+                if code:
+                    messages.append(f"{chain_attr}.code={code}")
+        except Exception:
+            pass
+
+    return redact_text_for_log(" | ".join(dict.fromkeys(messages)))
+
+SENSITIVE_LOG_KEYS = {
+    "api_key",
+    "apikey",
+    "apiKey",
+    "embeddingApiKey",
+    "embedding_api_key",
+    "authorization",
+    "token",
+    "secret",
+}
+
+def redact_for_log(value):
+    """递归脱敏日志上下文，避免 API Key 写入日志文件。"""
+    if isinstance(value, dict):
+        redacted = {}
+        for key, item in value.items():
+            if key in SENSITIVE_LOG_KEYS or any(s in key.lower() for s in ("key", "token", "secret", "authorization")):
+                redacted[key] = "[REDACTED]"
+            else:
+                redacted[key] = redact_for_log(item)
+        return redacted
+    if isinstance(value, list):
+        return [redact_for_log(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact_for_log(item) for item in value)
+    if isinstance(value, str):
+        return redact_text_for_log(value)
+    return value
+
+def log_detailed_exception(logger: logging.Logger, title: str, error: Exception, context=None) -> str:
+    """记录带上下文、底层异常和 traceback 的详细错误日志。"""
+    detailed_error = extract_detailed_exception_message(error)
+    logger.error(f"{title}: {detailed_error}")
+
+    if context:
+        try:
+            logger.error(
+                f"{title} context: "
+                f"{json.dumps(redact_for_log(context), ensure_ascii=False, default=safe_str)}"
+            )
+        except Exception:
+            logger.error(f"{title} context: {safe_str(redact_for_log(context))}")
+
+    try:
+        logger.error(
+            f"{title} traceback:\n"
+            f"{''.join(traceback.format_exception(type(error), error, error.__traceback__))}"
+        )
+    except Exception:
+        logger.error(f"{title} traceback: <failed to format traceback>")
+
+    return detailed_error
+
 # Fix Windows encoding issue (only if not running under uvicorn)
 # Check if we're running under uvicorn to avoid conflicts with its logging system
 if sys.platform == 'win32' and 'uvicorn' not in sys.modules:
@@ -119,6 +231,8 @@ from file_manager import file_manager
 from kb_manager import KnowledgeBaseManager
 import json
 import os
+import gc
+import time
 import asyncio
 import numpy as np
 import importlib.util
@@ -126,6 +240,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from typing import List, Optional
 from io import StringIO
+from datetime import datetime
 
 # 添加 HyperRAG 相关导入
 # 若尚不可导入，则向上逐级查找含有 hyperrag 包的目录，并把“其父目录”加到 sys.path
@@ -179,6 +294,75 @@ except ImportError as e:
 
 # 设置文件路径
 SETTINGS_FILE = "settings.json"
+API_KEY_POOL_STATE = {
+    "llm": {"cursor": 0, "disabled": set()},
+    "embedding": {"cursor": 0, "disabled": set()},
+}
+
+def get_runtime_settings_context() -> dict:
+    """返回可安全写入日志的运行配置摘要。"""
+    try:
+        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+            settings = json.load(f)
+        return {
+            "model": settings.get("modelName"),
+            "base_url": settings.get("baseUrl"),
+            "embedding_model": settings.get("embeddingModel"),
+            "embedding_base_url": settings.get("embeddingBaseUrl"),
+            "embedding_dim": settings.get("embeddingDim"),
+            "hyperrag_domain": settings.get("hyperrag_domain", "default"),
+        }
+    except Exception as e:
+        return {"settings_error": safe_str(e)}
+
+def split_api_keys(value: str | None) -> list[str]:
+    """支持在同一个设置字段内用换行、逗号或分号配置多个 API Key。"""
+    if not value:
+        return []
+    return [item.strip() for item in re.split(r"[\n,;]+", value) if item.strip()]
+
+def get_api_key_candidates(pool_name: str, primary: str | None, fallback: str | None = None) -> list[tuple[int, int, str]]:
+    keys = split_api_keys(primary)
+    if not keys:
+        keys = split_api_keys(fallback)
+    if not keys:
+        return []
+
+    state = API_KEY_POOL_STATE.setdefault(pool_name, {"cursor": 0, "disabled": set()})
+    enabled = [(idx, key) for idx, key in enumerate(keys) if key not in state["disabled"]]
+    candidates = enabled or list(enumerate(keys))
+    start = state["cursor"] % len(candidates)
+    state["cursor"] += 1
+    ordered = candidates[start:] + candidates[:start]
+    return [(idx + 1, len(keys), key) for idx, key in ordered]
+
+def mark_api_key_unhealthy(pool_name: str, key: str, error_message: str) -> None:
+    error_lower = error_message.lower()
+    if (
+        "permissiondenied" in error_lower
+        or "permission denied" in error_lower
+        or "insufficient" in error_lower
+        or "balance" in error_lower
+        or "quota" in error_lower
+        or "401" in error_message
+        or "403" in error_message
+    ):
+        API_KEY_POOL_STATE.setdefault(pool_name, {"cursor": 0, "disabled": set()})["disabled"].add(key)
+
+def reset_api_key_pool_health(pool_name: str | None = None) -> None:
+    pools = [pool_name] if pool_name else list(API_KEY_POOL_STATE.keys())
+    for pool in pools:
+        API_KEY_POOL_STATE.setdefault(pool, {"cursor": 0, "disabled": set()})["disabled"].clear()
+
+def summarize_key_pool(pool_name: str, primary: str | None, fallback: str | None = None) -> dict:
+    keys = split_api_keys(primary) or split_api_keys(fallback)
+    disabled = API_KEY_POOL_STATE.setdefault(pool_name, {"cursor": 0, "disabled": set()})["disabled"]
+    return {
+        "pool": pool_name,
+        "total_keys": len(keys),
+        "disabled_keys": sum(1 for key in keys if key in disabled),
+        "enabled_keys": sum(1 for key in keys if key not in disabled),
+    }
 
 app = FastAPI()
 
@@ -632,7 +816,10 @@ async def save_settings(settings: SettingsModel):
         settings_dict = settings.dict()
 
         # 添加调试日志
-        main_logger.info(f"🔍 [Settings] 接收到的设置: {json.dumps(settings_dict, ensure_ascii=False, indent=2)}")
+        main_logger.info(
+            f"🔍 [Settings] 接收到的设置: "
+            f"{json.dumps(redact_for_log(settings_dict), ensure_ascii=False, indent=2)}"
+        )
 
         # 如果apiKey是***，则保持原有的apiKey不变
         if settings_dict.get('apiKey') == '***':
@@ -662,7 +849,10 @@ async def save_settings(settings: SettingsModel):
         if 'embeddingBaseUrl' not in settings_dict:
             settings_dict['embeddingBaseUrl'] = ''
 
-        main_logger.info(f"💾 [Settings] 准备保存的设置: {json.dumps(settings_dict, ensure_ascii=False, indent=2)}")
+        main_logger.info(
+            f"💾 [Settings] 准备保存的设置: "
+            f"{json.dumps(redact_for_log(settings_dict), ensure_ascii=False, indent=2)}"
+        )
 
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(settings_dict, f, ensure_ascii=False, indent=2)
@@ -768,8 +958,17 @@ async def test_embedding():
             }
         }
     except Exception as e:
-        error_msg = safe_str(e)
-        main_logger.error(f"嵌入API测试失败: {error_msg}")
+        error_msg = log_detailed_exception(
+            main_logger,
+            "嵌入API测试失败",
+            e,
+            {
+                "embedding_model": locals().get("embedding_model"),
+                "embedding_base_url": locals().get("base_url"),
+                "test_text_count": 1,
+                "test_text_total_chars": len(test_texts[0]) if "test_texts" in locals() else None,
+            },
+        )
 
         # 提供用户友好的错误信息
         user_friendly_error = extract_user_friendly_error(error_msg)
@@ -777,7 +976,7 @@ async def test_embedding():
         return {
             "success": False,
             "message": user_friendly_error,
-            "detailed_error": error_msg[:200]
+            "detailed_error": error_msg[:500]
         }
 
 @app.post("/test-api")
@@ -875,34 +1074,66 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
         api_key = settings.get("apiKey")
         base_url = settings.get("baseUrl")
 
-        main_logger.info(f"使用模型: {model_name}, API地址: {base_url}")
+        key_candidates = get_api_key_candidates("llm", api_key)
+        main_logger.info(
+            f"使用模型: {model_name}, API地址: {base_url}, "
+            f"LLM Key池: {summarize_key_pool('llm', api_key)}"
+        )
         main_logger.info(f"历史消息数量: {len(cleaned_history)} (原始: {len(history_messages)})")
 
         # 设置超时参数（默认600秒，适应Moonshot慢速响应）
-        timeout = kwargs.get('timeout', 600.0)
+        timeout = float(settings.get("llmTimeout", kwargs.get('timeout', 240.0)))
         main_logger.info(f"超时设置: {timeout} 秒")
 
-        response = await openai_complete_if_cache(
-            model_name,
-            prompt,
-            system_prompt=system_prompt,
-            history_messages=cleaned_history,
-            api_key=api_key,
-            base_url=base_url,
-            timeout=timeout,
-            **kwargs,
-        )
+        errors = []
+        if not key_candidates:
+            key_candidates = [(0, 0, None)]
 
-        main_logger.info(f"LLM调用完成，响应长度: {len(response)} 字符")
-        return response
+        for attempt_pos, (key_index, key_total, candidate_key) in enumerate(key_candidates, start=1):
+            try:
+                if candidate_key:
+                    main_logger.info(f"LLM调用使用Key池候选: {key_index}/{key_total}")
+                response = await asyncio.wait_for(
+                    openai_complete_if_cache(
+                        model_name,
+                        prompt,
+                        system_prompt=system_prompt,
+                        history_messages=cleaned_history,
+                        api_key=candidate_key,
+                        base_url=base_url,
+                        timeout=timeout,
+                        **kwargs,
+                    ),
+                    timeout=timeout + 5.0,
+                )
+                main_logger.info(f"LLM调用完成，响应长度: {len(response)} 字符")
+                return response
+            except Exception as e:
+                error_msg = extract_detailed_exception_message(e)
+                errors.append(error_msg)
+                if candidate_key:
+                    mark_api_key_unhealthy("llm", candidate_key, error_msg)
+                    main_logger.error(f"LLM Key候选失败: {key_index}/{key_total}, 错误: {error_msg}")
+                if attempt_pos >= len(key_candidates):
+                    raise
+                main_logger.warning(f"切换到下一个 LLM API Key 继续尝试")
+
+        raise RuntimeError("所有 LLM API Key 均调用失败: " + " || ".join(errors))
 
     except Exception as e:
-        main_logger.error(f"LLM调用失败: {safe_str(e)}")
-        main_logger.error(f"错误类型: {type(e).__name__}")
-        if hasattr(e, '__cause__'):
-            main_logger.error(f"根本原因: {safe_str(e.__cause__)}")
-        import traceback
-        main_logger.error(f"详细错误: {traceback.format_exc()}")
+        log_detailed_exception(
+            main_logger,
+            "LLM调用失败",
+            e,
+            {
+                "model": locals().get("model_name"),
+                "base_url": locals().get("base_url"),
+                "prompt_chars": len(prompt) if prompt is not None else 0,
+                "system_prompt_chars": len(system_prompt) if system_prompt else 0,
+                "history_count": len(cleaned_history) if "cleaned_history" in locals() else len(history_messages),
+                "timeout": locals().get("timeout"),
+            },
+        )
         raise
 
 async def get_hyperrag_embedding_func(texts: list[str]) -> np.ndarray:
@@ -924,22 +1155,59 @@ async def get_hyperrag_embedding_func(texts: list[str]) -> np.ndarray:
             embedding_model = settings.get("embeddingModel", "text-embedding-3-small")
             api_key = settings.get("embeddingApiKey", settings.get("apiKey"))
             base_url = settings.get("embeddingBaseUrl", settings.get("baseUrl"))
+            key_candidates = get_api_key_candidates("embedding", api_key, settings.get("apiKey"))
 
-            main_logger.info(f"使用嵌入模型: {embedding_model}")
-
-            embeddings = await openai_embedding(
-                texts,
-                model=embedding_model,
-                api_key=api_key,
-                base_url=base_url,
+            main_logger.info(
+                f"使用嵌入模型: {embedding_model}, "
+                f"Embedding Key池: {summarize_key_pool('embedding', api_key, settings.get('apiKey'))}"
             )
 
-            main_logger.info(f"文本嵌入完成，嵌入维度: {embeddings.shape}")
-            return embeddings
+            if not key_candidates:
+                key_candidates = [(0, 0, None)]
+
+            last_error = None
+            for attempt_pos, (key_index, key_total, candidate_key) in enumerate(key_candidates, start=1):
+                try:
+                    if candidate_key:
+                        main_logger.info(f"Embedding调用使用Key池候选: {key_index}/{key_total}")
+                    embeddings = await openai_embedding(
+                        texts,
+                        model=embedding_model,
+                        api_key=candidate_key,
+                        base_url=base_url,
+                    )
+                    main_logger.info(f"文本嵌入完成，嵌入维度: {embeddings.shape}")
+                    return embeddings
+                except Exception as e:
+                    last_error = e
+                    error_msg = extract_detailed_exception_message(e)
+                    if candidate_key:
+                        mark_api_key_unhealthy("embedding", candidate_key, error_msg)
+                        main_logger.error(f"Embedding Key候选失败: {key_index}/{key_total}, 错误: {error_msg}")
+                    if attempt_pos >= len(key_candidates):
+                        raise
+                    main_logger.warning("切换到下一个 Embedding API Key 继续尝试")
+
+            if last_error:
+                raise last_error
 
         except Exception as e:
-            error_msg = safe_str(e)
-            main_logger.error(f"文本嵌入失败 (尝试 {attempt + 1}/{max_retries}): {error_msg}")
+            text_lengths = [len(text) for text in texts]
+            error_msg = log_detailed_exception(
+                main_logger,
+                f"文本嵌入失败 (尝试 {attempt + 1}/{max_retries})",
+                e,
+                {
+                    "attempt": attempt + 1,
+                    "max_retries": max_retries,
+                    "texts_count": len(texts),
+                    "texts_total_chars": sum(text_lengths),
+                    "texts_min_chars": min(text_lengths) if text_lengths else 0,
+                    "texts_max_chars": max(text_lengths) if text_lengths else 0,
+                    "embedding_model": locals().get("embedding_model"),
+                    "embedding_base_url": locals().get("base_url"),
+                },
+            )
 
             # 检查是否是可重试的错误
             is_retryable = False
@@ -963,7 +1231,107 @@ async def get_hyperrag_embedding_func(texts: list[str]) -> np.ndarray:
                 main_logger.error(f"文本嵌入最终失败: {error_msg}")
                 raise
 
-def get_or_create_hyperrag(database: str = None):
+async def preflight_hyperrag_api_services() -> None:
+    """在正式嵌入前轻量检查 LLM 与 embedding API，避免跑到 chunk 中途才失败。"""
+    if not HYPERRAG_AVAILABLE:
+        raise RuntimeError("HyperRAG is not available")
+
+    with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+        settings = json.load(f)
+
+    llm_model = settings.get("modelName", "gpt-5-mini")
+    llm_api_key = settings.get("apiKey")
+    llm_base_url = settings.get("baseUrl")
+    embedding_model = settings.get("embeddingModel", "text-embedding-3-small")
+    embedding_api_key = settings.get("embeddingApiKey", settings.get("apiKey"))
+    embedding_base_url = settings.get("embeddingBaseUrl", settings.get("baseUrl"))
+    llm_key_candidates = get_api_key_candidates("llm", llm_api_key)
+    embedding_key_candidates = get_api_key_candidates("embedding", embedding_api_key, llm_api_key)
+
+    main_logger.info(
+        "开始HyperRAG API预检: "
+        f"llm_model={llm_model}, llm_base_url={llm_base_url}, "
+        f"embedding_model={embedding_model}, embedding_base_url={embedding_base_url}, "
+        f"llm_key_pool={summarize_key_pool('llm', llm_api_key)}, "
+        f"embedding_key_pool={summarize_key_pool('embedding', embedding_api_key, llm_api_key)}"
+    )
+
+    if not embedding_key_candidates:
+        embedding_key_candidates = [(0, 0, None)]
+    embedding_errors = []
+    embedding_ok = False
+    for key_index, key_total, candidate_key in embedding_key_candidates:
+        try:
+            await openai_embedding(
+                ["HyperRAG embedding preflight"],
+                model=embedding_model,
+                api_key=candidate_key,
+                base_url=embedding_base_url,
+                timeout=30.0,
+            )
+            embedding_ok = True
+            main_logger.info(f"HyperRAG API预检: embedding 服务正常，Key候选 {key_index}/{key_total}")
+            break
+        except Exception as e:
+            detailed_error = log_detailed_exception(
+                main_logger,
+                "HyperRAG API预检失败 - embedding",
+                e,
+                {
+                    "key_index": key_index,
+                    "key_total": key_total,
+                    "embedding_model": embedding_model,
+                    "embedding_base_url": embedding_base_url,
+                    "runtime_settings": get_runtime_settings_context(),
+                },
+            )
+            embedding_errors.append(detailed_error)
+            if candidate_key:
+                mark_api_key_unhealthy("embedding", candidate_key, detailed_error)
+    if not embedding_ok:
+        detail = " || ".join(embedding_errors)
+        suggestion = extract_user_friendly_error(detail)
+        raise RuntimeError(f"嵌入服务预检失败: {detail}。建议: {suggestion}")
+
+    if not llm_key_candidates:
+        llm_key_candidates = [(0, 0, None)]
+    llm_errors = []
+    llm_ok = False
+    for key_index, key_total, candidate_key in llm_key_candidates:
+        try:
+            await openai_complete_if_cache(
+                llm_model,
+                "Reply exactly: OK",
+                api_key=candidate_key,
+                base_url=llm_base_url,
+                timeout=30.0,
+                max_tokens=8,
+            )
+            llm_ok = True
+            main_logger.info(f"HyperRAG API预检: LLM 服务正常，Key候选 {key_index}/{key_total}")
+            break
+        except Exception as e:
+            detailed_error = log_detailed_exception(
+                main_logger,
+                "HyperRAG API预检失败 - LLM",
+                e,
+                {
+                    "key_index": key_index,
+                    "key_total": key_total,
+                    "model": llm_model,
+                    "base_url": llm_base_url,
+                    "runtime_settings": get_runtime_settings_context(),
+                },
+            )
+            llm_errors.append(detailed_error)
+            if candidate_key:
+                mark_api_key_unhealthy("llm", candidate_key, detailed_error)
+    if not llm_ok:
+        detail = " || ".join(llm_errors)
+        suggestion = extract_user_friendly_error(detail)
+        raise RuntimeError(f"LLM服务预检失败: {detail}。建议: {suggestion}")
+
+def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_overlap: int = None):
     """
     获取或创建指定数据库的 HyperRAG 实例
     """
@@ -979,6 +1347,9 @@ def get_or_create_hyperrag(database: str = None):
         main_logger.info(f"使用默认数据库: {database}")
     
     # 检查是否已存在该数据库的实例
+    requested_chunk_size = int(chunk_size) if chunk_size else None
+    requested_chunk_overlap = int(chunk_overlap) if chunk_overlap is not None else None
+
     if database not in hyperrag_instances:
         main_logger.info(f"创建新的HyperRAG实例，数据库: {database}")
         
@@ -1033,17 +1404,47 @@ def get_or_create_hyperrag(database: str = None):
             ),
         }
 
+        if requested_chunk_size:
+            hyperrag_kwargs["chunk_token_size"] = requested_chunk_size
+        if requested_chunk_overlap is not None:
+            hyperrag_kwargs["chunk_overlap_token_size"] = requested_chunk_overlap
+
         hyperrag_instances[database] = HyperRAG(**hyperrag_kwargs)
 
         # 传递领域配置到 HyperRAG 实例
         if current_domain != "default":
             hyperrag_instances[database].domain = current_domain
+        main_logger.info(
+            f"HyperRAG effective config: database={database}, domain={hyperrag_instances[database].domain}, "
+            f"chunk_token_size={hyperrag_instances[database].chunk_token_size}, "
+            f"chunk_overlap_token_size={hyperrag_instances[database].chunk_overlap_token_size}, "
+            f"llm_model_max_async={hyperrag_instances[database].llm_model_max_async}, "
+            f"embedding_batch_num={hyperrag_instances[database].embedding_batch_num}"
+        )
         
         main_logger.info(f"HyperRAG实例创建完成，数据库: {database}")
     else:
         main_logger.info(f"使用现有HyperRAG实例，数据库: {database}")
     
-    return hyperrag_instances[database]
+    instance = hyperrag_instances[database]
+    try:
+        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+            settings = json.load(f)
+        instance.domain = settings.get("hyperrag_domain", getattr(instance, "domain", "default"))
+    except Exception as e:
+        main_logger.warning(f"刷新HyperRAG领域配置失败: {safe_str(e)}")
+    if requested_chunk_size:
+        instance.chunk_token_size = requested_chunk_size
+    if requested_chunk_overlap is not None:
+        instance.chunk_overlap_token_size = requested_chunk_overlap
+    main_logger.info(
+        f"HyperRAG active config: database={database}, domain={getattr(instance, 'domain', 'default')}, "
+        f"chunk_token_size={instance.chunk_token_size}, "
+        f"chunk_overlap_token_size={instance.chunk_overlap_token_size}, "
+        f"llm_model_max_async={instance.llm_model_max_async}, "
+        f"embedding_batch_num={instance.embedding_batch_num}"
+    )
+    return instance
 
 
 def get_or_create_cograg(database: str = None):
@@ -1864,7 +2265,12 @@ async def embed_files(request: FileEmbedRequest):
     results = []
     
     try:
+        await preflight_hyperrag_api_services()
+
         for i, file_id in enumerate(request.file_ids):
+            file_info = None
+            database_name = None
+            content = None
             try:
                 print(f"\n处理文件 {i+1}/{len(request.file_ids)}: {file_id}")
                 
@@ -1890,7 +2296,11 @@ async def embed_files(request: FileEmbedRequest):
                 # 使用文件对应的数据库名
                 database_name = file_info["database_name"]
                 print(f"目标数据库: {database_name}")
-                rag = get_or_create_hyperrag(database_name)
+                rag = get_or_create_hyperrag(
+                    database_name,
+                    chunk_size=request.chunk_size,
+                    chunk_overlap=request.chunk_overlap,
+                )
                 
                 # 读取文件内容
                 print("读取文件内容...")
@@ -1916,14 +2326,31 @@ async def embed_files(request: FileEmbedRequest):
                 
             except Exception as e:
                 # 更新文件状态为错误
-                error_msg = f"文件嵌入失败: {file_id}, 错误: {safe_str(e)}"
+                detailed_error = log_detailed_exception(
+                    main_logger,
+                    "文件嵌入失败",
+                    e,
+                    {
+                        "file_id": file_id,
+                        "filename": file_info.get("filename") if "file_info" in locals() and file_info else None,
+                        "database_name": locals().get("database_name"),
+                        "rag_system": request.rag_system,
+                        "chunk_size": request.chunk_size,
+                        "chunk_overlap": request.chunk_overlap,
+                        "content_chars": len(content) if "content" in locals() else None,
+                        "runtime_settings": get_runtime_settings_context(),
+                    },
+                )
+                user_friendly_error = extract_user_friendly_error(detailed_error)
+                error_msg = f"文件嵌入失败: {file_id}, 错误: {detailed_error}"
                 print(f"[ERROR] {error_msg}")
-                file_manager.update_file_status(file_id, "error", safe_str(e))
+                file_manager.update_file_status(file_id, "error", user_friendly_error)
                 
                 results.append({
                     "file_id": file_id,
                     "status": "error",
-                    "error": safe_str(e)
+                    "error": user_friendly_error,
+                    "detailed_error": detailed_error[:500]
                 })
         
         successful = len([r for r in results if r.get('status') == 'embedded'])
@@ -1933,9 +2360,22 @@ async def embed_files(request: FileEmbedRequest):
         return {"embedded_files": results}
 
     except Exception as e:
-        error_msg = f"批量嵌入失败: {safe_str(e)}"
+        detailed_error = log_detailed_exception(
+            main_logger,
+            "批量嵌入失败",
+            e,
+            {
+                "file_ids": request.file_ids,
+                "rag_system": request.rag_system,
+                "target_database": request.target_database,
+                "chunk_size": request.chunk_size,
+                "chunk_overlap": request.chunk_overlap,
+                "runtime_settings": get_runtime_settings_context(),
+            },
+        )
+        error_msg = f"批量嵌入失败: {detailed_error}"
         print(f"[ERROR] {error_msg}")
-        raise HTTPException(status_code=500, detail=error_msg)
+        raise HTTPException(status_code=500, detail=extract_user_friendly_error(detailed_error))
 
 @app.post("/cache/clear")
 async def clear_hyperrag_cache():
@@ -1960,7 +2400,8 @@ class WebSocketLogHandler(logging.Handler):
             # 使用safe_str处理可能包含问题Unicode字符的日志消息
             safe_message = safe_str(log_message)
             # 异步发送日志消息
-            asyncio.create_task(self.connection_manager.send_log_message({
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.connection_manager.send_log_message({
                 "type": "log",
                 "level": record.levelname,
                 "message": safe_message,
@@ -1987,11 +2428,12 @@ class WebSocketStreamHandler:
             if message.strip():
                 # 使用safe_str处理可能包含问题Unicode字符的消息
                 safe_message = safe_str(message.strip())
-                asyncio.create_task(self.connection_manager.send_log_message({
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.connection_manager.send_log_message({
                     "type": "console",
                     "level": "ERROR" if self.stream_type == "stderr" else "INFO",
                     "message": safe_message,
-                    "timestamp": asyncio.get_event_loop().time(),
+                    "timestamp": loop.time(),
                     "source": self.stream_type
                 }))
         except Exception:
@@ -2099,10 +2541,16 @@ def setup_comprehensive_logging():
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
     
+    log_dir = Path(__file__).resolve().parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
     # 创建WebSocket处理器
     ws_handler = WebSocketLogHandler(manager)
     ws_handler.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    detailed_formatter = logging.Formatter(
+        '%(asctime)s - %(process)d - %(threadName)s - %(name)s - %(levelname)s - %(message)s'
+    )
     ws_handler.setFormatter(formatter)
     
     # 创建控制台处理器（保留控制台输出）
@@ -2115,14 +2563,37 @@ def setup_comprehensive_logging():
             console_handler.stream.reconfigure(encoding='utf-8', errors='replace')
         except Exception:
             pass  # 如果重新配置失败，继续使用默认编码
+
+    # 创建文件日志处理器：backend.log 记录完整运行日志，error.log 只记录错误和 traceback
+    backend_file_handler = RotatingFileHandler(
+        log_dir / "backend.log",
+        maxBytes=20 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    backend_file_handler.setLevel(logging.DEBUG)
+    backend_file_handler.setFormatter(detailed_formatter)
+
+    error_file_handler = RotatingFileHandler(
+        log_dir / "error.log",
+        maxBytes=20 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    error_file_handler.setLevel(logging.ERROR)
+    error_file_handler.setFormatter(detailed_formatter)
     
     # 添加处理器到根日志记录器
     root_logger.addHandler(ws_handler)
     root_logger.addHandler(console_handler)
+    root_logger.addHandler(backend_file_handler)
+    root_logger.addHandler(error_file_handler)
 
     # 添加安全日志过滤器到根记录器
     safe_filter = SafeLogFilter()
     root_logger.addFilter(safe_filter)
+    for handler in root_logger.handlers:
+        handler.addFilter(safe_filter)
     
     # 设置特定模块的日志级别
     logging.getLogger('hyperrag').setLevel(logging.INFO)
@@ -2148,6 +2619,9 @@ def setup_comprehensive_logging():
         module_logger.propagate = True
         # 添加安全过滤器到每个模块
         module_logger.addFilter(safe_filter)
+
+    root_logger.info(f"日志文件已启用: {log_dir / 'backend.log'}")
+    root_logger.info(f"错误日志文件已启用: {log_dir / 'error.log'}")
     
     return root_logger
 
@@ -2254,6 +2728,31 @@ async def embed_files_with_progress(request: FileEmbedRequest):
     if request.target_database:
         main_logger.info(f"目标数据库已指定: {request.target_database}")
         print(f"目标数据库: {request.target_database}")
+
+    try:
+        await preflight_hyperrag_api_services()
+    except Exception as e:
+        detailed_error = log_detailed_exception(
+            main_logger,
+            "文档嵌入启动前预检失败",
+            e,
+            {
+                "file_ids": request.file_ids,
+                "rag_system": request.rag_system,
+                "target_database": request.target_database,
+                "chunk_size": request.chunk_size,
+                "chunk_overlap": request.chunk_overlap,
+                "runtime_settings": get_runtime_settings_context(),
+            },
+        )
+        user_friendly_error = extract_user_friendly_error(detailed_error)
+        await manager.send_progress_update({
+            "type": "error",
+            "error": user_friendly_error,
+            "detailed_error": detailed_error[:500],
+            "total_files": total_files,
+        })
+        raise HTTPException(status_code=400, detail=user_friendly_error)
     
     # 异步处理文件嵌入
     asyncio.create_task(process_files_with_progress(request, total_files))
@@ -2280,6 +2779,9 @@ async def process_files_with_progress(request: FileEmbedRequest, total_files: in
         failed_files = 0
         
         for i, file_id in enumerate(request.file_ids):
+            file_info = None
+            database_name = None
+            content = None
             try:
                 print(f"\n{'='*40}")
                 print(f"处理文件 {i + 1}/{total_files}")
@@ -2352,7 +2854,11 @@ async def process_files_with_progress(request: FileEmbedRequest, total_files: in
                         return {"success": False, "message": "HyperRAG is not available"}
                     print(f"正在初始化 HyperRAG 实例（{request.rag_system.upper()}系统）...")
                     main_logger.info(f"正在初始化 HyperRAG 实例，数据库: {database_name}")
-                    rag = get_or_create_hyperrag(database_name)
+                    rag = get_or_create_hyperrag(
+                        database_name,
+                        chunk_size=request.chunk_size,
+                        chunk_overlap=request.chunk_overlap,
+                    )
                     print(f"[OK] HyperRAG 实例初始化完成")
                     main_logger.info(f"HyperRAG 实例初始化完成，使用数据库: {database_name}")
                 
@@ -2400,27 +2906,33 @@ async def process_files_with_progress(request: FileEmbedRequest, total_files: in
                     print("[OK] 文档嵌入完成！")
                     main_logger.info(f"文档嵌入完成: {file_info['filename']}，数据库: {database_name}")
                 except Exception as embed_error:
-                    error_msg = safe_str(embed_error)
+                    error_msg = log_detailed_exception(
+                        main_logger,
+                        "文档嵌入失败",
+                        embed_error,
+                        {
+                            "file_id": file_id,
+                            "filename": file_info.get("filename") if file_info else None,
+                            "file_size": file_info.get("file_size") if file_info else None,
+                            "file_path": file_info.get("file_path") if file_info else None,
+                            "database_name": database_name,
+                            "rag_system": request.rag_system,
+                            "target_database": request.target_database,
+                            "chunk_size": request.chunk_size,
+                            "chunk_overlap": request.chunk_overlap,
+                            "content_chars": len(content) if content is not None else None,
+                            "runtime_settings": get_runtime_settings_context(),
+                        },
+                    )
 
                     # 提供更详细的错误信息和建议
-                    main_logger.error(f"文档嵌入失败: {error_msg}")
+                    main_logger.error(f"文档嵌入失败摘要: {error_msg}")
 
                     # 检查常见的错误类型并提供建议
-                    if "500" in error_msg:
-                        suggestion = "API服务器错误，请稍后重试"
-                    elif "rate" in error_msg.lower() or "limit" in error_msg.lower():
-                        suggestion = "API速率限制，请减少并发请求或等待一段时间后重试"
-                    elif "timeout" in error_msg.lower():
-                        suggestion = "请求超时，请检查网络连接或增加超时时间"
-                    elif "authentication" in error_msg.lower() or "key" in error_msg.lower():
-                        suggestion = "API密钥问题，请检查配置"
-                    elif "quota" in error_msg.lower():
-                        suggestion = "API配额已用完，请检查账户状态"
-                    else:
-                        suggestion = "未知错误，请检查日志获取详细信息"
+                    suggestion = extract_user_friendly_error(error_msg)
 
                     # 抛出包含详细建议的错误
-                    raise Exception(f"{error_msg}。建议: {suggestion}")
+                    raise RuntimeError(f"{error_msg}。建议: {suggestion}") from embed_error
                 
                 # 更新文件状态为已嵌入
                 file_manager.update_file_status(file_id, "embedded")
@@ -2441,10 +2953,27 @@ async def process_files_with_progress(request: FileEmbedRequest, total_files: in
             except Exception as e:
                 # 更新文件状态为错误
                 error_msg = f"文件处理失败: {file_id}"
-                detailed_error = safe_str(e)
+                detailed_error = log_detailed_exception(
+                    main_logger,
+                    error_msg,
+                    e,
+                    {
+                        "file_id": file_id,
+                        "filename": file_info.get("filename") if file_info else None,
+                        "file_size": file_info.get("file_size") if file_info else None,
+                        "file_path": file_info.get("file_path") if file_info else None,
+                        "database_name": database_name,
+                        "rag_system": request.rag_system,
+                        "target_database": request.target_database,
+                        "chunk_size": request.chunk_size,
+                        "chunk_overlap": request.chunk_overlap,
+                        "content_chars": len(content) if content is not None else None,
+                        "runtime_settings": get_runtime_settings_context(),
+                    },
+                )
                 print(f"[ERROR] {error_msg}")
                 print(f"[ERROR] 详细错误: {detailed_error}")
-                main_logger.error(f"{error_msg}, 详细错误: {detailed_error}")
+                main_logger.error(f"{error_msg}, 详细错误摘要: {detailed_error}")
 
                 # 提取有用的错误信息给用户
                 user_friendly_error = extract_user_friendly_error(detailed_error)
@@ -2483,7 +3012,21 @@ async def process_files_with_progress(request: FileEmbedRequest, total_files: in
         
     except Exception as e:
         # 发送整体错误信息
-        error_msg = f"批量嵌入失败: {safe_str(e)}"
+        detailed_error = log_detailed_exception(
+            main_logger,
+            "批量嵌入失败",
+            e,
+            {
+                "file_ids": request.file_ids,
+                "total_files": total_files,
+                "rag_system": request.rag_system,
+                "target_database": request.target_database,
+                "chunk_size": request.chunk_size,
+                "chunk_overlap": request.chunk_overlap,
+                "runtime_settings": get_runtime_settings_context(),
+            },
+        )
+        error_msg = f"批量嵌入失败: {detailed_error}"
         print(f"[ERROR] {error_msg}")
         main_logger.error(error_msg)
         await manager.send_progress_update({

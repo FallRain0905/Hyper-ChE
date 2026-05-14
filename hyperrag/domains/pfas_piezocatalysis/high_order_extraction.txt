@@ -1,0 +1,39 @@
+{DOMAIN_CONTEXT}
+
+From the entities below, construct 3+ entity hyperedges for PFAS piezocatalytic degradation and mechanism reasoning.
+
+Use EXACT entity names from K_v. Do not invent vertices or append values to names.
+
+Build separate hyperedges for distinct themes:
+- MATERIAL_DESIGN: catalyst + material features + piezo/electronic properties.
+- OPERATION_PERFORMANCE: catalyst + PFAS target + process + conditions + metrics.
+- MECHANISM_PATHWAY: catalyst/property + active species/evidence + C-F cleavage/defluorination/mineralization.
+- ADSORPTION_ORIENTATION: surface feature + PFAS headgroup/fluorinated chain + local field.
+- CHARGE_TRANSFER: piezo charge/direct electron transfer/band structure/conductive component.
+- COUPLING_STRATEGY: piezo + photo/electro/Fenton/contact-electro/PMS/PDS/adsorption synergy.
+- MATRIX_APPLICATION: material/process + real water/soil matrix.
+- COMPARISON: materials, dopants, processes, PFAS chain lengths, or conditions compared under shared metrics.
+
+COMPARISON trigger:
+When text presents a series or table comparing d33, oxygen vacancy, band gap, doping strategies, ultrasound frequency/power, process strategies, PFAS chain lengths, or short-chain PFAS outcomes, create one COMPARISON hyperedge including all exact candidate entity names and shared metric/condition names.
+
+OUTPUT FORMAT - JSON array, nothing else:
+[
+  {{
+    "vertices": ["<entity name from K_v>", "<entity name from K_v>", "..."],
+    "relation_type": "MATERIAL_DESIGN | OPERATION_PERFORMANCE | MECHANISM_PATHWAY | ADSORPTION_ORIENTATION | CHARGE_TRANSFER | COUPLING_STRATEGY | MATRIX_APPLICATION | COMPARISON",
+    "description": "<detailed description covering all entities>",
+    "generalization": "<one-sentence summary>",
+    "keywords": "<overarching concepts>",
+    "strength": <0-10 integer>,
+    "evidence_span": "<verbatim quote from text, <=120 chars>"
+  }}
+]
+
+Entities (K_v):
+{K_v_JSON}
+
+Text:
+{CHUNK_TEXT}
+
+Output ONLY the JSON array. No prose before or after.

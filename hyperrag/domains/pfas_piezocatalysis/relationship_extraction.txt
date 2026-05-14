@@ -1,0 +1,61 @@
+{DOMAIN_CONTEXT}
+
+From the entities below, extract BOTH low-order relations and high-order hyperedges in ONE pass.
+
+Use low-order relations as the reasoning scaffold for high-order hyperedges:
+1. Identify direct pairwise relations between entities.
+2. Group strongly connected pairs into 3+ entity hyperedges.
+3. High-order hyperedges must summarize a material design, operation-performance setup, mechanism pathway, adsorption orientation, charge-transfer claim, coupling strategy, matrix application, or comparison.
+
+CRITICAL - Vertex Name Matching:
+Use EXACT entity names from K_v. Do not invent vertices. Do not append numeric values to names. If a useful concept is absent from K_v, mention it in description/evidence_span but omit it from vertices.
+
+RELATION TYPES:
+- MATERIAL_DESIGN: material + composition/phase/morphology/defect/property.
+- OPERATION_PERFORMANCE: material + PFAS target + process + condition + metric.
+- MECHANISM_PATHWAY: property/material + active species/evidence + C-F cleavage/defluorination/mineralization.
+- ADSORPTION_ORIENTATION: surface feature + PFAS headgroup/chain orientation + local electric field.
+- CHARGE_TRANSFER: piezo charge, direct electron transfer, band structure, or conductive component participates in C-F activation.
+- COUPLING_STRATEGY: piezo process coupled with photo/electro/Fenton/PMS/PDS/contact-electro/adsorption.
+- MATRIX_APPLICATION: material/process tested in groundwater, AFFF, leachate, wastewater, soil, or co-contaminated matrix.
+- COMPARISON: materials, dopants, processes, PFAS chain lengths, or conditions compared under shared metrics.
+
+REQUIRED HIGH-ORDER PATTERNS:
+- Material design hyperedge: catalyst + material features + piezo/electronic properties.
+- Operation-performance hyperedge: catalyst + PFAS target + process + conditions + metrics.
+- Mechanism-pathway hyperedge: catalyst/property + active species/evidence + C-F cleavage/defluorination/mineralization claim.
+- Adsorption-orientation hyperedge when surface binding, headgroup interaction, fluorinated-chain orientation, or local field is discussed.
+- Comparison hyperedge when the text compares d33, oxygen vacancy, band gap, doping strategy, ultrasound frequency/power, PFAS chain length, short-chain PFAS, or coupled strategies.
+
+Entities (K_v):
+{K_v_JSON}
+
+Text:
+{CHUNK_TEXT}
+
+OUTPUT FORMAT - strict JSON object, nothing else:
+{{
+  "low_order_relations": [
+    {{
+      "source": "<entity name from K_v>",
+      "target": "<entity name from K_v>",
+      "relation_type": "MATERIAL_DESIGN | OPERATION_PERFORMANCE | MECHANISM_PATHWAY | ADSORPTION_ORIENTATION | CHARGE_TRANSFER | COUPLING_STRATEGY | MATRIX_APPLICATION | COMPARISON",
+      "description": "<why related>",
+      "keywords": "<overarching concepts>",
+      "strength": <0-10 integer>
+    }}
+  ],
+  "high_order_hyperedges": [
+    {{
+      "vertices": ["<entity name from K_v>", "<entity name from K_v>", "..."],
+      "relation_type": "MATERIAL_DESIGN | OPERATION_PERFORMANCE | MECHANISM_PATHWAY | ADSORPTION_ORIENTATION | CHARGE_TRANSFER | COUPLING_STRATEGY | MATRIX_APPLICATION | COMPARISON",
+      "description": "<detailed description covering all entities>",
+      "generalization": "<one-sentence summary>",
+      "keywords": "<overarching concepts>",
+      "strength": <0-10 integer>,
+      "evidence_span": "<verbatim quote from text, <=120 chars>"
+    }}
+  ]
+}}
+
+Output ONLY the JSON object. No prose before or after.

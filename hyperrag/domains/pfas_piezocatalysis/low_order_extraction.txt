@@ -1,0 +1,35 @@
+{DOMAIN_CONTEXT}
+
+From the entities below, identify all clearly related pairs. Output a JSON array.
+
+Use EXACT entity names from K_v. Do not invent vertices or append values to names.
+
+RELATION TYPES:
+- MATERIAL_DESIGN: material is connected to composition, phase, morphology, defect, or property.
+- OPERATION_PERFORMANCE: material, PFAS target, process, condition, or metric are part of one treatment setup.
+- MECHANISM_PATHWAY: active species or evidence supports C-F cleavage, direct electron transfer, defluorination, ROS pathway, or mineralization.
+- ADSORPTION_ORIENTATION: surface feature controls PFAS adsorption orientation or local-field interaction.
+- CHARGE_TRANSFER: piezo charge, electron/hole, band structure, or conductive component supports charge transfer.
+- COUPLING_STRATEGY: piezo process is coupled with photo/electro/Fenton/PMS/PDS/contact-electro/adsorption.
+- MATRIX_APPLICATION: process/material is tested in a real or simulated water/soil matrix.
+- COMPARISON: two entities are compared under a shared criterion.
+
+OUTPUT FORMAT - JSON array, nothing else:
+[
+  {{
+    "source": "<entity name from K_v>",
+    "target": "<entity name from K_v>",
+    "relation_type": "MATERIAL_DESIGN | OPERATION_PERFORMANCE | MECHANISM_PATHWAY | ADSORPTION_ORIENTATION | CHARGE_TRANSFER | COUPLING_STRATEGY | MATRIX_APPLICATION | COMPARISON",
+    "description": "<why related>",
+    "keywords": "<overarching concepts>",
+    "strength": <0-10 integer>
+  }}
+]
+
+Entities (K_v):
+{K_v_JSON}
+
+Text:
+{CHUNK_TEXT}
+
+Output ONLY the JSON array. No prose before or after.

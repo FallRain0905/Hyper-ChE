@@ -583,6 +583,25 @@ def get_high_order_extraction_prompt(domain='default', **kwargs):
             print(f"Warning: high_order_extraction template not found for domain '{domain}', using default")
             return get_default_high_order_prompt(**kwargs)
 
+def get_relationship_extraction_prompt(domain='default', **kwargs):
+    """
+    Get combined low-order and high-order relationship extraction prompt.
+
+    Returns None when a domain has no combined relationship template so callers
+    can fall back to the legacy two-step low/high extraction flow.
+    """
+    if domain == 'default' or not DOMAIN_SUPPORT_AVAILABLE:
+        return None
+
+    try:
+        template = domain_manager.get_prompt_template('relationship_extraction', domain)
+        domain_context = get_domain_context(domain)
+
+        kwargs['DOMAIN_CONTEXT'] = domain_context
+        return template.format(**kwargs)
+    except FileNotFoundError:
+        return None
+
 def get_query_keywords_prompt(domain='default', **kwargs):
     """
     Get query keywords extraction prompt for a specific domain

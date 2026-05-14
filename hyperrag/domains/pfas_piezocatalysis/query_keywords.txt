@@ -1,0 +1,31 @@
+{DOMAIN_CONTEXT}
+
+Extract retrieval keywords from the user query for PFAS piezocatalytic degradation literature. Output JSON only.
+
+The current retrieval code expects these exact fields:
+- high_level_keywords: themes, mechanisms, process strategies, comparison dimensions, and research questions.
+- low_level_keywords: exact materials, PFAS targets, properties, conditions, metrics, active species, and evidence terms.
+
+High-level examples:
+"PFAS piezocatalytic defluorination", "direct electron transfer", "short-chain PFAS degradation", "adsorption orientation", "coupling strategy comparison", "C-F bond activation", "ultrasound frequency window".
+
+Low-level examples:
+"BaTiO3", "PFOS", "PFBA", "GenX", "d33", "oxygen vacancy", "band gap", "ultrasound frequency", "power density", "defluorination ratio", "fluoride release", "EPR", "scavenger test".
+
+OUTPUT FORMAT - JSON object, nothing else:
+{{
+  "high_level_keywords": ["...", "..."],
+  "low_level_keywords": ["...", "..."]
+}}
+
+EXAMPLE:
+Query: "Which of d33, oxygen vacancy concentration, and band gap is most strongly associated with PFOA defluorination in BaTiO3-based systems?"
+Output:
+{{
+  "high_level_keywords": ["PFAS piezocatalytic defluorination", "material-property performance correlation", "comparison of d33 oxygen vacancy band gap"],
+  "low_level_keywords": ["BaTiO3", "PFOA", "d33", "oxygen vacancy", "band gap", "defluorination ratio"]
+}}
+
+Query: {QUERY}
+
+Output ONLY the JSON object.

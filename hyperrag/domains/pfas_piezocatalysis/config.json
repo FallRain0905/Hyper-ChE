@@ -1,0 +1,165 @@
+{
+  "domain_name": "pfas_piezocatalysis",
+  "domain_description": "PFAS piezocatalytic degradation, defluorination, mineralization, and mechanism reasoning",
+  "domain_context": "You are an expert in PFAS remediation and piezocatalytic water treatment. You understand per- and polyfluoroalkyl substances (PFAS), C-F bond activation, defluorination/mineralization pathways, piezoelectric materials, contact-electro-catalysis, photo/electro/Fenton coupling strategies, and environmental water matrices.\n\nIn this task you will extract structured knowledge from PFAS remediation literature, with emphasis on piezocatalytic PFAS degradation and mechanism evidence. Follow the ontology, rules, and output format exactly.",
+  "entity_types": [
+    {
+      "name": "PFAS_TARGET",
+      "description": "PFAS pollutants, fluoropolymers, fluorotelomers, and target molecules for degradation or defluorination",
+      "examples": ["PFOA", "PFOS", "PFBA", "PFBS", "GenX", "PTFE", "fluorotelomer alcohols"]
+    },
+    {
+      "name": "CATALYST_MATERIAL",
+      "description": "Catalysts, adsorbents, membranes, electrodes, or composite materials used for PFAS treatment",
+      "examples": ["BaTiO3", "BiFeO3", "PTFE", "Fe/ZnO", "MoS2/Fe3O4", "BDD", "Ti/SnO2-Sb"]
+    },
+    {
+      "name": "MATERIAL_FEATURE",
+      "description": "Material design variables that affect PFAS adsorption, charge transfer, or C-F activation",
+      "examples": ["oxygen vacancy", "heterojunction", "nanowire morphology", "surface fluorination", "local electric field"]
+    },
+    {
+      "name": "PIEZO_PROPERTY",
+      "description": "Piezoelectric, electronic, interfacial, or charge-transport properties",
+      "examples": ["d33", "polarization", "band gap", "charge separation", "conductivity", "zeta potential"]
+    },
+    {
+      "name": "PROCESS_STRATEGY",
+      "description": "Treatment process or coupled strategy",
+      "subtypes": ["piezo", "piezo_photo", "piezo_electro", "piezo_fenton", "contact_electro", "adsorption", "electrochemical", "photocatalytic", "mechanochemical", "other"],
+      "examples": ["piezocatalysis", "piezo-photocatalysis", "piezo-Fenton", "contact-electro-catalysis"]
+    },
+    {
+      "name": "CONDITION",
+      "description": "Reaction, operation, pretreatment, or water-matrix conditions",
+      "subtypes": ["reaction", "synthesis", "matrix"],
+      "examples": ["ultrasound frequency", "power density", "pH", "temperature", "reaction time", "catalyst dosage"]
+    },
+    {
+      "name": "METRIC",
+      "description": "Performance, defluorination, mineralization, or material-property metrics",
+      "subtypes": ["performance", "mechanistic", "material_property"],
+      "examples": ["degradation efficiency", "defluorination ratio", "fluoride yield", "rate constant", "TOC removal", "d33"]
+    },
+    {
+      "name": "ACTIVE_SPECIES",
+      "description": "Reactive oxygen species, charge carriers, reducing species, or oxidants involved in degradation",
+      "examples": ["hydroxyl radical", "sulfate radical", "superoxide radical", "hole", "electron", "hydrated electron", "H2O2"]
+    },
+    {
+      "name": "MECHANISM_EVIDENCE",
+      "description": "Experimental or theoretical evidence supporting pathways, charge transfer, ROS, C-F cleavage, or mineralization",
+      "examples": ["EPR", "scavenger test", "isotope labeling", "DFT", "LC-MS intermediates", "fluoride release", "control experiment"]
+    },
+    {
+      "name": "WATER_MATRIX",
+      "description": "Real or simulated environmental matrix",
+      "examples": ["pure water", "groundwater", "AFFF", "landfill leachate", "wastewater", "soil"]
+    }
+  ],
+  "relation_types": [
+    {
+      "name": "MATERIAL_DESIGN",
+      "description": "Material is defined or modified by composition, phase, morphology, defect, or piezoelectric/electronic property",
+      "examples": ["BaTiO3 with oxygen vacancies", "Fe/ZnO heterojunction", "nanowire aspect ratio"]
+    },
+    {
+      "name": "OPERATION_PERFORMANCE",
+      "description": "A treatment setup connects material, PFAS target, process, conditions, and measured performance",
+      "examples": ["BaTiO3 degrades PFOS under ultrasound with reported defluorination"]
+    },
+    {
+      "name": "MECHANISM_PATHWAY",
+      "description": "Material/property/species/evidence explains C-F cleavage, defluorination, ROS pathway, or mineralization",
+      "examples": ["EPR detects radicals", "fluoride release supports defluorination"]
+    },
+    {
+      "name": "ADSORPTION_ORIENTATION",
+      "description": "Surface features, PFAS headgroup/chain orientation, or local electric field influence interfacial adsorption",
+      "examples": ["cationic surface binds sulfonate headgroup", "local field polarizes C-F bond"]
+    },
+    {
+      "name": "CHARGE_TRANSFER",
+      "description": "Piezo charge, direct electron transfer, band structure, or conductive component participates in C-F activation",
+      "examples": ["piezo-generated electrons activate PFOA", "conductive phase improves charge separation"]
+    },
+    {
+      "name": "COUPLING_STRATEGY",
+      "description": "Piezo process is coupled with photo, electro, Fenton, PMS/PDS, contact-electro, or adsorption steps",
+      "examples": ["piezo-photocatalysis", "PMS activation", "adsorption followed by mineralization"]
+    },
+    {
+      "name": "MATRIX_APPLICATION",
+      "description": "Material or process is applied in real/simulated water, soil, or co-contaminated matrix",
+      "examples": ["AFFF-impacted groundwater", "landfill leachate", "PFAS-metal co-contaminated soil"]
+    },
+    {
+      "name": "COMPARISON",
+      "description": "Materials, dopants, processes, PFAS chain lengths, or conditions are compared under shared metrics",
+      "examples": ["long-chain vs short-chain PFAS", "A-site vs B-site doping", "20-80 kHz ultrasound"]
+    }
+  ],
+  "output_format": "json",
+  "language": "English",
+  "critical_rules": [
+    "PFAS identity precision: PFOA != PFOS != PFBA != PFBS != GenX != PTFE",
+    "Material variables are separate entities: composition, phase, morphology, defect, d33, band gap, oxygen vacancy, conductive component",
+    "Numeric values MUST be split into value/unit or value_min/value_max/unit",
+    "Mechanism evidence MUST be extracted when it supports C-F cleavage, direct electron transfer, ROS pathway, or mineralization",
+    "Preserve original entity names; do not translate or canonicalize names"
+  ],
+  "entity_fields": [
+    {"name": "name", "type": "string", "required": true},
+    {
+      "name": "type",
+      "type": "enum",
+      "required": true,
+      "values": ["PFAS_TARGET", "CATALYST_MATERIAL", "MATERIAL_FEATURE", "PIEZO_PROPERTY", "PROCESS_STRATEGY", "CONDITION", "METRIC", "ACTIVE_SPECIES", "MECHANISM_EVIDENCE", "WATER_MATRIX"]
+    },
+    {
+      "name": "subtype",
+      "type": "enum",
+      "required": "conditional",
+      "condition": "type in ['PROCESS_STRATEGY', 'CONDITION', 'METRIC']",
+      "values": ["piezo", "piezo_photo", "piezo_electro", "piezo_fenton", "contact_electro", "adsorption", "electrochemical", "photocatalytic", "mechanochemical", "other", "reaction", "synthesis", "matrix", "performance", "mechanistic", "material_property"]
+    },
+    {"name": "value", "type": "number", "required": false},
+    {"name": "value_min", "type": "number", "required": false},
+    {"name": "value_max", "type": "number", "required": false},
+    {"name": "unit", "type": "string", "required": false},
+    {"name": "description", "type": "string", "required": true},
+    {
+      "name": "key_attribute",
+      "type": "string",
+      "required": "conditional",
+      "condition": "type in ['CATALYST_MATERIAL', 'MATERIAL_FEATURE', 'PIEZO_PROPERTY', 'MECHANISM_EVIDENCE']"
+    }
+  ],
+  "relation_fields": [
+    {"name": "source", "type": "string", "required": true},
+    {"name": "target", "type": "string", "required": true},
+    {
+      "name": "relation_type",
+      "type": "enum",
+      "required": true,
+      "values": ["MATERIAL_DESIGN", "OPERATION_PERFORMANCE", "MECHANISM_PATHWAY", "ADSORPTION_ORIENTATION", "CHARGE_TRANSFER", "COUPLING_STRATEGY", "MATRIX_APPLICATION", "COMPARISON"]
+    },
+    {"name": "description", "type": "string", "required": true},
+    {"name": "keywords", "type": "string", "required": true},
+    {"name": "strength", "type": "integer", "required": true, "range": [0, 10]}
+  ],
+  "hyperedge_fields": [
+    {"name": "vertices", "type": "array", "required": true},
+    {
+      "name": "relation_type",
+      "type": "enum",
+      "required": true,
+      "values": ["MATERIAL_DESIGN", "OPERATION_PERFORMANCE", "MECHANISM_PATHWAY", "ADSORPTION_ORIENTATION", "CHARGE_TRANSFER", "COUPLING_STRATEGY", "MATRIX_APPLICATION", "COMPARISON"]
+    },
+    {"name": "description", "type": "string", "required": true},
+    {"name": "generalization", "type": "string", "required": true},
+    {"name": "keywords", "type": "string", "required": true},
+    {"name": "strength", "type": "integer", "required": true, "range": [0, 10]},
+    {"name": "evidence_span", "type": "string", "required": false}
+  ]
+}

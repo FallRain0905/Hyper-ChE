@@ -2,6 +2,8 @@ import sys
 import asyncio
 import json
 import re
+import traceback
+import time
 from datetime import datetime
 from typing import Union
 from collections import Counter, defaultdict
@@ -42,6 +44,44 @@ except ImportError:
 from .prompt import GRAPH_FIELD_SEP, PROMPTS
 
 # ========== JSON Output Support Functions ==========
+
+def _format_llm_exception(error: Exception) -> str:
+    """Expand Tenacity/OpenAI wrapper errors so chunk-step logs show the provider error."""
+    messages = [f"{type(error).__name__}: {error}"]
+
+    try:
+        last_attempt = getattr(error, "last_attempt", None)
+        inner_error = last_attempt.exception() if last_attempt else None
+        if inner_error is not None:
+            messages.append(f"{type(inner_error).__name__}: {inner_error}")
+            for attr in ("body", "status_code", "code"):
+                value = getattr(inner_error, attr, None)
+                if value:
+                    messages.append(f"{attr}={value}")
+    except Exception:
+        pass
+
+    for chain_attr in ("__cause__", "__context__"):
+        try:
+            chained = getattr(error, chain_attr, None)
+            if chained is not None:
+                messages.append(f"{chain_attr}={type(chained).__name__}: {chained}")
+                for attr in ("body", "status_code", "code"):
+                    value = getattr(chained, attr, None)
+                    if value:
+                        messages.append(f"{chain_attr}.{attr}={value}")
+        except Exception:
+            pass
+
+    return " | ".join(dict.fromkeys(str(message) for message in messages))
+
+def _log_step_exception(chunk_key: str, step: str, label: str, error: Exception) -> None:
+    detail = _format_llm_exception(error)
+    logger.error(f"[{chunk_key}] {step} FAILED - {label}: {detail}")
+    logger.debug(
+        f"[{chunk_key}] {step} FAILED traceback:\n"
+        f"{''.join(traceback.format_exception(type(error), error, error.__traceback__))}"
+    )
 
 def parse_json_entities(json_str: str, chunk_key: str = "") -> list:
     """
@@ -263,6 +303,61 @@ def parse_json_hyperedges(json_str: str, chunk_key: str = "") -> list:
             logger.warning(f"[{chunk_key}] parse_json_hyperedges: Fix attempt failed: {e2}")
         return []
 
+def parse_json_combined_relationships(json_str: str, chunk_key: str = "") -> tuple[list, list]:
+    """
+    Parse combined relationship extraction output.
+
+    Expected format:
+    {
+      "low_order_relations": [...],
+      "high_order_hyperedges": [...]
+    }
+    """
+    logger.debug(f"[{chunk_key}] parse_json_combined_relationships: Raw response (first 500 chars): {json_str[:500]}")
+
+    json_str = re.sub(r'```json\s*', '', json_str)
+    json_str = re.sub(r'```\s*', '', json_str)
+    json_str = json_str.strip()
+
+    json_match = re.search(r'\{.*\}', json_str, re.DOTALL)
+    if not json_match:
+        logger.error(f"[{chunk_key}] parse_json_combined_relationships: No JSON object found (first 1000 chars): {json_str[:1000]}")
+        return [], []
+
+    extracted_json = json_match.group()
+    try:
+        data = json.loads(extracted_json)
+    except json.JSONDecodeError as e:
+        logger.warning(f"[{chunk_key}] parse_json_combined_relationships: JSON decode error at position {e.pos}: {e.msg}")
+        try:
+            fixed_json = re.sub(r',\s*([}\]])', r'\1', extracted_json)
+            fixed_json = re.sub(r'\s+', ' ', fixed_json)
+            data = json.loads(fixed_json)
+            logger.info(f"[{chunk_key}] parse_json_combined_relationships: Successfully parsed after fixing")
+        except Exception as e2:
+            logger.warning(f"[{chunk_key}] parse_json_combined_relationships: Fix attempt failed: {e2}")
+            return [], []
+
+    if not isinstance(data, dict):
+        logger.warning(f"[{chunk_key}] parse_json_combined_relationships: Expected object, got {type(data)}")
+        return [], []
+
+    low_relations = data.get("low_order_relations", [])
+    high_relations = data.get("high_order_hyperedges", [])
+
+    if not isinstance(low_relations, list):
+        logger.warning(f"[{chunk_key}] parse_json_combined_relationships: low_order_relations is not a list")
+        low_relations = []
+    if not isinstance(high_relations, list):
+        logger.warning(f"[{chunk_key}] parse_json_combined_relationships: high_order_hyperedges is not a list")
+        high_relations = []
+
+    logger.info(
+        f"[{chunk_key}] parse_json_combined_relationships: Parsed "
+        f"{len(low_relations)} low-order relations and {len(high_relations)} high-order hyperedges"
+    )
+    return low_relations, high_relations
+
 def convert_json_entity_to_standard_format(entity: dict, chunk_key: str = "") -> dict:
     """
     Convert JSON entity format to standard Hyper-RAG entity format
@@ -425,6 +520,70 @@ def is_json_output_domain(domain: str) -> bool:
         return output_format == "json"
     except:
         return False
+
+def _get_query_keywords_prompt(query: str, global_config: dict) -> str:
+    """
+    Build query-keyword prompt from the active domain when available.
+    Falls back to the original generic keyword prompt.
+    """
+    current_domain = get_domain_from_config(global_config)
+    if current_domain != "default":
+        try:
+            from .prompt import get_query_keywords_prompt
+
+            return get_query_keywords_prompt(
+                domain=current_domain,
+                query=query,
+                QUERY=query,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to load domain query keyword prompt for '{current_domain}': {e}")
+
+    return PROMPTS["keywords_extraction"].format(query=query)
+
+def _parse_query_keywords(result: str, kw_prompt: str, need_relation_keywords: bool = True) -> tuple[str, str]:
+    """
+    Parse keyword extraction JSON while preserving the existing retrieval contract.
+    Supports both high/low fields and older domain prompt aliases.
+    """
+    def _as_list(value):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(v) for v in value if v is not None]
+        if isinstance(value, str):
+            return [value] if value.strip() else []
+        return [str(value)]
+
+    try:
+        keywords_data = json.loads(result)
+    except json.JSONDecodeError:
+        result = (
+            result.replace(kw_prompt[:-1], "")
+            .replace("user", "")
+            .replace("model", "")
+            .strip()
+        )
+        if "{" not in result or "}" not in result:
+            raise json.JSONDecodeError("No JSON object found in keyword extraction result", result, 0)
+        result = "{" + result.split("{", 1)[1].split("}", 1)[0] + "}"
+        keywords_data = json.loads(result)
+
+    entity_keywords = _as_list(keywords_data.get("low_level_keywords", []))
+    if not entity_keywords:
+        entity_keywords = _as_list(keywords_data.get("entity_keywords", []))
+
+    relation_keywords = []
+    if need_relation_keywords:
+        relation_keywords = _as_list(keywords_data.get("high_level_keywords", []))
+        if not relation_keywords:
+            relation_keywords = _as_list(keywords_data.get("theme_keywords", []))
+
+    condition_keywords = _as_list(keywords_data.get("condition_keywords", []))
+    if condition_keywords:
+        entity_keywords = entity_keywords + condition_keywords
+
+    return ", ".join(entity_keywords), ", ".join(relation_keywords)
 
 def chunking_by_token_size(
     content: str, overlap_token_size=128, max_token_size=1024, tiktoken_model="gpt-4o"
@@ -881,13 +1040,17 @@ async def _merge_edges_then_upsert(
 
     # Track UNKNOWN vertex creation
     unknown_count = 0
+    unknown_reference_count = 0
     unknown_names = []
+    unknown_references = []
 
     for need_insert_id in id_set:
         if not (await knowledge_hypergraph_inst.has_vertex(need_insert_id)):
             logger.warning(f"[{source_id}] Creating UNKNOWN vertex for: {need_insert_id}")
             unknown_count += 1
+            unknown_reference_count += 1
             unknown_names.append(need_insert_id)
+            unknown_references.append(need_insert_id)
             await knowledge_hypergraph_inst.upsert_vertex(
                 need_insert_id,
                 {
@@ -897,16 +1060,31 @@ async def _merge_edges_then_upsert(
                     "entity_type": "UNKNOWN",
                 },
             )
+        else:
+            existing_vertex = await knowledge_hypergraph_inst.get_vertex(need_insert_id)
+            if existing_vertex and existing_vertex.get("entity_type") == "UNKNOWN":
+                unknown_reference_count += 1
+                unknown_references.append(need_insert_id)
 
     # Log UNKNOWN vertex statistics with context
-    if unknown_count > 0:
-        logger.warning(f"[{source_id}] Created {unknown_count} UNKNOWN vertices out of {len(id_set)} total ({unknown_count/len(id_set)*100:.1f}%)")
-        logger.warning(f"[{source_id}] Hyperedge vertices: {list(id_set)}")
+    if unknown_reference_count > 0:
+        unknown_rate = unknown_reference_count / len(id_set) * 100 if id_set else 0
+        logger.warning(
+            f"[{source_id}] UNKNOWN vertices in edge: created={unknown_count}, "
+            f"references={unknown_reference_count}, vertices_total={len(id_set)}, "
+            f"unknown_rate={unknown_rate:.2f}%"
+        )
+        logger.warning(f"[{source_id}] UNKNOWN names: {unknown_references[:20]}")
+        logger.warning(f"[{source_id}] Full hyperedge vertices: {list(id_set)}")
         if relation_type:
-            logger.warning(f"[{source_id}] Hyperedge type: {relation_type}")
-        if unknown_count > len(id_set) * 0.5:
-            logger.error(f"[{source_id}] CRITICAL: More than 50% vertices are UNKNOWN! Check high_order_extraction.txt")
-            logger.error(f"[{source_id}] Unknown vertex names: {unknown_names[:10]}")  # Log first 10 to avoid flooding
+            logger.warning(f"[{source_id}] Relation type: {relation_type}")
+        if evidence_span:
+            logger.warning(f"[{source_id}] Evidence span: {evidence_span[:500]}")
+        if description:
+            logger.warning(f"[{source_id}] Edge description: {description[:500]}")
+        if unknown_reference_count > len(id_set) * 0.5:
+            logger.error(f"[{source_id}] CRITICAL: More than 50% vertices are UNKNOWN in this edge")
+            logger.error(f"[{source_id}] Unknown vertex names: {unknown_references[:10]}")  # Log first 10 to avoid flooding
             logger.error(f"[{source_id}] This likely indicates composite names (e.g., 'CP + MEMBr') or numeric suffixes (e.g., 'CE 99.1%')")
     description = await _handle_relation_summary(  # 应该重新写一个针对超边描述进行合并的函数
         id_set, description, global_config
@@ -934,6 +1112,11 @@ async def _merge_edges_then_upsert(
         id_set=id_set,
         description=description,
         keywords=filter_keywords,
+        source_id=source_id,
+        unknown_created_count=unknown_count,
+        unknown_reference_count=unknown_reference_count,
+        unknown_names=unknown_references,
+        vertex_count=len(id_set),
     )
     if evidence_span:
         edge_data["evidence_span"] = evidence_span
@@ -941,6 +1124,60 @@ async def _merge_edges_then_upsert(
         edge_data["relation_type"] = relation_type
 
     return edge_data
+
+
+def _log_unknown_summary(relationships_data: list[dict]):
+    """Log aggregate UNKNOWN vertex statistics for prompt-quality debugging."""
+    relationships_data = [dp for dp in relationships_data if dp]
+    if not relationships_data:
+        return
+
+    total_edges = len(relationships_data)
+    edges_with_unknown = sum(
+        1 for dp in relationships_data if dp.get("unknown_reference_count", 0) > 0
+    )
+    total_vertex_mentions = sum(dp.get("vertex_count", len(dp.get("id_set", []))) for dp in relationships_data)
+    unknown_vertex_mentions = sum(dp.get("unknown_reference_count", 0) for dp in relationships_data)
+    unknown_created_mentions = sum(dp.get("unknown_created_count", 0) for dp in relationships_data)
+    unknown_rate = (
+        unknown_vertex_mentions / total_vertex_mentions * 100
+        if total_vertex_mentions
+        else 0
+    )
+
+    unknown_counter = Counter()
+    unknown_by_relation_type = Counter()
+    for dp in relationships_data:
+        unknown_names = dp.get("unknown_names", [])
+        if unknown_names:
+            unknown_counter.update(unknown_names)
+            relation_type = dp.get("relation_type", "UNKNOWN_RELATION_TYPE") or "UNKNOWN_RELATION_TYPE"
+            for rel_type in split_string_by_multi_markers(str(relation_type), [GRAPH_FIELD_SEP]):
+                unknown_by_relation_type[rel_type or "UNKNOWN_RELATION_TYPE"] += len(unknown_names)
+
+    if unknown_vertex_mentions == 0:
+        logger.info(
+            "UNKNOWN SUMMARY: total_edges=%s, total_vertex_mentions=%s, "
+            "unknown_vertex_mentions=0, unknown_rate=0.00%%",
+            total_edges,
+            total_vertex_mentions,
+        )
+        return
+
+    logger.warning(
+        "UNKNOWN SUMMARY: total_edges=%s, edges_with_unknown=%s, "
+        "total_vertex_mentions=%s, unknown_vertex_mentions=%s, "
+        "unknown_created_mentions=%s, unknown_rate=%.2f%%, unique_unknown_vertices=%s",
+        total_edges,
+        edges_with_unknown,
+        total_vertex_mentions,
+        unknown_vertex_mentions,
+        unknown_created_mentions,
+        unknown_rate,
+        len(unknown_counter),
+    )
+    logger.warning("UNKNOWN SUMMARY top_unknown_vertices=%s", unknown_counter.most_common(20))
+    logger.warning("UNKNOWN SUMMARY unknown_by_relation_type=%s", dict(unknown_by_relation_type))
 
 
 async def _process_json_format_extraction(
@@ -963,8 +1200,14 @@ async def _process_json_format_extraction(
     Returns:
         Tuple of (entities, relations) in standard format
     """
-    from .prompt import get_entity_extraction_prompt, get_low_order_extraction_prompt, get_high_order_extraction_prompt
+    from .prompt import (
+        get_entity_extraction_prompt,
+        get_high_order_extraction_prompt,
+        get_low_order_extraction_prompt,
+        get_relationship_extraction_prompt,
+    )
 
+    chunk_extract_start = time.perf_counter()
     logger.info(f"[{chunk_key}] Starting JSON format extraction for domain: {domain}")
 
     # Step 1: Extract entities using domain-specific prompt
@@ -977,12 +1220,13 @@ async def _process_json_format_extraction(
 
     try:
         logger.info(f"[{chunk_key}] Step 1: Calling LLM for entity extraction...")
+        step_start = time.perf_counter()
         entity_result = await use_llm_func(entity_prompt)
-        logger.info(f"[{chunk_key}] Step 1: LLM returned {len(entity_result)} chars")
+        logger.info(f"[{chunk_key}] Step 1: LLM returned {len(entity_result)} chars in {time.perf_counter() - step_start:.2f}s")
         entities_json = parse_json_entities(entity_result, chunk_key)
         logger.info(f"[{chunk_key}] Step 1: Parsed {len(entities_json)} entities from JSON")
     except Exception as e:
-        logger.error(f"[{chunk_key}] Step 1 FAILED - Entity extraction error: {type(e).__name__}: {e}")
+        _log_step_exception(chunk_key, "Step 1", "Entity extraction error", e)
         return [], []
 
     if not entities_json:
@@ -1018,48 +1262,76 @@ async def _process_json_format_extraction(
             info["unit"] = e["unit"]
         entity_info.append(info)
 
-    logger.debug(f"[{chunk_key}] Step 2: Generating low-order prompt with {len(entity_info)} entities...")
-    low_prompt = get_low_order_extraction_prompt(
-        domain=domain,
-        K_v_JSON=json.dumps(entity_info),
-        CHUNK_TEXT=content
-    )
-    logger.debug(f"[{chunk_key}] Step 2: Prompt length = {len(low_prompt)} chars")
-
     low_relations_json = []
-    try:
-        logger.info(f"[{chunk_key}] Step 2: Calling LLM for low-order relations...")
-        low_result = await use_llm_func(low_prompt)
-        logger.info(f"[{chunk_key}] Step 2: LLM returned {len(low_result)} chars")
-        low_relations_json = parse_json_relations(low_result, chunk_key)
-        logger.info(f"[{chunk_key}] Step 2: Parsed {len(low_relations_json)} low-order relations")
-        if low_relations_json:
-            rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in low_relations_json)
-            logger.debug(f"[{chunk_key}] Step 2: Relation types: {dict(rel_types)}")
-    except Exception as e:
-        logger.error(f"[{chunk_key}] Step 2 FAILED - Low-order relation extraction error: {type(e).__name__}: {e}")
+    high_relations_json = []
 
-    # Step 3: Extract high-order relationships (hyperedges)
-    logger.debug(f"[{chunk_key}] Step 3: Generating high-order prompt with {len(entity_info)} entities...")
-    high_prompt = get_high_order_extraction_prompt(
+    logger.debug(f"[{chunk_key}] Step 2: Generating combined relationship prompt with {len(entity_info)} entities...")
+    combined_prompt = get_relationship_extraction_prompt(
         domain=domain,
         K_v_JSON=json.dumps(entity_info),
         CHUNK_TEXT=content
     )
-    logger.debug(f"[{chunk_key}] Step 3: Prompt length = {len(high_prompt)} chars")
 
-    high_relations_json = []
-    try:
-        logger.info(f"[{chunk_key}] Step 3: Calling LLM for high-order relations (hyperedges)...")
-        high_result = await use_llm_func(high_prompt)
-        logger.info(f"[{chunk_key}] Step 3: LLM returned {len(high_result)} chars")
-        high_relations_json = parse_json_hyperedges(high_result, chunk_key)
-        logger.info(f"[{chunk_key}] Step 3: Parsed {len(high_relations_json)} high-order relations (hyperedges)")
-        if high_relations_json:
-            rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in high_relations_json)
-            logger.debug(f"[{chunk_key}] Step 3: Hyperedge types: {dict(rel_types)}")
-    except Exception as e:
-        logger.error(f"[{chunk_key}] Step 3 FAILED - High-order relation extraction error: {type(e).__name__}: {e}")
+    if combined_prompt is not None:
+        logger.debug(f"[{chunk_key}] Step 2: Combined prompt length = {len(combined_prompt)} chars")
+        try:
+            logger.info(f"[{chunk_key}] Step 2: Calling LLM for combined low/high relationship extraction...")
+            step_start = time.perf_counter()
+            combined_result = await use_llm_func(combined_prompt)
+            logger.info(f"[{chunk_key}] Step 2: LLM returned {len(combined_result)} chars in {time.perf_counter() - step_start:.2f}s")
+            low_relations_json, high_relations_json = parse_json_combined_relationships(
+                combined_result, chunk_key
+            )
+            if low_relations_json:
+                rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in low_relations_json)
+                logger.debug(f"[{chunk_key}] Step 2: Low-order relation types: {dict(rel_types)}")
+            if high_relations_json:
+                rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in high_relations_json)
+                logger.debug(f"[{chunk_key}] Step 2: High-order hyperedge types: {dict(rel_types)}")
+        except Exception as e:
+            _log_step_exception(chunk_key, "Step 2", "Combined relationship extraction error", e)
+    else:
+        logger.info(f"[{chunk_key}] Step 2: Combined relationship template not found; using legacy low/high extraction")
+
+        logger.debug(f"[{chunk_key}] Step 2a: Generating low-order prompt with {len(entity_info)} entities...")
+        low_prompt = get_low_order_extraction_prompt(
+            domain=domain,
+            K_v_JSON=json.dumps(entity_info),
+            CHUNK_TEXT=content
+        )
+        logger.debug(f"[{chunk_key}] Step 2a: Prompt length = {len(low_prompt)} chars")
+
+        try:
+            logger.info(f"[{chunk_key}] Step 2a: Calling LLM for low-order relations...")
+            low_result = await use_llm_func(low_prompt)
+            logger.info(f"[{chunk_key}] Step 2a: LLM returned {len(low_result)} chars")
+            low_relations_json = parse_json_relations(low_result, chunk_key)
+            logger.info(f"[{chunk_key}] Step 2a: Parsed {len(low_relations_json)} low-order relations")
+            if low_relations_json:
+                rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in low_relations_json)
+                logger.debug(f"[{chunk_key}] Step 2a: Relation types: {dict(rel_types)}")
+        except Exception as e:
+            _log_step_exception(chunk_key, "Step 2a", "Low-order relation extraction error", e)
+
+        logger.debug(f"[{chunk_key}] Step 2b: Generating high-order prompt with {len(entity_info)} entities...")
+        high_prompt = get_high_order_extraction_prompt(
+            domain=domain,
+            K_v_JSON=json.dumps(entity_info),
+            CHUNK_TEXT=content
+        )
+        logger.debug(f"[{chunk_key}] Step 2b: Prompt length = {len(high_prompt)} chars")
+
+        try:
+            logger.info(f"[{chunk_key}] Step 2b: Calling LLM for high-order relations (hyperedges)...")
+            high_result = await use_llm_func(high_prompt)
+            logger.info(f"[{chunk_key}] Step 2b: LLM returned {len(high_result)} chars")
+            high_relations_json = parse_json_hyperedges(high_result, chunk_key)
+            logger.info(f"[{chunk_key}] Step 2b: Parsed {len(high_relations_json)} high-order relations (hyperedges)")
+            if high_relations_json:
+                rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in high_relations_json)
+                logger.debug(f"[{chunk_key}] Step 2b: Hyperedge types: {dict(rel_types)}")
+        except Exception as e:
+            _log_step_exception(chunk_key, "Step 2b", "High-order relation extraction error", e)
 
     # Convert all relations to standard format
     relations = []
@@ -1073,7 +1345,8 @@ async def _process_json_format_extraction(
         if standard_relation:
             relations.append(standard_relation)
 
-    logger.info(f"[{chunk_key}] Pipeline complete: {len(entities)} entities, {len(relations)} relations "
+    logger.info(f"[{chunk_key}] Pipeline complete in {time.perf_counter() - chunk_extract_start:.2f}s: "
+                f"{len(entities)} entities, {len(relations)} relations "
                 f"(low={len(low_relations_json)}, high={len(high_relations_json)})")
 
     # Validate output if domain support is available (non-blocking)
@@ -1286,11 +1559,13 @@ async def extract_entities(
     # ----------------------------------------------------------------------------
     # use_llm_func is wrapped in ascynio.Semaphore, limiting max_async callings
     begin_time = datetime.now()
+    extract_start = time.perf_counter()
     logger.info(f"Starting parallel processing of {len(ordered_chunks)} chunks...")
     results = await asyncio.gather(
         *[_process_single_content(c) for c in ordered_chunks],
         return_exceptions=True
     )
+    logger.info(f"Chunk LLM extraction wall time: {time.perf_counter() - extract_start:.2f}s")
 
     # Count successes and failures
     success_count = 0
@@ -1331,6 +1606,7 @@ async def extract_entities(
     """
         update the hypergraph database
     """
+    merge_start = time.perf_counter()
     logger.info(f"Merging and upserting {len(maybe_nodes)} unique entities to hypergraph...")
     all_entities_data = await asyncio.gather(
         *[
@@ -1346,6 +1622,8 @@ async def extract_entities(
             for k, v in maybe_edges.items()
         ]
     )
+    _log_unknown_summary(all_relationships_data)
+    logger.info(f"Hypergraph merge/upsert wall time: {time.perf_counter() - merge_start:.2f}s")
     if not len(all_entities_data):
         logger.warning("Didn't extract any entities, maybe your LLM is not working")
         return None
@@ -1356,6 +1634,7 @@ async def extract_entities(
         return None
 
     if entity_vdb is not None:
+        entity_vdb_start = time.perf_counter()
         data_for_vdb = {
             compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
                 "content": dp["entity_name"] + dp["description"],
@@ -1364,8 +1643,10 @@ async def extract_entities(
             for dp in all_entities_data
         }
         await entity_vdb.upsert(data_for_vdb)
+        logger.info(f"Entity vector upsert wall time: {time.perf_counter() - entity_vdb_start:.2f}s")
 
     if relationships_vdb is not None:
+        relationship_vdb_start = time.perf_counter()
         data_for_vdb = {
             compute_mdhash_id(str(sorted(dp["id_set"])), prefix="rel-"): {
                 "id_set": dp["id_set"],
@@ -1376,6 +1657,7 @@ async def extract_entities(
             for dp in all_relationships_data
         }
         await relationships_vdb.upsert(data_for_vdb)
+        logger.info(f"Relationship vector upsert wall time: {time.perf_counter() - relationship_vdb_start:.2f}s")
 
     return knowledge_hypergraph_inst
 
@@ -1838,35 +2120,17 @@ async def hyper_query(
     relation_context = None
     use_model_func = global_config["llm_model_func"]
 
-    kw_prompt_temp = PROMPTS["keywords_extraction"]
-    kw_prompt = kw_prompt_temp.format(query=query)
+    kw_prompt = _get_query_keywords_prompt(query, global_config)
 
     result = await use_model_func(kw_prompt)
 
     try:
-        keywords_data = json.loads(result)
-        entity_keywords = keywords_data.get("low_level_keywords", [])
-        relation_keywords = keywords_data.get("high_level_keywords", [])
-        entity_keywords = ", ".join(entity_keywords)
-        relation_keywords = ", ".join(relation_keywords)
+        entity_keywords, relation_keywords = _parse_query_keywords(
+            result, kw_prompt, need_relation_keywords=True
+        )
     except json.JSONDecodeError:
-        try:
-            result = (
-                result.replace(kw_prompt[:-1], "")
-                .replace("user", "")
-                .replace("model", "")
-                .strip()
-            )
-            result = "{" + result.split("{")[1].split("}")[0] + "}"
-            keywords_data = json.loads(result)
-            relation_keywords = keywords_data.get("high_level_keywords", [])
-            entity_keywords = keywords_data.get("low_level_keywords", [])
-            relation_keywords = ", ".join(relation_keywords)
-            entity_keywords = ", ".join(entity_keywords)
-        # Handle parsing error
-        except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {e}")
-            return PROMPTS["fail_response"]
+        print(f"JSON parsing error: {result}")
+        return PROMPTS["fail_response"]
     """
         Perform different actions based on keywords:
             ll_keywords: Find information based on low-level keywords.
@@ -1958,36 +2222,18 @@ async def hyper_query_stream(
     if use_model_stream_func is None:
         raise AttributeError("llm_model_stream_func not found; streaming is unavailable.")
 
-    kw_prompt_temp = PROMPTS["keywords_extraction"]
-    kw_prompt = kw_prompt_temp.format(query=query)
+    kw_prompt = _get_query_keywords_prompt(query, global_config)
 
     result = await use_model_func(kw_prompt)
 
     try:
-        keywords_data = json.loads(result)
-        entity_keywords = keywords_data.get("low_level_keywords", [])
-        relation_keywords = keywords_data.get("high_level_keywords", [])
-        entity_keywords = ", ".join(entity_keywords)
-        relation_keywords = ", ".join(relation_keywords)
+        entity_keywords, relation_keywords = _parse_query_keywords(
+            result, kw_prompt, need_relation_keywords=True
+        )
     except json.JSONDecodeError:
-        try:
-            result = (
-                result.replace(kw_prompt[:-1], "")
-                .replace("user", "")
-                .replace("model", "")
-                .strip()
-            )
-            result = "{" + result.split("{")[1].split("}")[0] + "}"
-            keywords_data = json.loads(result)
-            relation_keywords = keywords_data.get("high_level_keywords", [])
-            entity_keywords = keywords_data.get("low_level_keywords", [])
-            relation_keywords = ", ".join(relation_keywords)
-            entity_keywords = ", ".join(entity_keywords)
-        # Handle parsing error
-        except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {e}")
-            yield PROMPTS["fail_response"]
-            return
+        print(f"JSON parsing error: {result}")
+        yield PROMPTS["fail_response"]
+        return
 
     """
         Perform different actions based on keywords:
@@ -2073,31 +2319,17 @@ async def hyper_query_lite(
     entity_context = None
     use_model_func = global_config["llm_model_func"]
 
-    kw_prompt_temp = PROMPTS["keywords_extraction"]
-    kw_prompt = kw_prompt_temp.format(query=query)
+    kw_prompt = _get_query_keywords_prompt(query, global_config)
 
     result = await use_model_func(kw_prompt)
 
     try:
-        keywords_data = json.loads(result)
-        entity_keywords = keywords_data.get("low_level_keywords", [])
-        entity_keywords = ", ".join(entity_keywords)
+        entity_keywords, _ = _parse_query_keywords(
+            result, kw_prompt, need_relation_keywords=False
+        )
     except json.JSONDecodeError:
-        try:
-            result = (
-                result.replace(kw_prompt[:-1], "")
-                .replace("user", "")
-                .replace("model", "")
-                .strip()
-            )
-            result = "{" + result.split("{")[1].split("}")[0] + "}"
-            keywords_data = json.loads(result)
-            entity_keywords = keywords_data.get("low_level_keywords", [])
-            entity_keywords = ", ".join(entity_keywords)
-        # Handle parsing error
-        except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {e}")
-            return PROMPTS["fail_response"]
+        print(f"JSON parsing error: {result}")
+        return PROMPTS["fail_response"]
     """
         Perform different actions based on keywords:
             ll_keywords: Find information based on low-level keywords.
@@ -2169,32 +2401,15 @@ async def graph_query(
     检索和返回 hypergraph db 中的成对关系
     """
     use_model_func = global_config["llm_model_func"]
-    kw_prompt_temp = PROMPTS["keywords_extraction"]
-    kw_prompt = kw_prompt_temp.format(query=query)
+    kw_prompt = _get_query_keywords_prompt(query, global_config)
     result = await use_model_func(kw_prompt)
     try:
-        keywords_data = json.loads(result)
-        entity_keywords = keywords_data.get("low_level_keywords", [])
-        relation_keywords = keywords_data.get("high_level_keywords", [])
-        entity_keywords = ", ".join(entity_keywords)
-        relation_keywords = ", ".join(relation_keywords)
+        entity_keywords, relation_keywords = _parse_query_keywords(
+            result, kw_prompt, need_relation_keywords=True
+        )
     except json.JSONDecodeError:
-        try:
-            result = (
-                result.replace(kw_prompt[:-1], "")
-                .replace("user", "")
-                .replace("model", "")
-                .strip()
-            )
-            result = "{" + result.split("{")[1].split("}")[0] + "}"
-            keywords_data = json.loads(result)
-            relation_keywords = keywords_data.get("high_level_keywords", [])
-            entity_keywords = keywords_data.get("low_level_keywords", [])
-            relation_keywords = ", ".join(relation_keywords)
-            entity_keywords = ", ".join(entity_keywords)
-        except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {e}")
-            return PROMPTS["fail_response"]
+        print(f"JSON parsing error: {result}")
+        return PROMPTS["fail_response"]
 
     # 只处理二元关系
     def filter_pairwise_edges(edges):
@@ -2566,30 +2781,17 @@ async def hyper_query_lite_stream(
     if use_model_stream_func is None:
         raise AttributeError("llm_model_stream_func not found; streaming is unavailable.")
 
-    kw_prompt_temp = PROMPTS["keywords_extraction"]
-    kw_prompt = kw_prompt_temp.format(query=query)
+    kw_prompt = _get_query_keywords_prompt(query, global_config)
 
     result = await use_model_func(kw_prompt)
 
     try:
-        keywords_data = json.loads(result)
-        entity_keywords = keywords_data.get("low_level_keywords", [])
-        entity_keywords = ", ".join(entity_keywords)
+        entity_keywords, _ = _parse_query_keywords(
+            result, kw_prompt, need_relation_keywords=False
+        )
     except json.JSONDecodeError:
-        try:
-            result = (
-                result.replace(kw_prompt[:-1], "")
-                .replace("user", "")
-                .replace("model", "")
-                .strip()
-            )
-            result = "{" + result.split("{")[1].split("}")[0] + "}"
-            keywords_data = json.loads(result)
-            entity_keywords = keywords_data.get("low_level_keywords", [])
-            entity_keywords = ", ".join(entity_keywords)
-        except json.JSONDecodeError as e:
-            yield PROMPTS["fail_response"]
-            return
+        yield PROMPTS["fail_response"]
+        return
 
     if entity_keywords:
         entity_context = await _build_entity_query_context(
