@@ -1,4 +1,4 @@
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -12,7 +12,7 @@ ENV VITE_SERVER_URL=${VITE_SERVER_URL}
 
 RUN npm run build
 
-FROM node:18-alpine AS runtime
+FROM node:20-alpine AS runtime
 
 WORKDIR /app
 
