@@ -19,7 +19,7 @@ import {
   ThunderboltOutlined,
   PlusOutlined,
 } from '@ant-design/icons'
-import { SERVER_URL } from '../../utils'
+import { SERVER_URL, getWebSocketUrl } from '../../utils'
 import type { UploadFile, UploadProps } from 'antd/es/upload/interface'
 
 interface FileInfo {
@@ -397,7 +397,7 @@ const Files: React.FC = () => {
 
   const connectWebSocket = () => {
     try {
-      const wsUrl = SERVER_URL.replace('http', 'ws') + '/ws'
+      const wsUrl = getWebSocketUrl('/ws')
       wsRef.current = new WebSocket(wsUrl)
       wsRef.current.onmessage = (event) => {
         try { handleProgressUpdate(JSON.parse(event.data)) } catch {}
@@ -580,8 +580,8 @@ const Files: React.FC = () => {
                         <Dropdown
                           menu={{
                             items: [
-                              ...(file.status === 'embedded' ? [{ key: 'graph', label: '查看图谱', onClick: () => navigate('/Hyper/show') }] : []),
-                              ...(file.status === 'embedded' ? [{ key: 'chat', label: '开始检索', onClick: async () => { const { storeGlobalUser } = await import('../../store/globalUser'); storeGlobalUser.setSelectedDatabase(file.database_name || ''); navigate('/Hyper/chat') } }] : []),
+                              ...(file.status === 'embedded' ? [{ key: 'graph', label: '查看图谱', onClick: () => navigate('/app/Hyper/show') }] : []),
+                              ...(file.status === 'embedded' ? [{ key: 'chat', label: '开始检索', onClick: async () => { const { storeGlobalUser } = await import('../../store/globalUser'); storeGlobalUser.setSelectedDatabase(file.database_name || ''); navigate('/app/Hyper/chat') } }] : []),
                               ...(file.status === 'uploaded' ? [{ key: 'embed', label: '嵌入此文档', onClick: () => handleEmbed([file.file_id]) }] : []),
                               { type: 'divider' as const },
                               { key: 'delete', label: '删除文件', danger: true, onClick: () => { Modal.confirm({ title: '删除文件', content: `确定要删除 "${file.filename}" 吗？`, okText: '确定', okType: 'danger', cancelText: '取消', onOk: () => deleteFile(file.file_id) }) } },

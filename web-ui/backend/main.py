@@ -5,6 +5,7 @@ import re
 import logging  # Import logging early for SafeLogFilter class definition
 import traceback
 import hashlib
+import contextvars
 from logging.handlers import RotatingFileHandler
 
 # Safe string conversion function for Windows encoding
@@ -225,8 +226,9 @@ if sys.platform == 'win32' and 'uvicorn' not in sys.modules:
         # If wrapping fails, continue without it - better to have encoding issues than crash
         pass
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect, Form, Request, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from auth import AUTH_COOKIE_NAME, auth_store, create_token
 from db import get_hypergraph, getFrequentVertices, get_vertices, get_hyperedges, get_vertice, get_vertice_neighbor, get_hyperedge_neighbor_server, add_vertex, add_hyperedge, delete_vertex, delete_hyperedge, update_vertex, update_hyperedge, get_hyperedge_detail, db_manager, get_theme_hypergraph, get_theme_vertices, get_theme_hyperedges, get_theme_vertex_neighbor
 from file_manager import file_manager
 from kb_manager import KnowledgeBaseManager
@@ -299,6 +301,7 @@ API_KEY_POOL_STATE = {
     "llm": {"cursor": 0, "disabled": set()},
     "embedding": {"cursor": 0, "disabled": set()},
 }
+CURRENT_USER_ID = contextvars.ContextVar("hyperche_current_user_id", default=None)
 LLM_PROVIDER_POOL_STATE = {
     "cursor": 0,
     "keys": {},
@@ -676,9 +679,22 @@ def reset_llm_provider_pool_health() -> None:
 
 app = FastAPI()
 
+def _cors_origins() -> list[str]:
+    configured = os.getenv("CORS_ORIGINS", "")
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+    return [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5000",
+        "http://127.0.0.1:5000",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -686,7 +702,164 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "Hyper-RAG"}
+    return {"message": "HyperChE"}
+
+
+class AuthRegisterRequest(BaseModel):
+    email: str
+    password: str
+    display_name: str = ""
+
+
+class AuthLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class UserApiKeyRequest(BaseModel):
+    provider_type: str
+    base_url: str
+    model_name: str
+    api_key: str
+    enabled: bool = True
+
+
+def public_user(user: dict) -> dict:
+    return {
+        "id": user.get("id"),
+        "email": user.get("email"),
+        "display_name": user.get("display_name"),
+        "role": user.get("role", "user"),
+    }
+
+
+def _set_auth_cookie(response: Response, token: str) -> None:
+    secure_cookie = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        token,
+        httponly=True,
+        secure=secure_cookie,
+        samesite="lax",
+        max_age=14 * 24 * 3600,
+        path="/",
+    )
+
+
+def _extract_auth_token(request: Request) -> str | None:
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+    return None
+
+
+async def get_current_user(request: Request) -> dict | None:
+    user = auth_store.user_from_token(_extract_auth_token(request))
+    if user:
+        CURRENT_USER_ID.set(user["id"])
+    return user
+
+
+async def require_current_user(request: Request) -> dict:
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="请先登录 HyperChE")
+    return user
+
+
+def has_personal_provider(user_id: str | None, provider_type: str) -> bool:
+    return bool(auth_store.get_enabled_provider(user_id, provider_type))
+
+
+def consume_platform_quota(user_id: str | None, provider_type: str, amount: int = 1) -> None:
+    if not user_id:
+        return
+    if has_personal_provider(user_id, provider_type):
+        return
+    quota_type = "llm" if provider_type == "llm" else "embedding"
+    try:
+        auth_store.consume_quota(user_id, quota_type, amount)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=safe_str(e))
+
+
+def consume_document_quota_if_needed(user: dict, file_count: int) -> None:
+    user_id = user.get("id")
+    if user_id and not has_personal_provider(user_id, "embedding"):
+        try:
+            auth_store.consume_quota(user_id, "docs", file_count)
+        except PermissionError as e:
+            raise HTTPException(status_code=403, detail=safe_str(e))
+
+
+@app.post("/auth/register")
+async def auth_register(payload: AuthRegisterRequest, response: Response):
+    try:
+        user = auth_store.create_user(payload.email, payload.password, payload.display_name)
+        token = create_token(user["id"], user.get("role", "user"))
+        _set_auth_cookie(response, token)
+        CURRENT_USER_ID.set(user["id"])
+        return {"success": True, "user": public_user(user), "quota": auth_store.get_quota(user["id"])}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=safe_str(e))
+
+
+@app.post("/auth/login")
+async def auth_login(payload: AuthLoginRequest, response: Response):
+    user = auth_store.authenticate(payload.email, payload.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="邮箱或密码错误")
+    token = create_token(user["id"], user.get("role", "user"))
+    _set_auth_cookie(response, token)
+    CURRENT_USER_ID.set(user["id"])
+    return {"success": True, "user": public_user(user), "quota": auth_store.get_quota(user["id"])}
+
+
+@app.post("/auth/logout")
+async def auth_logout(response: Response):
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    CURRENT_USER_ID.set(None)
+    return {"success": True}
+
+
+@app.get("/auth/me")
+async def auth_me(user: dict = Depends(require_current_user)):
+    return {"success": True, "user": public_user(user), "quota": auth_store.get_quota(user["id"])}
+
+
+@app.get("/quota/me")
+async def quota_me(user: dict = Depends(require_current_user)):
+    return {"success": True, "quota": auth_store.get_quota(user["id"])}
+
+
+@app.get("/user-api-keys")
+async def list_user_api_keys(user: dict = Depends(require_current_user)):
+    return {"success": True, "keys": auth_store.list_api_keys(user["id"])}
+
+
+@app.post("/user-api-keys")
+async def create_user_api_key(payload: UserApiKeyRequest, user: dict = Depends(require_current_user)):
+    try:
+        key = auth_store.add_api_key(
+            user["id"],
+            payload.provider_type,
+            payload.base_url,
+            payload.model_name,
+            payload.api_key,
+            payload.enabled,
+        )
+        return {"success": True, "key": key}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=safe_str(e))
+
+
+@app.delete("/user-api-keys/{key_id}")
+async def delete_user_api_key(key_id: str, user: dict = Depends(require_current_user)):
+    deleted = auth_store.delete_api_key(user["id"], key_id)
+    return {"success": deleted}
 
 
 # ============ Knowledge Base Management ============
@@ -1087,7 +1260,7 @@ class DatabaseTestModel(BaseModel):
     database: str
 
 @app.get("/settings")
-async def get_settings():
+async def get_settings(user: dict = Depends(require_current_user)):
     """
     获取系统设置
     """
@@ -1154,7 +1327,7 @@ async def get_settings():
         return {"success": False, "message": safe_str(e)}
 
 @app.post("/settings")
-async def save_settings(settings: SettingsModel):
+async def save_settings(settings: SettingsModel, user: dict = Depends(require_current_user)):
     """
     保存系统设置
     """
@@ -1326,7 +1499,7 @@ async def get_databases():
         return {"success": False, "message": safe_str(e), "data": []}
 
 @app.post("/test/embedding")
-async def test_embedding():
+async def test_embedding(user: dict = Depends(require_current_user)):
     """
     测试嵌入API连接
     """
@@ -1340,7 +1513,14 @@ async def test_embedding():
         embedding_model = settings.get("embeddingModel", "text-embedding-3-small")
         api_key = settings.get("embeddingApiKey", settings.get("apiKey"))
         base_url = settings.get("embeddingBaseUrl", settings.get("baseUrl"))
-        key_candidates = get_api_key_candidates("embedding", api_key, settings.get("apiKey"))
+        user_embedding_provider = auth_store.get_enabled_provider(user["id"], "embedding")
+        if user_embedding_provider:
+            embedding_model = user_embedding_provider["modelName"]
+            api_key = user_embedding_provider["apiKey"]
+            base_url = user_embedding_provider["baseUrl"]
+            key_candidates = [(1, 1, api_key)]
+        else:
+            key_candidates = get_api_key_candidates("embedding", api_key, settings.get("apiKey"))
 
         main_logger.info(
             f"测试嵌入模型: {embedding_model}, "
@@ -1411,7 +1591,7 @@ async def test_embedding():
         }
 
 @app.post("/test-api")
-async def test_api_connection(api_test: APITestModel):
+async def test_api_connection(api_test: APITestModel, user: dict = Depends(require_current_user)):
     """
     测试API连接
     """
@@ -1598,10 +1778,20 @@ async def get_hyperrag_embedding_func(texts: list[str]) -> np.ndarray:
             embedding_model = settings.get("embeddingModel", "text-embedding-3-small")
             api_key = settings.get("embeddingApiKey", settings.get("apiKey"))
             base_url = settings.get("embeddingBaseUrl", settings.get("baseUrl"))
-            key_candidates = get_api_key_candidates("embedding", api_key, settings.get("apiKey"))
+            current_user_id = CURRENT_USER_ID.get()
+            user_embedding_provider = auth_store.get_enabled_provider(current_user_id, "embedding")
+            if user_embedding_provider:
+                embedding_model = user_embedding_provider["modelName"]
+                api_key = user_embedding_provider["apiKey"]
+                base_url = user_embedding_provider["baseUrl"]
+                key_candidates = [(1, 1, api_key)]
+            else:
+                consume_platform_quota(current_user_id, "embedding", 1)
+                key_candidates = get_api_key_candidates("embedding", api_key, settings.get("apiKey"))
 
             main_logger.info(
                 f"使用嵌入模型: {embedding_model}, "
+                f"provider={'user' if user_embedding_provider else 'platform'}, "
                 f"Embedding Key池: {summarize_key_pool('embedding', api_key, settings.get('apiKey'))}"
             )
 
@@ -1798,10 +1988,38 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
         timeout = float(settings.get("llmTimeout", kwargs.get('timeout', 600.0)))
         max_retries = _coerce_positive_int(settings.get("llmMaxRetries", 1), 1, minimum=0)
         max_attempts = max(1, max_retries + 1)
-        provider_candidates = get_llm_provider_candidates(settings)
+        current_user_id = CURRENT_USER_ID.get()
+        user_llm_provider = auth_store.get_enabled_provider(current_user_id, "llm")
+        if user_llm_provider:
+            user_provider = {
+                "name": "user-llm",
+                "baseUrl": user_llm_provider["baseUrl"],
+                "modelName": user_llm_provider["modelName"],
+                "apiKeys": [user_llm_provider["apiKey"]],
+                "enabled": True,
+                "maxAsync": 1,
+                "perKeyMaxAsync": 1,
+                "priority": 0,
+                "index": 0,
+            }
+            provider_candidates = [
+                {
+                    "provider": user_provider,
+                    "provider_index": 1,
+                    "provider_total": 1,
+                    "key": user_llm_provider["apiKey"],
+                    "key_index": 1,
+                    "key_total": 1,
+                    "provider_id": _provider_id(user_provider),
+                    "key_id": _llm_key_id(user_provider, 1, user_llm_provider["apiKey"]),
+                }
+            ]
+        else:
+            consume_platform_quota(current_user_id, "llm", 1)
+            provider_candidates = get_llm_provider_candidates(settings)
         main_logger.info(
             "LLM provider pool: "
-            f"{json.dumps(redact_for_log(summarize_llm_provider_pool(settings)), ensure_ascii=False)}"
+            f"{'user-owned-key' if user_llm_provider else json.dumps(redact_for_log(summarize_llm_provider_pool(settings)), ensure_ascii=False)}"
         )
         main_logger.info(f"LLM history messages: {len(cleaned_history)} (raw: {len(history_messages)})")
 
@@ -1917,7 +2135,15 @@ async def preflight_hyperrag_api_services() -> None:
     embedding_model = settings.get("embeddingModel", "text-embedding-3-small")
     embedding_api_key = settings.get("embeddingApiKey", settings.get("apiKey"))
     embedding_base_url = settings.get("embeddingBaseUrl", settings.get("baseUrl"))
-    embedding_key_candidates = get_api_key_candidates("embedding", embedding_api_key, settings.get("apiKey"))
+    current_user_id = CURRENT_USER_ID.get()
+    user_embedding_provider = auth_store.get_enabled_provider(current_user_id, "embedding")
+    if user_embedding_provider:
+        embedding_model = user_embedding_provider["modelName"]
+        embedding_api_key = user_embedding_provider["apiKey"]
+        embedding_base_url = user_embedding_provider["baseUrl"]
+        embedding_key_candidates = [(1, 1, embedding_api_key)]
+    else:
+        embedding_key_candidates = get_api_key_candidates("embedding", embedding_api_key, settings.get("apiKey"))
     if not embedding_key_candidates:
         embedding_key_candidates = [(0, 0, None)]
 
@@ -1963,7 +2189,33 @@ async def preflight_hyperrag_api_services() -> None:
         suggestion = extract_user_friendly_error(detail)
         raise RuntimeError(f"Embedding service preflight failed: {detail}. Suggestion: {suggestion}")
 
-    llm_candidates = get_llm_provider_candidates(settings)
+    user_llm_provider = auth_store.get_enabled_provider(current_user_id, "llm")
+    if user_llm_provider:
+        user_provider = {
+            "name": "user-llm",
+            "baseUrl": user_llm_provider["baseUrl"],
+            "modelName": user_llm_provider["modelName"],
+            "apiKeys": [user_llm_provider["apiKey"]],
+            "enabled": True,
+            "maxAsync": 1,
+            "perKeyMaxAsync": 1,
+            "priority": 0,
+            "index": 0,
+        }
+        llm_candidates = [
+            {
+                "provider": user_provider,
+                "provider_index": 1,
+                "provider_total": 1,
+                "key": user_llm_provider["apiKey"],
+                "key_index": 1,
+                "key_total": 1,
+                "provider_id": _provider_id(user_provider),
+                "key_id": _llm_key_id(user_provider, 1, user_llm_provider["apiKey"]),
+            }
+        ]
+    else:
+        llm_candidates = get_llm_provider_candidates(settings)
     if not llm_candidates:
         raise RuntimeError("LLM service preflight failed: no healthy provider/key candidates")
     llm_errors = []
@@ -2185,7 +2437,7 @@ class Message(BaseModel):
     message: str
 
 @app.post("/process_message")
-async def process_message(msg: Message):
+async def process_message(msg: Message, user: dict = Depends(require_current_user)):
     user_message = msg.message
     try:
         response_message = await get_hyperrag_llm_func(prompt=user_message)
@@ -2212,7 +2464,7 @@ class QueryModel(BaseModel):
     database: str = None  # 添加数据库参数
 
 @app.post("/hyperrag/insert")
-async def insert_document(doc: DocumentModel):
+async def insert_document(doc: DocumentModel, user: dict = Depends(require_current_user)):
     """
     向指定数据库的 HyperRAG 插入文档
     """
@@ -2220,6 +2472,7 @@ async def insert_document(doc: DocumentModel):
         return {"success": False, "message": "HyperRAG is not available"}
     
     try:
+        consume_document_quota_if_needed(user, 1)
         rag = get_or_create_hyperrag(doc.database)
         
         # 重试机制
@@ -2241,7 +2494,7 @@ async def insert_document(doc: DocumentModel):
         return {"success": False, "message": f"Failed to insert document: {safe_str(e)}"}
 
 @app.post("/hyperrag/query")
-async def query_hyperrag(query: QueryModel):
+async def query_hyperrag(query: QueryModel, user: dict = Depends(require_current_user)):
     """
     统一的查询端点，支持HyperRAG和Cog-RAG模式
     """
@@ -2493,7 +2746,7 @@ class FileEmbedRequest(BaseModel):
     kb_name: Optional[str] = None  # 知识库名称，自动填充嵌入配置
 
 @app.get("/files")
-async def get_files():
+async def get_files(user: dict = Depends(require_current_user)):
     """
     获取所有上传的文件列表
     """
@@ -2507,7 +2760,8 @@ async def get_files():
 async def upload_files(
     files: List[UploadFile] = File(...),
     target_database: str = Form(default=None),
-    kb_name: str = Form(default=None)
+    kb_name: str = Form(default=None),
+    user: dict = Depends(require_current_user)
 ):
     """
     上传文件接口
@@ -2931,7 +3185,7 @@ async def delete_database_endpoint(database_name: str):
         return {"success": False, "message": f"删除数据库失败: {safe_str(e)}"}
 
 @app.post("/files/embed")
-async def embed_files(request: FileEmbedRequest):
+async def embed_files(request: FileEmbedRequest, user: dict = Depends(require_current_user)):
     """
     批量嵌入文档到HyperRAG
     """
@@ -2946,6 +3200,7 @@ async def embed_files(request: FileEmbedRequest):
     results = []
     
     try:
+        consume_document_quota_if_needed(user, len(request.file_ids))
         await preflight_hyperrag_api_services()
 
         for i, file_id in enumerate(request.file_ids):
@@ -3364,7 +3619,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # 带实时进度通知的文档嵌入接口
 @app.post("/files/embed-with-progress")
-async def embed_files_with_progress(request: FileEmbedRequest):
+async def embed_files_with_progress(request: FileEmbedRequest, user: dict = Depends(require_current_user)):
     """
     批量嵌入文档到HyperRAG，带实时进度通知
 
@@ -3404,6 +3659,7 @@ async def embed_files_with_progress(request: FileEmbedRequest):
 
     # 立即返回处理开始的响应
     total_files = len(request.file_ids)
+    consume_document_quota_if_needed(user, total_files)
 
     # 记录目标数据库信息
     if request.target_database:

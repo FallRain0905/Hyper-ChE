@@ -2,73 +2,90 @@ import NotFoundPage from '@/404'
 import App from '@/App'
 import ErrorPage from '@/ErrorPage'
 import Home from '@/pages/Home'
+import Landing from '@/pages/Landing'
 import Files from '@/pages/Files'
 import Graph from '@/pages/Hyper/Graph'
 import FullGraph from '@/pages/Hyper/FullGraph'
 import HyperDB from '@/pages/Hyper/DB'
 import Setting from '@/pages/Setting'
 import APIPage from '@/pages/API'
-import { HomeFilled, SmileFilled, FileAddOutlined, QuestionCircleOutlined, DeploymentUnitOutlined, DatabaseOutlined, SettingOutlined, ApiOutlined, ProjectOutlined } from '@ant-design/icons'
+import {
+  ApiOutlined,
+  DatabaseOutlined,
+  DeploymentUnitOutlined,
+  FileAddOutlined,
+  ProjectOutlined,
+  QuestionCircleOutlined,
+  SettingOutlined,
+  SmileFilled,
+} from '@ant-design/icons'
 import { Navigate } from 'react-router-dom'
 
 export const routers = [
   {
     path: '/',
-    element: <Navigate replace to="/Hyper/chat" />
+    element: <Landing />,
   },
   {
-    path: '/',
+    path: '/app',
     element: <App />,
     errorElement: <ErrorPage />,
     icon: <SmileFilled />,
     children: [
       {
-        path: '/Hyper/chat',
+        path: '/app',
+        element: <Navigate replace to="/app/Hyper/chat" />,
+      },
+      {
+        path: '/app/Hyper/chat',
         name: '检索问答',
         icon: <QuestionCircleOutlined />,
-        // permissionObj: true,
-        element: <Home />
+        element: <Home />,
       },
       {
-        path: '/Hyper/show',
+        path: '/app/Hyper/show',
         name: '超图展示',
         icon: <DeploymentUnitOutlined />,
-        // permissionObj: true,
-        element: <Graph />
+        element: <Graph />,
       },
       {
-        path: '/Hyper/DB',
+        path: '/app/Hyper/DB',
         name: 'HypergraphDB',
         icon: <DatabaseOutlined />,
-        // permissionObj: true,
-        element: <HyperDB />
+        element: <HyperDB />,
       },
       {
-        path: '/Hyper/FullGraph',
+        path: '/app/Hyper/FullGraph',
         name: 'FullGraph',
         icon: <ProjectOutlined />,
-        element: <FullGraph />
+        element: <FullGraph />,
       },
       {
-        path: '/Hyper/files',
-        name: '文件管理',
+        path: '/app/Hyper/files',
+        name: '知识库',
         icon: <FileAddOutlined />,
         element: <Files />,
       },
       {
-        path: '/API',
+        path: '/app/API',
         name: 'API 文档',
         icon: <ApiOutlined />,
         element: <APIPage />,
       },
       {
-        path: '/Setting',
+        path: '/app/Setting',
         name: '系统设置',
         icon: <SettingOutlined />,
-        // permissionObj: true,
-        element: <Setting />
+        element: <Setting />,
       },
-    ]
+    ],
   },
-  { path: '*', element: <NotFoundPage /> }
+  { path: '/Hyper/chat', element: <Navigate replace to="/app/Hyper/chat" /> },
+  { path: '/Hyper/show', element: <Navigate replace to="/app/Hyper/show" /> },
+  { path: '/Hyper/DB', element: <Navigate replace to="/app/Hyper/DB" /> },
+  { path: '/Hyper/FullGraph', element: <Navigate replace to="/app/Hyper/FullGraph" /> },
+  { path: '/Hyper/files', element: <Navigate replace to="/app/Hyper/files" /> },
+  { path: '/API', element: <Navigate replace to="/app/API" /> },
+  { path: '/Setting', element: <Navigate replace to="/app/Setting" /> },
+  { path: '*', element: <NotFoundPage /> },
 ]

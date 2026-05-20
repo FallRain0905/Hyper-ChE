@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 // 服务器URL配置
-import { SERVER_URL } from '../../../utils/index'
+import { SERVER_URL, getWebSocketUrl } from '../../../utils/index'
 
 const DocumentManager = () => {
   const { t } = useTranslation();
@@ -50,7 +50,7 @@ const DocumentManager = () => {
   // 建立WebSocket连接
   const connectWebSocket = () => {
     try {
-      const wsUrl = SERVER_URL.replace('http', 'ws') + '/ws';
+      const wsUrl = getWebSocketUrl('/ws');
       wsRef.current = new WebSocket(wsUrl);
 
       wsRef.current.onopen = () => {

@@ -5,6 +5,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { observer } from 'mobx-react'
 import React from 'react'
 import Sidebar, { SidebarProvider, useSidebar } from '@/components/Sidebar'
+import { authStore } from '@/store/auth'
 
 export enum ComponTypeEnum {
   MENU,
@@ -32,6 +33,9 @@ const BasicLayout: React.FC = () => {
   const pathname = location.hash.replace('#', '')
 
   useAsyncEffect(async () => {
+    if (!authStore.initialized) {
+      await authStore.fetchMe()
+    }
     if (pathname !== '/login') {
       await storeGlobalUser.getUserDetail()
     }

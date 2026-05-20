@@ -32,6 +32,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import LanguageSelector from '../../components/LanguageSelector'
 import { SERVER_URL } from '../../utils'
+import { authStore } from '../../store/auth'
 
 const { Title, Text } = Typography
 const { Option } = Select
@@ -40,12 +41,15 @@ const { Password } = Input
 const Setting: React.FC = () => {
   const { t } = useTranslation()
   const [form] = Form.useForm()
+  const [userKeyForm] = Form.useForm()
   const [loading, setLoading] = useState(false)
   const [saveLoading, setSaveLoading] = useState(false)
   const [availableDatabases, setAvailableDatabases] = useState<any[]>([])
   const [testResults, setTestResults] = useState<any>({})
   const [isCustomEmbedding, setIsCustomEmbedding] = useState(false)
   const [availableDomains, setAvailableDomains] = useState<any[]>([])
+  const [userApiKeys, setUserApiKeys] = useState<any[]>([])
+  const [userKeyLoading, setUserKeyLoading] = useState(false)
 
   // 默认配置
   const defaultSettings = {
@@ -677,9 +681,7 @@ const Setting: React.FC = () => {
             embeddingBaseUrl: model.baseUrl
           })
           message.info(`已自动设置阿里云百炼API地址，请配置您的阿里云百炼API Key`)
-        }
-        // 如果是硅基流动模型，自动配置base_url
-        else if (model.provider === 'siliconflow' && model.baseUrl) {
+        } else if (model.provider === 'siliconflow' && model.baseUrl) {
           form.setFieldsValue({
             embeddingBaseUrl: model.baseUrl
           })
@@ -689,10 +691,62 @@ const Setting: React.FC = () => {
     }
   }
 
+  const loadUserApiKeys = async () => {
+    try {
+      const response = await fetch(`${SERVER_URL}/user-api-keys`)
+      if (response.ok) {
+        const data = await response.json()
+        setUserApiKeys(data.keys || [])
+      }
+    } catch (error) {
+      console.error('加载用户 API Key 失败:', error)
+    }
+  }
+
+  const saveUserApiKey = async (values: any) => {
+    setUserKeyLoading(true)
+    try {
+      const response = await fetch(`${SERVER_URL}/user-api-keys`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values)
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(data.detail || data.message || '保存失败')
+      }
+      message.success('个人 API Key 已保存')
+      userKeyForm.resetFields()
+      await loadUserApiKeys()
+      await authStore.refreshQuota()
+    } catch (error: any) {
+      message.error(error.message || '保存个人 API Key 失败')
+    } finally {
+      setUserKeyLoading(false)
+    }
+  }
+
+  const deleteUserApiKey = async (id: string) => {
+    try {
+      const response = await fetch(`${SERVER_URL}/user-api-keys/${id}`, {
+        method: 'DELETE'
+      })
+      if (!response.ok) {
+        throw new Error('删除失败')
+      }
+      message.success('已删除个人 API Key')
+      await loadUserApiKeys()
+    } catch (error: any) {
+      message.error(error.message || '删除失败')
+    }
+  }
+
   useEffect(() => {
     loadSettings()
     loadDatabases()
     loadDomains()
+    authStore.refreshQuota()
+    loadUserApiKeys()
   }, [])
 
   return (
@@ -707,8 +761,6 @@ const Setting: React.FC = () => {
         </div>
 
         <Form form={form} layout="vertical" onFinish={saveSettings} initialValues={defaultSettings}>
-          {/* 添加调试信息 */}
-          {(() => { console.log('📋 Settings表单初始值:', defaultSettings); return null })()}
           {/* 系统配置区块 */}
           <Card
             title={
@@ -722,6 +774,126 @@ const Setting: React.FC = () => {
             <Form.Item label={t('settings.language_select')}>
               <LanguageSelector />
             </Form.Item>
+          </Card>
+
+          <Card
+            title={
+              <span>
+                <KeyOutlined style={{ marginRight: '8px' }} />
+                HyperChE 试用额度与个人 API Key
+              </span>
+            }
+            style={{ marginBottom: '24px' }}
+          >
+            <Alert
+              message="个人 API Key 优先"
+              description="未配置个人 Key 时，HyperChE 使用平台试用额度；配置个人 LLM 或 embedding Key 后，对应调用将优先使用你的 Key，并不扣平台试用额度。"
+              type="info"
+              showIcon
+              style={{ marginBottom: '16px' }}
+            />
+
+            {authStore.quota && (
+              <Row gutter={16} style={{ marginBottom: 16 }}>
+                <Col span={8}>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <Text type="secondary">文档嵌入</Text>
+                    <div className="mt-1 text-xl font-semibold text-slate-900">
+                      {authStore.quota.trial_docs_used}/{authStore.quota.trial_docs_limit}
+                    </div>
+                  </div>
+                </Col>
+                <Col span={8}>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <Text type="secondary">LLM 问答</Text>
+                    <div className="mt-1 text-xl font-semibold text-slate-900">
+                      {authStore.quota.trial_llm_calls_used}/{authStore.quota.trial_llm_calls_limit}
+                    </div>
+                  </div>
+                </Col>
+                <Col span={8}>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <Text type="secondary">Embedding 调用</Text>
+                    <div className="mt-1 text-xl font-semibold text-slate-900">
+                      {authStore.quota.trial_embedding_calls_used}/{authStore.quota.trial_embedding_calls_limit}
+                    </div>
+                  </div>
+                </Col>
+              </Row>
+            )}
+
+            <Form
+              form={userKeyForm}
+              layout="vertical"
+              component={false}
+              initialValues={{ provider_type: 'llm', enabled: true }}
+            >
+              <Row gutter={16}>
+                <Col span={4}>
+                  <Form.Item name="provider_type" label="类型" rules={[{ required: true }]}>
+                    <Select>
+                      <Option value="llm">LLM</Option>
+                      <Option value="embedding">Embedding</Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
+                <Col span={7}>
+                  <Form.Item name="base_url" label="Base URL" rules={[{ required: true, message: '请输入 Base URL' }]}>
+                    <Input placeholder="https://api.siliconflow.cn/v1" />
+                  </Form.Item>
+                </Col>
+                <Col span={6}>
+                  <Form.Item name="model_name" label="Model Name" rules={[{ required: true, message: '请输入模型名' }]}>
+                    <Input placeholder="deepseek-ai/DeepSeek-V4-Flash" />
+                  </Form.Item>
+                </Col>
+                <Col span={7}>
+                  <Form.Item name="api_key" label="API Key" rules={[{ required: true, message: '请输入 API Key' }]}>
+                    <Password placeholder="sk-xxxxxxxxxxxxxxxx" />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Form.Item name="enabled" valuePropName="checked">
+                <Switch checkedChildren="启用" unCheckedChildren="停用" />
+              </Form.Item>
+              <Button
+                type="primary"
+                loading={userKeyLoading}
+                onClick={async () => {
+                  const values = await userKeyForm.validateFields()
+                  await saveUserApiKey(values)
+                }}
+              >
+                保存个人 API Key
+              </Button>
+            </Form>
+
+            <Divider />
+            <Space direction="vertical" style={{ width: '100%' }}>
+              {userApiKeys.length === 0 ? (
+                <Text type="secondary">暂无个人 API Key。配置后系统会优先使用个人 Key。</Text>
+              ) : (
+                userApiKeys.map(item => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3"
+                  >
+                    <div>
+                      <div className="text-sm font-medium text-slate-900">
+                        {item.provider_type.toUpperCase()} · {item.model_name}
+                      </div>
+                      <div className="text-xs text-slate-500">{item.base_url}</div>
+                    </div>
+                    <Space>
+                      <Text type={item.enabled ? 'success' : 'secondary'}>{item.enabled ? '启用' : '停用'}</Text>
+                      <Button danger type="text" onClick={() => deleteUserApiKey(item.id)}>
+                        删除
+                      </Button>
+                    </Space>
+                  </div>
+                ))
+              )}
+            </Space>
           </Card>
 
           {/* API 配置区块 */}

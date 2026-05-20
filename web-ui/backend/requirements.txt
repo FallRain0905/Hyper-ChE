@@ -13,3 +13,6 @@ websockets
 aiofiles
 PyMuPDF
 python-docx
+SQLAlchemy
+psycopg[binary]
+cryptography

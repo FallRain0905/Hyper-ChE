@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { SERVER_URL } from '../utils';
+import { getWebSocketUrl } from '../utils';
 
 export interface WebSocketHookReturn {
   isConnected: boolean;
@@ -19,7 +19,7 @@ export const useWebSocket = (onMessage?: (data: any) => void): WebSocketHookRetu
   }, [onMessage]);
 
   const connect = useCallback(() => {
-    const wsUrl = `ws://localhost:8000/ws`;
+    const wsUrl = getWebSocketUrl('/ws');
     console.log('[WebSocket] 连接中...', wsUrl);
 
     try {
