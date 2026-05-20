@@ -296,7 +296,7 @@ except ImportError as e:
 
 
 # 设置文件路径
-SETTINGS_FILE = "settings.json"
+SETTINGS_FILE = os.getenv("HYPERCHE_SETTINGS_FILE", "settings.json")
 API_KEY_POOL_STATE = {
     "llm": {"cursor": 0, "disabled": set()},
     "embedding": {"cursor": 0, "disabled": set()},

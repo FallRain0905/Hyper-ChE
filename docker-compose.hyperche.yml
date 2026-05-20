@@ -45,7 +45,9 @@ services:
       HYPERCHE_ADMIN_PASSWORD: ${HYPERCHE_ADMIN_PASSWORD:-admin123}
       HYPERCHE_ADMIN_NAME: ${HYPERCHE_ADMIN_NAME:-HyperChE Admin}
       HYPERCHE_ENABLE_API_DOCS: ${HYPERCHE_ENABLE_API_DOCS:-false}
+      HYPERCHE_SETTINGS_FILE: /app/config/settings.json
     volumes:
+      - backend_config:/app/config
       - backend_uploads:/app/uploads
       - backend_hyperrag_cache:/app/hyperrag_cache
       - backend_cograg_cache:/app/cograg_cache
@@ -78,3 +80,4 @@ volumes:
   backend_hyperrag_cache:
   backend_cograg_cache:
   backend_logs:
+  backend_config:
