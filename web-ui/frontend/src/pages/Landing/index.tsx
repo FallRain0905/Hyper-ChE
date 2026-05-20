@@ -58,12 +58,6 @@ const Landing = () => {
     }
   }, [])
 
-  useEffect(() => {
-    if (authStore.isAuthenticated) {
-      navigate('/app/Hyper/chat')
-    }
-  }, [authStore.isAuthenticated])
-
   const authTitle = useMemo(() => (mode === 'login' ? '登录 HyperChE' : '创建试用账号'), [mode])
 
   const submit = async (event: React.FormEvent) => {
@@ -112,7 +106,11 @@ const Landing = () => {
             <a href="#features" className="hover:text-teal-700">能力</a>
             <a href="#cases" className="hover:text-teal-700">案例</a>
             <a href="#comparison" className="hover:text-teal-700">对比</a>
-            <a href="#auth" className="hover:text-teal-700">试用</a>
+            {authStore.isAuthenticated ? (
+              <button className="text-teal-700 hover:text-teal-800" onClick={() => navigate('/app/Hyper/chat')}>进入工作台</button>
+            ) : (
+              <a href="#auth" className="hover:text-teal-700">试用</a>
+            )}
           </nav>
         </div>
       </header>

@@ -43,12 +43,20 @@ class KnowledgeBaseManager:
             clean_name = "default"
         return clean_name
 
+    def _is_visible_to_user(self, kb: Dict, owner_user_id: Optional[str] = None, include_legacy: bool = True) -> bool:
+        if not owner_user_id:
+            return True
+        kb_owner = kb.get("owner_user_id")
+        return kb_owner == owner_user_id or (include_legacy and not kb_owner)
+
     async def create_kb(self, name: str, description: str = "",
                         rag_system: str = "hyperrag", domain: str = "default",
-                        chunk_size: int = 1000, chunk_overlap: int = 200) -> Dict:
+                        chunk_size: int = 1000, chunk_overlap: int = 200,
+                        database_name: Optional[str] = None,
+                        owner_user_id: Optional[str] = None) -> Dict:
         """创建知识库"""
         import uuid
-        database_name = self.sanitize_name(name)
+        database_name = self.sanitize_name(database_name or name)
 
         async with self.metadata_lock:
             metadata = self._load_metadata()
@@ -62,6 +70,7 @@ class KnowledgeBaseManager:
                 "name": name,
                 "description": description,
                 "database_name": database_name,
+                "owner_user_id": owner_user_id,
                 "rag_system": rag_system,
                 "domain": domain,
                 "chunk_size": chunk_size,
@@ -75,24 +84,32 @@ class KnowledgeBaseManager:
 
         return kb_data
 
-    async def list_kbs(self) -> List[Dict]:
+    async def list_kbs(self, owner_user_id: Optional[str] = None, include_legacy: bool = True) -> List[Dict]:
         """列出所有知识库"""
         metadata = self._load_metadata()
-        return list(metadata.values())
+        return [
+            kb for kb in metadata.values()
+            if self._is_visible_to_user(kb, owner_user_id, include_legacy)
+        ]
 
-    async def get_kb(self, kb_name: str) -> Optional[Dict]:
+    async def get_kb(self, kb_name: str, owner_user_id: Optional[str] = None, include_legacy: bool = True) -> Optional[Dict]:
         """获取知识库详情"""
         metadata = self._load_metadata()
         database_name = self.sanitize_name(kb_name)
-        return metadata.get(database_name)
+        kb = metadata.get(database_name)
+        if not kb or not self._is_visible_to_user(kb, owner_user_id, include_legacy):
+            return None
+        return kb
 
-    async def update_kb(self, kb_name: str, **updates) -> Optional[Dict]:
+    async def update_kb(self, kb_name: str, owner_user_id: Optional[str] = None, include_legacy: bool = True, **updates) -> Optional[Dict]:
         """更新知识库设置"""
         database_name = self.sanitize_name(kb_name)
 
         async with self.metadata_lock:
             metadata = self._load_metadata()
             if database_name not in metadata:
+                return None
+            if not self._is_visible_to_user(metadata[database_name], owner_user_id, include_legacy):
                 return None
 
             allowed_fields = {"description", "rag_system", "domain", "chunk_size", "chunk_overlap", "name"}
@@ -105,7 +122,7 @@ class KnowledgeBaseManager:
 
         return metadata[database_name]
 
-    async def delete_kb(self, kb_name: str) -> bool:
+    async def delete_kb(self, kb_name: str, owner_user_id: Optional[str] = None, include_legacy: bool = True) -> bool:
         """删除知识库（仅删除元数据，文件和数据库由调用方清理）"""
         database_name = self.sanitize_name(kb_name)
 
@@ -113,15 +130,17 @@ class KnowledgeBaseManager:
             metadata = self._load_metadata()
             if database_name not in metadata:
                 return False
+            if not self._is_visible_to_user(metadata[database_name], owner_user_id, include_legacy):
+                return False
 
             del metadata[database_name]
             self._save_metadata(metadata)
 
         return True
 
-    async def get_kb_stats(self, kb_name: str, file_manager=None) -> Dict:
+    async def get_kb_stats(self, kb_name: str, file_manager=None, owner_user_id: Optional[str] = None, include_legacy: bool = True) -> Dict:
         """获取知识库统计信息"""
-        kb = await self.get_kb(kb_name)
+        kb = await self.get_kb(kb_name, owner_user_id=owner_user_id, include_legacy=include_legacy)
         if not kb:
             return {}
 
@@ -133,7 +152,10 @@ class KnowledgeBaseManager:
         }
 
         if file_manager:
-            files = file_manager.get_all_files()
+            try:
+                files = file_manager.get_all_files(owner_user_id=owner_user_id, include_legacy=include_legacy)
+            except TypeError:
+                files = file_manager.get_all_files()
             kb_files = [f for f in files if f.get("kb_name") == kb["database_name"]]
             stats["file_count"] = len(kb_files)
             stats["embedded_count"] = sum(1 for f in kb_files if f.get("status") == "embedded")

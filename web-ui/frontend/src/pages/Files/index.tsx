@@ -293,16 +293,16 @@ const Files: React.FC = () => {
           kb_name: activeKB.database_name,
         }),
       })
-      const data = await res.json()
-      if (data.processing) {
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.processing) {
         message.success(`开始处理 ${data.total_files} 个文档`)
       } else {
         setIsEmbedding(false)
-        message.error('处理失败')
+        message.error(data.detail || data.error || `处理失败 (${res.status})`)
       }
-    } catch (e) {
+    } catch (e: any) {
       setIsEmbedding(false)
-      message.error('嵌入失败')
+      message.error(e?.message || '嵌入失败')
     }
   }
 

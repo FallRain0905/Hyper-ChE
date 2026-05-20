@@ -292,18 +292,18 @@ return;
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
-      if (data.processing) {
+      if (response.ok && data.processing) {
         showNotification(t('files.start_processing', { count: data.total_files }), 'info');
         // 嵌入状态和进度将通过WebSocket更新
       } else {
         setIsEmbedding(false);
-        showNotification(t('files.processing_failed'), 'error');
+        showNotification(data.detail || data.error || `${t('files.processing_failed')} (${response.status})`, 'error');
       }
     } catch (error) {
       setIsEmbedding(false);
-      showNotification(t('files.embedding_failed'), 'error');
+      showNotification(error?.message || t('files.embedding_failed'), 'error');
     }
   };
 

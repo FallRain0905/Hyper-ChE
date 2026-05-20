@@ -60,7 +60,13 @@ class FileManager:
             clean_name = "default"
         return clean_name
 
-    async def save_uploaded_file(self, file_content: bytes, original_filename: str, target_database: str = None) -> Dict:
+    def _is_visible_to_user(self, file_info: Dict, owner_user_id: Optional[str] = None, include_legacy: bool = True) -> bool:
+        if not owner_user_id:
+            return True
+        file_owner = file_info.get("owner_user_id")
+        return file_owner == owner_user_id or (include_legacy and not file_owner)
+
+    async def save_uploaded_file(self, file_content: bytes, original_filename: str, target_database: str = None, owner_user_id: str = None) -> Dict:
         """保存上传的文件"""
         try:
             # 根据文件扩展名推断MIME类型
@@ -110,6 +116,7 @@ class FileManager:
                     "file_type": file_ext,
                     "mime_type": mime_type,
                     "database_name": database_name,
+                    "owner_user_id": owner_user_id,
                     "upload_time": datetime.utcnow().isoformat(),
                     "status": "uploaded",
                     "processed_time": None,
@@ -127,6 +134,7 @@ class FileManager:
                     "file_size": file_size,
                     "file_type": file_ext,
                     "database_name": database_name,
+                    "owner_user_id": owner_user_id,
                     "upload_time": file_record["upload_time"]
                 }
 
@@ -164,13 +172,19 @@ class FileManager:
         with open(self.metadata_file, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
 
-    def get_all_files(self) -> List[Dict]:
+    def get_all_files(self, owner_user_id: Optional[str] = None, include_legacy: bool = True) -> List[Dict]:
         """获取所有文件的列表"""
-        return list(self._load_metadata().values())
+        return [
+            file_info for file_info in self._load_metadata().values()
+            if self._is_visible_to_user(file_info, owner_user_id, include_legacy)
+        ]
 
-    def get_file_info(self, file_id: str) -> Optional[Dict]:
+    def get_file_info(self, file_id: str, owner_user_id: Optional[str] = None, include_legacy: bool = True) -> Optional[Dict]:
         """获取指定文件的信息"""
-        return self._load_metadata().get(file_id)
+        file_info = self._load_metadata().get(file_id)
+        if not file_info or not self._is_visible_to_user(file_info, owner_user_id, include_legacy):
+            return None
+        return file_info
 
     def update_file_status(self, file_id: str, status: str, error_message: str = None):
         """更新文件状态"""
@@ -182,9 +196,9 @@ class FileManager:
                 metadata[file_id]["error_message"] = error_message
             self._save_metadata(metadata)
 
-    def get_file_by_id(self, file_id: str) -> Optional[Dict]:
+    def get_file_by_id(self, file_id: str, owner_user_id: Optional[str] = None, include_legacy: bool = True) -> Optional[Dict]:
         """根据ID获取文件信息（别名）"""
-        return self.get_file_info(file_id)
+        return self.get_file_info(file_id, owner_user_id=owner_user_id, include_legacy=include_legacy)
 
     def update_file_database(self, file_id: str, database_name: str) -> bool:
         """更新文件的目标数据库"""
@@ -204,10 +218,13 @@ class FileManager:
             return True
         return False
 
-    def get_files_by_database(self, database_name: str) -> List[Dict]:
+    def get_files_by_database(self, database_name: str, owner_user_id: Optional[str] = None, include_legacy: bool = True) -> List[Dict]:
         """获取指定数据库的所有文件"""
         metadata = self._load_metadata()
-        return [f for f in metadata.values() if f.get("database_name") == database_name]
+        return [
+            f for f in metadata.values()
+            if f.get("database_name") == database_name and self._is_visible_to_user(f, owner_user_id, include_legacy)
+        ]
 
     def delete_file(self, file_id: str, clean_database: bool = False, rag_instance=None) -> bool:
         """删除文件及其元数据，可选清理数据库中的嵌入数据"""

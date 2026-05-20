@@ -58,6 +58,8 @@ const entityTypeColors = {
   'default': '#8566CC'
 };
 
+const MAX_FULL_GRAPH_ITEMS = 800;
+
 const FullGraphPage = observer(() => {
   const { t } = useTranslation();
   const [vertices, setVertices] = useState<any[]>([]);
@@ -144,6 +146,19 @@ const FullGraphPage = observer(() => {
       if (isMountedRef.current) {
         const verticesList = verticesData.data || verticesData || [];
         const hyperedgesList = hyperedgesData.data || hyperedgesData || [];
+        const vertexTotal = verticesData.total ?? verticesList.length;
+        const hyperedgeTotal = hyperedgesData.total ?? hyperedgesList.length;
+        const totalItems = vertexTotal + hyperedgeTotal;
+
+        if (totalItems > MAX_FULL_GRAPH_ITEMS) {
+          const limitMessage = `完整超图规模过大：当前 ${vertexTotal} 个实体、${hyperedgeTotal} 条超边，超过完整渲染上限 ${MAX_FULL_GRAPH_ITEMS}。请使用“超图展示”页面按实体进行局部查看。`;
+          setVertices([]);
+          setHyperedges([]);
+          setError(limitMessage);
+          message.warning(limitMessage);
+          return;
+        }
+
         setVertices(verticesList);
         setHyperedges(hyperedgesList);
         console.log('[FullGraph] 数据已更新:', { verticesCount: verticesList.length, hyperedgesCount: hyperedgesList.length });
@@ -368,17 +383,13 @@ const FullGraphPage = observer(() => {
         }
       },
       animate: false,
-      layout: graphMode === 'hyperedges' ? {
-        type: 'circular',
+      layout: {
+        type: 'force',
+        clustering: true,
         preventOverlap: true,
-        nodeSpacing: 80,
-        radius: 300,
-      } : {
-        type: 'force-atlas2',
-        preventOverlap: true,
-        kr: 80,
+        nodeClusterBy: 'entity_type',
         gravity: 20,
-        linkDistance: 10,
+        linkDistance: 150,
       },
       behaviors: [
         'zoom-canvas',

@@ -1,5 +1,6 @@
 import { makeAutoObservable } from 'mobx'
 import { SERVER_URL } from '../utils'
+import { authStore } from './auth'
 
 class GlobalUser {
   userInfo: Partial<User.UserEntity> = {}
@@ -14,6 +15,11 @@ class GlobalUser {
 
   constructor() {
     makeAutoObservable(this)
+  }
+
+  private selectedDatabaseKey() {
+    const scope = authStore.user?.id || authStore.user?.email || 'anonymous'
+    return `selectedDatabase_${scope}`
   }
 
   async getUserDetail() {
@@ -51,7 +57,7 @@ class GlobalUser {
     this.lastSetDbValue = database;
     this.selectedDatabase = database
     // 保存到localStorage
-    localStorage.setItem('selectedDatabase', database)
+    localStorage.setItem(this.selectedDatabaseKey(), database)
     console.log('[GlobalUser] selectedDatabase 已更新为:', database);
   }
 
@@ -65,7 +71,7 @@ class GlobalUser {
       console.log('[GlobalUser] 当前选择的数据库不在列表中，清除选择');
       this.selectedDatabase = '';
       this.lastSetDbValue = '';
-      localStorage.removeItem('selectedDatabase');
+      localStorage.removeItem(this.selectedDatabaseKey());
     }
 
     // 注意：不再自动修改 selectedDatabase，让用户自己选择
@@ -74,7 +80,7 @@ class GlobalUser {
 
   // 从localStorage恢复选中的数据库（仅恢复名称，不触发加载）
   restoreSelectedDatabase() {
-    const saved = localStorage.getItem('selectedDatabase')
+    const saved = localStorage.getItem(this.selectedDatabaseKey())
     console.log('[GlobalUser] restoreSelectedDatabase 被调用, saved:', saved, '当前 selectedDatabase:', this.selectedDatabase);
     if (saved && !this.selectedDatabase) {
       // 只在没有选中数据库时才恢复

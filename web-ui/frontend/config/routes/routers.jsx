@@ -8,9 +8,7 @@ import Graph from '@/pages/Hyper/Graph'
 import FullGraph from '@/pages/Hyper/FullGraph'
 import HyperDB from '@/pages/Hyper/DB'
 import Setting from '@/pages/Setting'
-import APIPage from '@/pages/API'
 import {
-  ApiOutlined,
   DatabaseOutlined,
   DeploymentUnitOutlined,
   FileAddOutlined,
@@ -69,8 +67,8 @@ export const routers = [
       {
         path: '/app/API',
         name: 'API 文档',
-        icon: <ApiOutlined />,
-        element: <APIPage />,
+        hideInMenu: true,
+        element: <Navigate replace to="/app/Hyper/chat" />,
       },
       {
         path: '/app/Setting',
@@ -85,7 +83,7 @@ export const routers = [
   { path: '/Hyper/DB', element: <Navigate replace to="/app/Hyper/DB" /> },
   { path: '/Hyper/FullGraph', element: <Navigate replace to="/app/Hyper/FullGraph" /> },
   { path: '/Hyper/files', element: <Navigate replace to="/app/Hyper/files" /> },
-  { path: '/API', element: <Navigate replace to="/app/API" /> },
+  { path: '/API', element: <Navigate replace to="/app/Hyper/chat" /> },
   { path: '/Setting', element: <Navigate replace to="/app/Setting" /> },
   { path: '*', element: <NotFoundPage /> },
 ]

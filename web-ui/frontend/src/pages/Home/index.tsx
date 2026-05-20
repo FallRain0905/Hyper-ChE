@@ -35,6 +35,7 @@ import {
     AvatarImage
 } from '../../components/ui'
 import { storeGlobalUser } from '../../store/globalUser'
+import { authStore } from '../../store/auth'
 import { SERVER_URL } from '../../utils'
 import DatabaseSelector from '../../components/DatabaseSelector'
 import RetrievalInfo from '../../components/RetrievalInfo'
@@ -115,9 +116,10 @@ const HyperRAGHome = () => {
     const [compareMode2, setCompareMode2] = useState('naive')
 
     // Storage keys
+    const storageScope = authStore.user?.id || authStore.user?.email || 'anonymous'
     const STORAGE_KEYS = {
-        CONVERSATIONS: 'hyperrag_conversations_v2',
-        ACTIVE_ID: 'hyperrag_active_conversation_v2'
+        CONVERSATIONS: `hyperrag_conversations_v2_${storageScope}`,
+        ACTIVE_ID: `hyperrag_active_conversation_v2_${storageScope}`
     }
 
     // 定义所有可用的模式配置
@@ -491,13 +493,13 @@ return
         return () => {
             window.removeEventListener('storage', handleStorageChange)
         }
-    }, [])
+    }, [storageScope])
 
     useEffect(() => {
         if (conversations.length > 0) {
             saveToStorage()
         }
-    }, [conversations, activeConversationId])
+    }, [conversations, activeConversationId, storageScope])
 
     // 当availableModes变化时，确保当前选择的mode在可用列表中
     useEffect(() => {

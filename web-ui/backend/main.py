@@ -677,7 +677,12 @@ def reset_llm_provider_pool_health() -> None:
         record["cooldown_until"] = 0.0
         record["last_error"] = ""
 
-app = FastAPI()
+enable_api_docs = os.getenv("HYPERCHE_ENABLE_API_DOCS", "false").lower() in {"1", "true", "yes"}
+app = FastAPI(
+    docs_url="/docs" if enable_api_docs else None,
+    redoc_url="/redoc" if enable_api_docs else None,
+    openapi_url="/openapi.json" if enable_api_docs else None,
+)
 
 def _cors_origins() -> list[str]:
     configured = os.getenv("CORS_ORIGINS", "")
@@ -700,6 +705,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def log_http_requests(request: Request, call_next):
+    start = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        duration_ms = (time.perf_counter() - start) * 1000
+        path = request.url.path
+        if path.startswith(("/files", "/auth", "/quota", "/settings", "/hyperrag")):
+            log_line = (
+                f"HTTP {request.method} {path} status={status_code} "
+                f"duration_ms={duration_ms:.1f}"
+            )
+            if status_code >= 400:
+                main_logger.warning(log_line)
+            else:
+                main_logger.info(log_line)
+
 @app.get("/")
 async def root():
     return {"message": "HyperChE"}
@@ -714,6 +740,12 @@ class AuthRegisterRequest(BaseModel):
 class AuthLoginRequest(BaseModel):
     email: str
     password: str
+
+
+class QuotaConfigRequest(BaseModel):
+    trial_docs_limit: int = 3
+    trial_llm_calls_limit: int = 50
+    trial_embedding_calls_limit: int = 200
 
 
 class UserApiKeyRequest(BaseModel):
@@ -772,8 +804,126 @@ async def require_current_user(request: Request) -> dict:
     return user
 
 
+async def require_admin_user(user: dict = Depends(require_current_user)) -> dict:
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return user
+
+
+def _user_db_prefix(user: dict) -> str:
+    user_id = (user or {}).get("id") or "anonymous"
+    return f"u_{user_id[:12]}__"
+
+
+def namespace_database_name(database_name: str | None, user: dict) -> str:
+    clean_name = file_manager.sanitize_database_name(database_name or "default")
+    prefix = _user_db_prefix(user)
+    if clean_name.startswith(prefix):
+        return clean_name
+    return f"{prefix}{clean_name}"
+
+
+def user_can_access_database(user: dict, database_name: str | None, include_legacy: bool = True) -> bool:
+    if not database_name:
+        return True
+    if user.get("role") == "admin":
+        return True
+    if database_name.startswith(_user_db_prefix(user)):
+        return True
+
+    user_id = user.get("id")
+    for kb in getattr(kb_manager, "_load_metadata", lambda: {})().values():
+        if kb.get("database_name") == database_name:
+            owner = kb.get("owner_user_id")
+            return owner == user_id or (include_legacy and not owner)
+    for file_info in file_manager.get_all_files(owner_user_id=user_id, include_legacy=include_legacy):
+        if file_info.get("database_name") == database_name:
+            return True
+    return include_legacy and not database_name.startswith("u_")
+
+
+def require_database_access(database_name: str | None, user: dict) -> str | None:
+    if not database_name:
+        return None
+    clean_name = file_manager.sanitize_database_name(database_name)
+    if not user_can_access_database(user, clean_name):
+        raise HTTPException(status_code=403, detail="鏃犳潈璁块棶璇ョ煡璇嗗簱")
+    return clean_name
+
+
+def database_display_name(database_name: str, user: dict) -> str:
+    prefix = _user_db_prefix(user)
+    if database_name and database_name.startswith(prefix):
+        return database_name[len(prefix):]
+    return database_name
+
+
 def has_personal_provider(user_id: str | None, provider_type: str) -> bool:
-    return bool(auth_store.get_enabled_provider(user_id, provider_type))
+    return bool(auth_store.get_enabled_providers(user_id, provider_type))
+
+
+def get_user_llm_provider_candidates(user_id: str | None, settings: dict) -> list[dict]:
+    user_providers = auth_store.get_enabled_providers(user_id, "llm")
+    if not user_providers:
+        return []
+
+    per_key_default = _coerce_positive_int(settings.get("llmPerKeyMaxAsync", 1), 1)
+    providers = []
+    for idx, user_provider in enumerate(user_providers):
+        api_keys = user_provider.get("apiKeys") or split_api_keys(user_provider.get("apiKey"))
+        if not api_keys:
+            continue
+        providers.append(
+            {
+                "name": f"user-llm-{idx + 1}",
+                "baseUrl": user_provider["baseUrl"],
+                "modelName": user_provider["modelName"],
+                "apiKeys": api_keys,
+                "enabled": True,
+                "maxAsync": max(1, len(api_keys) * per_key_default),
+                "perKeyMaxAsync": per_key_default,
+                "priority": idx,
+                "index": idx,
+            }
+        )
+    if not providers:
+        return []
+
+    user_settings = dict(settings)
+    user_settings["llmProviders"] = providers
+    return get_llm_provider_candidates(user_settings)
+
+
+def summarize_user_provider_pool(user_id: str | None, provider_type: str) -> dict:
+    providers = auth_store.get_enabled_providers(user_id, provider_type)
+    return {
+        "pool": f"user_{provider_type}",
+        "providers": len(providers),
+        "total_keys": sum(len(provider.get("apiKeys") or []) for provider in providers),
+    }
+
+
+def get_user_embedding_candidates(user_id: str | None, settings: dict) -> list[dict]:
+    user_providers = auth_store.get_enabled_providers(user_id, "embedding")
+    candidates = []
+    for provider_index, provider in enumerate(user_providers, start=1):
+        key_candidates = get_api_key_candidates(
+            f"embedding:user:{provider.get('id', provider_index)}",
+            "\n".join(provider.get("apiKeys") or []),
+        )
+        for key_index, key_total, candidate_key in key_candidates:
+            candidates.append(
+                {
+                    "provider_index": provider_index,
+                    "provider_total": len(user_providers),
+                    "key_index": key_index,
+                    "key_total": key_total,
+                    "key": candidate_key,
+                    "model": provider["modelName"],
+                    "base_url": provider["baseUrl"],
+                }
+            )
+    return candidates
 
 
 def consume_platform_quota(user_id: str | None, provider_type: str, amount: int = 1) -> None:
@@ -838,6 +988,21 @@ async def quota_me(user: dict = Depends(require_current_user)):
     return {"success": True, "quota": auth_store.get_quota(user["id"])}
 
 
+@app.get("/admin/quota-config")
+async def get_admin_quota_config(user: dict = Depends(require_admin_user)):
+    return {"success": True, "quota_config": auth_store.get_quota_limits()}
+
+
+@app.post("/admin/quota-config")
+async def save_admin_quota_config(payload: QuotaConfigRequest, user: dict = Depends(require_admin_user)):
+    limits = auth_store.set_quota_limits(
+        payload.trial_docs_limit,
+        payload.trial_llm_calls_limit,
+        payload.trial_embedding_calls_limit,
+    )
+    return {"success": True, "quota_config": limits}
+
+
 @app.get("/user-api-keys")
 async def list_user_api_keys(user: dict = Depends(require_current_user)):
     return {"success": True, "keys": auth_store.list_api_keys(user["id"])}
@@ -886,7 +1051,7 @@ class KBUpdateRequest(BaseModel):
     name: Optional[str] = None
 
 @app.post("/kb")
-async def create_kb(req: KBCreateRequest):
+async def create_kb(req: KBCreateRequest, user: dict = Depends(require_current_user)):
     """创建知识库"""
     try:
         kb = await kb_manager.create_kb(
@@ -896,6 +1061,8 @@ async def create_kb(req: KBCreateRequest):
             domain=req.domain,
             chunk_size=req.chunk_size,
             chunk_overlap=req.chunk_overlap,
+            database_name=namespace_database_name(req.name, user),
+            owner_user_id=user.get("id"),
         )
         return {"success": True, "data": kb}
     except ValueError as e:
@@ -904,38 +1071,38 @@ async def create_kb(req: KBCreateRequest):
         raise HTTPException(status_code=500, detail=safe_str(e))
 
 @app.get("/kb")
-async def list_kbs():
+async def list_kbs(user: dict = Depends(require_current_user)):
     """列出所有知识库（含统计）"""
     try:
-        kbs = await kb_manager.list_kbs()
+        kbs = await kb_manager.list_kbs(owner_user_id=user.get("id"), include_legacy=True)
         result = []
         for kb in kbs:
-            stats = await kb_manager.get_kb_stats(kb["database_name"], file_manager)
-            result.append({**kb, "stats": stats})
+            stats = await kb_manager.get_kb_stats(kb["database_name"], file_manager, owner_user_id=user.get("id"), include_legacy=True)
+            result.append({**kb, "display_database_name": database_display_name(kb["database_name"], user), "stats": stats})
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=safe_str(e))
 
 @app.get("/kb/{kb_name}")
-async def get_kb(kb_name: str):
+async def get_kb(kb_name: str, user: dict = Depends(require_current_user)):
     """获取知识库详情"""
     try:
-        kb = await kb_manager.get_kb(kb_name)
+        kb = await kb_manager.get_kb(kb_name, owner_user_id=user.get("id"), include_legacy=True)
         if not kb:
             raise HTTPException(status_code=404, detail="知识库不存在")
-        stats = await kb_manager.get_kb_stats(kb["database_name"], file_manager)
-        return {**kb, "stats": stats}
+        stats = await kb_manager.get_kb_stats(kb["database_name"], file_manager, owner_user_id=user.get("id"), include_legacy=True)
+        return {**kb, "display_database_name": database_display_name(kb["database_name"], user), "stats": stats}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=safe_str(e))
 
 @app.put("/kb/{kb_name}")
-async def update_kb(kb_name: str, req: KBUpdateRequest):
+async def update_kb(kb_name: str, req: KBUpdateRequest, user: dict = Depends(require_current_user)):
     """更新知识库设置"""
     try:
         updates = {k: v for k, v in req.dict().items() if v is not None}
-        kb = await kb_manager.update_kb(kb_name, **updates)
+        kb = await kb_manager.update_kb(kb_name, owner_user_id=user.get("id"), include_legacy=True, **updates)
         if not kb:
             raise HTTPException(status_code=404, detail="知识库不存在")
         return {"success": True, "data": kb}
@@ -945,17 +1112,17 @@ async def update_kb(kb_name: str, req: KBUpdateRequest):
         raise HTTPException(status_code=500, detail=safe_str(e))
 
 @app.delete("/kb/{kb_name}")
-async def delete_kb(kb_name: str):
+async def delete_kb(kb_name: str, user: dict = Depends(require_current_user)):
     """删除知识库及其文件和数据库"""
     try:
-        kb = await kb_manager.get_kb(kb_name)
+        kb = await kb_manager.get_kb(kb_name, owner_user_id=user.get("id"), include_legacy=True)
         if not kb:
             raise HTTPException(status_code=404, detail="知识库不存在")
 
         database_name = kb["database_name"]
 
         # 删除关联文件
-        all_files = file_manager.get_all_files()
+        all_files = file_manager.get_all_files(owner_user_id=user.get("id"), include_legacy=True)
         kb_files = [f for f in all_files if f.get("kb_name") == database_name]
         for f in kb_files:
             try:
@@ -970,7 +1137,7 @@ async def delete_kb(kb_name: str):
             pass
 
         # 删除KB元数据
-        await kb_manager.delete_kb(kb_name)
+        await kb_manager.delete_kb(kb_name, owner_user_id=user.get("id"), include_legacy=True)
 
         return {"success": True, "message": f"知识库 '{kb_name}' 已删除"}
     except HTTPException:
@@ -980,77 +1147,83 @@ async def delete_kb(kb_name: str):
 
 
 @app.get("/db")
-async def db(database: str = None):
+async def db(database: str = None, user: dict = Depends(require_current_user)):
     """
     获取全部数据json
     """
     try:
+        database = require_database_access(database, user)
         data = get_hypergraph(database)
         return data
     except Exception as e:
         return {"error": safe_str(e)}
 
 @app.get("/db/vertices")
-async def get_vertices_function(database: str = None, page: int = None, page_size: int = None):
+async def get_vertices_function(database: str = None, page: int = None, page_size: int = None, user: dict = Depends(require_current_user)):
     """
     获取vertices列表
     """
     try:
+        database = require_database_access(database, user)
         data = getFrequentVertices(database, page, page_size)
         return data
     except Exception as e:
         return {"error": safe_str(e)}
 
 @app.get("/db/hyperedges")
-async def get_hypergraph_function(database: str = None, page: int = None, page_size: int = None):
+async def get_hypergraph_function(database: str = None, page: int = None, page_size: int = None, user: dict = Depends(require_current_user)):
     """
     获取hyperedges列表
     """
     try:
+        database = require_database_access(database, user)
         data = get_hyperedges(database, page, page_size)
         return data
     except Exception as e:
         return {"error": safe_str(e)}
 
 @app.get("/db/hyperedges/{hyperedge_id}")
-async def get_hyperedge(hyperedge_id: str, database: str = None):
+async def get_hyperedge(hyperedge_id: str, database: str = None, user: dict = Depends(require_current_user)):
     """
     获取指定hyperedge的详情
     """
     try:
         hyperedge_id = hyperedge_id.replace("%20", " ")
         vertices = hyperedge_id.split("|*|")
+        database = require_database_access(database, user)
         data = get_hyperedge_detail(vertices, database)
         return data
     except Exception as e:
         return {"error": safe_str(e)}
 
 @app.get("/db/vertices/{vertex_id}")
-async def get_vertex(vertex_id: str, database: str = None):
+async def get_vertex(vertex_id: str, database: str = None, user: dict = Depends(require_current_user)):
     """
     获取指定vertex的json
     """
     vertex_id = vertex_id.replace("%20", " ")
     try:
+        database = require_database_access(database, user)
         data = get_vertice(vertex_id, database)
         return data
     except Exception as e:
         return {"error": safe_str(e)}
 
 @app.get("/db/vertices_neighbor/{vertex_id}")
-async def get_vertex_neighbor(vertex_id: str, database: str = None):
+async def get_vertex_neighbor(vertex_id: str, database: str = None, user: dict = Depends(require_current_user)):
     """
     获取指定vertex的neighbor
     """
     vertex_id = vertex_id.replace("%20", " ")
     try:
+        database = require_database_access(database, user)
         data = get_vertice_neighbor(vertex_id, database)
         return data
     except Exception as e:
         return {"error": safe_str(e)}
 
 @app.get("/db/hyperedge_neighbor/{hyperedge_id}")
-async def get_hyperedge_neighbor(hyperedge_id: str, database: str = None):
+async def get_hyperedge_neighbor(hyperedge_id: str, database: str = None, user: dict = Depends(require_current_user)):
     """
     获取指定hyperedge的neighbor
     """
@@ -1058,6 +1231,7 @@ async def get_hyperedge_neighbor(hyperedge_id: str, database: str = None):
     hyperedge_id = hyperedge_id.replace("*", "#")
     print(hyperedge_id)
     try:
+        database = require_database_access(database, user)
         data = get_hyperedge_neighbor_server(hyperedge_id, database)
         return data
     except Exception as e:
@@ -1090,11 +1264,12 @@ class HyperedgeUpdateModel(BaseModel):
     database: str = None
 
 @app.post("/db/vertices")
-async def create_vertex(vertex: VertexModel):
+async def create_vertex(vertex: VertexModel, user: dict = Depends(require_current_user)):
     """
     创建新的vertex
     """
     try:
+        vertex.database = require_database_access(vertex.database, user)
         result = add_vertex(vertex.vertex_id, {
             "entity_name": vertex.entity_name,
             "entity_type": vertex.entity_type,
@@ -1106,11 +1281,12 @@ async def create_vertex(vertex: VertexModel):
         return {"success": False, "message": safe_str(e)}
 
 @app.post("/db/hyperedges")
-async def create_hyperedge(hyperedge: HyperedgeModel):
+async def create_hyperedge(hyperedge: HyperedgeModel, user: dict = Depends(require_current_user)):
     """
     创建新的hyperedge
     """
     try:
+        hyperedge.database = require_database_access(hyperedge.database, user)
         result = add_hyperedge(hyperedge.vertices, {
             "keywords": hyperedge.keywords,
             "summary": hyperedge.summary
@@ -1120,12 +1296,13 @@ async def create_hyperedge(hyperedge: HyperedgeModel):
         return {"success": False, "message": safe_str(e)}
 
 @app.put("/db/vertices/{vertex_id}")
-async def update_vertex_endpoint(vertex_id: str, vertex: VertexUpdateModel):
+async def update_vertex_endpoint(vertex_id: str, vertex: VertexUpdateModel, user: dict = Depends(require_current_user)):
     """
     更新vertex信息
     """
     try:
         vertex_id = vertex_id.replace("%20", " ")
+        vertex.database = require_database_access(vertex.database, user)
         result = update_vertex(vertex_id, {
             "entity_name": vertex.entity_name,
             "entity_type": vertex.entity_type,
@@ -1137,13 +1314,14 @@ async def update_vertex_endpoint(vertex_id: str, vertex: VertexUpdateModel):
         return {"success": False, "message": safe_str(e)}
 
 @app.put("/db/hyperedges/{hyperedge_id}")
-async def update_hyperedge_endpoint(hyperedge_id: str, hyperedge: HyperedgeUpdateModel):
+async def update_hyperedge_endpoint(hyperedge_id: str, hyperedge: HyperedgeUpdateModel, user: dict = Depends(require_current_user)):
     """
     更新hyperedge信息
     """
     try:
         hyperedge_id = hyperedge_id.replace("%20", " ")
         vertices = hyperedge_id.split("|*|")
+        hyperedge.database = require_database_access(hyperedge.database, user)
         result = update_hyperedge(vertices, {
             "keywords": hyperedge.keywords,
             "summary": hyperedge.summary
@@ -1153,25 +1331,27 @@ async def update_hyperedge_endpoint(hyperedge_id: str, hyperedge: HyperedgeUpdat
         return {"success": False, "message": safe_str(e)}
 
 @app.delete("/db/vertices/{vertex_id}")
-async def delete_vertex_endpoint(vertex_id: str, database: str = None):
+async def delete_vertex_endpoint(vertex_id: str, database: str = None, user: dict = Depends(require_current_user)):
     """
     删除vertex
     """
     try:
         vertex_id = vertex_id.replace("%20", " ")
+        database = require_database_access(database, user)
         result = delete_vertex(vertex_id, database)
         return {"success": True, "message": "Vertex deleted successfully"}
     except Exception as e:
         return {"success": False, "message": safe_str(e)}
 
 @app.delete("/db/hyperedges/{hyperedge_id}")
-async def delete_hyperedge_endpoint(hyperedge_id: str, database: str = None):
+async def delete_hyperedge_endpoint(hyperedge_id: str, database: str = None, user: dict = Depends(require_current_user)):
     """
     删除hyperedge
     """
     try:
         hyperedge_id = hyperedge_id.replace("%20", " ")
         vertices = hyperedge_id.split("|*|")
+        database = require_database_access(database, user)
         result = delete_hyperedge(vertices, database)
         return {"success": True, "message": "Hyperedge deleted successfully"}
     except Exception as e:
@@ -1180,37 +1360,41 @@ async def delete_hyperedge_endpoint(hyperedge_id: str, database: str = None):
 # ========== 主题超图相关API端点 ==========
 
 @app.get("/db/theme_hypergraph")
-async def get_theme_hypergraph_endpoint(database: str = None):
+async def get_theme_hypergraph_endpoint(database: str = None, user: dict = Depends(require_current_user)):
     """获取主题超图全部数据"""
     try:
+        database = require_database_access(database, user)
         data = get_theme_hypergraph(database)
         return data
     except Exception as e:
         return {"error": safe_str(e)}
 
 @app.get("/db/theme_vertices")
-async def get_theme_vertices_endpoint(database: str = None, page: int = None, page_size: int = None):
+async def get_theme_vertices_endpoint(database: str = None, page: int = None, page_size: int = None, user: dict = Depends(require_current_user)):
     """获取主题超图顶点列表"""
     try:
+        database = require_database_access(database, user)
         data = get_theme_vertices(database, page, page_size)
         return data
     except Exception as e:
         return {"error": safe_str(e)}
 
 @app.get("/db/theme_hyperedges")
-async def get_theme_hyperedges_endpoint(database: str = None, page: int = None, page_size: int = None):
+async def get_theme_hyperedges_endpoint(database: str = None, page: int = None, page_size: int = None, user: dict = Depends(require_current_user)):
     """获取主题超图超边列表"""
     try:
+        database = require_database_access(database, user)
         data = get_theme_hyperedges(database, page, page_size)
         return data
     except Exception as e:
         return {"error": safe_str(e)}
 
 @app.get("/db/theme_vertices_neighbor/{vertex_id}")
-async def get_theme_vertex_neighbor_endpoint(vertex_id: str, database: str = None):
+async def get_theme_vertex_neighbor_endpoint(vertex_id: str, database: str = None, user: dict = Depends(require_current_user)):
     """获取主题超图中顶点的邻居"""
     try:
         vertex_id = vertex_id.replace("%20", " ")
+        database = require_database_access(database, user)
         data = get_theme_vertex_neighbor(vertex_id, database)
         return data
     except Exception as e:
@@ -1303,6 +1487,11 @@ async def get_settings(user: dict = Depends(require_current_user)):
                     safe_provider['apiKeys'] = ['***' for key in keys if key]
                     safe_providers.append(safe_provider)
                 settings_safe['llmProviders'] = safe_providers
+            settings_safe["is_admin"] = user.get("role") == "admin"
+            if user.get("role") != "admin":
+                settings_safe["apiKey"] = ""
+                settings_safe["embeddingApiKey"] = ""
+                settings_safe["llmProviders"] = []
             return settings_safe
         else:
             # 返回默认设置
@@ -1330,7 +1519,7 @@ async def get_settings(user: dict = Depends(require_current_user)):
         return {"success": False, "message": safe_str(e)}
 
 @app.post("/settings")
-async def save_settings(settings: SettingsModel, user: dict = Depends(require_current_user)):
+async def save_settings(settings: SettingsModel, user: dict = Depends(require_admin_user)):
     """
     保存系统设置
     """
@@ -1428,7 +1617,7 @@ async def save_settings(settings: SettingsModel, user: dict = Depends(require_cu
         return {"success": False, "message": safe_str(e)}
 
 @app.get("/llm-provider-pool/status")
-async def get_llm_provider_pool_status():
+async def get_llm_provider_pool_status(user: dict = Depends(require_admin_user)):
     try:
         with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
             settings = json.load(f)
@@ -1437,7 +1626,7 @@ async def get_llm_provider_pool_status():
         return {"success": False, "message": safe_str(e)}
 
 @app.post("/llm-provider-pool/reset")
-async def reset_llm_provider_pool_status():
+async def reset_llm_provider_pool_status(user: dict = Depends(require_admin_user)):
     try:
         reset_llm_provider_pool_health()
         return {"success": True, "message": "LLM provider pool health reset"}
@@ -1471,7 +1660,7 @@ async def get_domains():
         return {"domains": [{"name": "default", "description": "通用领域", "output_format": "delimiter"}]}
 
 @app.get("/databases")
-async def get_databases():
+async def get_databases(user: dict = Depends(require_current_user)):
     """
     获取可用数据库列表
     """
@@ -1494,6 +1683,12 @@ async def get_databases():
                 })
 
         # 如果没有找到数据库文件，返回默认列表
+        databases = [
+            {**db, "display_name": database_display_name(db.get("name", ""), user)}
+            for db in databases
+            if user_can_access_database(user, db.get("name"), include_legacy=True)
+        ]
+
         if not databases:
             databases = []
 
@@ -1521,7 +1716,7 @@ async def test_embedding(user: dict = Depends(require_current_user)):
             embedding_model = user_embedding_provider["modelName"]
             api_key = user_embedding_provider["apiKey"]
             base_url = user_embedding_provider["baseUrl"]
-            key_candidates = [(1, 1, api_key)]
+            key_candidates = get_api_key_candidates(f"embedding:user:{user['id']}", api_key)
         else:
             key_candidates = get_api_key_candidates("embedding", api_key, settings.get("apiKey"))
 
@@ -1787,7 +1982,7 @@ async def get_hyperrag_embedding_func(texts: list[str]) -> np.ndarray:
                 embedding_model = user_embedding_provider["modelName"]
                 api_key = user_embedding_provider["apiKey"]
                 base_url = user_embedding_provider["baseUrl"]
-                key_candidates = [(1, 1, api_key)]
+                key_candidates = get_api_key_candidates(f"embedding:user:{current_user_id}", api_key)
             else:
                 consume_platform_quota(current_user_id, "embedding", 1)
                 key_candidates = get_api_key_candidates("embedding", api_key, settings.get("apiKey"))
@@ -1992,37 +2187,15 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
         max_retries = _coerce_positive_int(settings.get("llmMaxRetries", 1), 1, minimum=0)
         max_attempts = max(1, max_retries + 1)
         current_user_id = CURRENT_USER_ID.get()
-        user_llm_provider = auth_store.get_enabled_provider(current_user_id, "llm")
-        if user_llm_provider:
-            user_provider = {
-                "name": "user-llm",
-                "baseUrl": user_llm_provider["baseUrl"],
-                "modelName": user_llm_provider["modelName"],
-                "apiKeys": [user_llm_provider["apiKey"]],
-                "enabled": True,
-                "maxAsync": 1,
-                "perKeyMaxAsync": 1,
-                "priority": 0,
-                "index": 0,
-            }
-            provider_candidates = [
-                {
-                    "provider": user_provider,
-                    "provider_index": 1,
-                    "provider_total": 1,
-                    "key": user_llm_provider["apiKey"],
-                    "key_index": 1,
-                    "key_total": 1,
-                    "provider_id": _provider_id(user_provider),
-                    "key_id": _llm_key_id(user_provider, 1, user_llm_provider["apiKey"]),
-                }
-            ]
+        user_llm_candidates = get_user_llm_provider_candidates(current_user_id, settings)
+        if user_llm_candidates:
+            provider_candidates = user_llm_candidates
         else:
             consume_platform_quota(current_user_id, "llm", 1)
             provider_candidates = get_llm_provider_candidates(settings)
         main_logger.info(
             "LLM provider pool: "
-            f"{'user-owned-key' if user_llm_provider else json.dumps(redact_for_log(summarize_llm_provider_pool(settings)), ensure_ascii=False)}"
+            f"{json.dumps(redact_for_log(summarize_user_provider_pool(current_user_id, 'llm')), ensure_ascii=False) if user_llm_candidates else json.dumps(redact_for_log(summarize_llm_provider_pool(settings)), ensure_ascii=False)}"
         )
         main_logger.info(f"LLM history messages: {len(cleaned_history)} (raw: {len(history_messages)})")
 
@@ -2144,7 +2317,7 @@ async def preflight_hyperrag_api_services() -> None:
         embedding_model = user_embedding_provider["modelName"]
         embedding_api_key = user_embedding_provider["apiKey"]
         embedding_base_url = user_embedding_provider["baseUrl"]
-        embedding_key_candidates = [(1, 1, embedding_api_key)]
+        embedding_key_candidates = get_api_key_candidates(f"embedding:user:{current_user_id}", embedding_api_key)
     else:
         embedding_key_candidates = get_api_key_candidates("embedding", embedding_api_key, settings.get("apiKey"))
     if not embedding_key_candidates:
@@ -2192,31 +2365,9 @@ async def preflight_hyperrag_api_services() -> None:
         suggestion = extract_user_friendly_error(detail)
         raise RuntimeError(f"Embedding service preflight failed: {detail}. Suggestion: {suggestion}")
 
-    user_llm_provider = auth_store.get_enabled_provider(current_user_id, "llm")
-    if user_llm_provider:
-        user_provider = {
-            "name": "user-llm",
-            "baseUrl": user_llm_provider["baseUrl"],
-            "modelName": user_llm_provider["modelName"],
-            "apiKeys": [user_llm_provider["apiKey"]],
-            "enabled": True,
-            "maxAsync": 1,
-            "perKeyMaxAsync": 1,
-            "priority": 0,
-            "index": 0,
-        }
-        llm_candidates = [
-            {
-                "provider": user_provider,
-                "provider_index": 1,
-                "provider_total": 1,
-                "key": user_llm_provider["apiKey"],
-                "key_index": 1,
-                "key_total": 1,
-                "provider_id": _provider_id(user_provider),
-                "key_id": _llm_key_id(user_provider, 1, user_llm_provider["apiKey"]),
-            }
-        ]
+    user_llm_candidates = get_user_llm_provider_candidates(current_user_id, settings)
+    if user_llm_candidates:
+        llm_candidates = user_llm_candidates
     else:
         llm_candidates = get_llm_provider_candidates(settings)
     if not llm_candidates:
@@ -2476,6 +2627,7 @@ async def insert_document(doc: DocumentModel, user: dict = Depends(require_curre
     
     try:
         consume_document_quota_if_needed(user, 1)
+        doc.database = namespace_database_name(doc.database, user)
         rag = get_or_create_hyperrag(doc.database)
         
         # 重试机制
@@ -2512,6 +2664,7 @@ async def query_hyperrag(query: QueryModel, user: dict = Depends(require_current
                 return {"success": False, "message": "Cog-RAG is not available"}
 
             main_logger.info(f"使用Cog-RAG查询，模式: {query.mode}")
+            query.database = require_database_access(query.database, user) if query.database else namespace_database_name("default", user)
             rag = get_or_create_cograg(query.database)
 
             # 创建Cog-RAG查询参数
@@ -2548,6 +2701,7 @@ async def query_hyperrag(query: QueryModel, user: dict = Depends(require_current
                 return {"success": False, "message": "HyperRAG is not available"}
 
             main_logger.info(f"使用HyperRAG查询，模式: {query.mode}")
+            query.database = require_database_access(query.database, user) if query.database else namespace_database_name("default", user)
             rag = get_or_create_hyperrag(query.database)
             param = QueryParam(
                 mode=query.mode,
@@ -2754,7 +2908,7 @@ async def get_files(user: dict = Depends(require_current_user)):
     获取所有上传的文件列表
     """
     try:
-        files = file_manager.get_all_files()
+        files = file_manager.get_all_files(owner_user_id=user.get("id"), include_legacy=True)
         return {"files": files}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取文件列表失败: {safe_str(e)}")
@@ -2813,11 +2967,22 @@ async def upload_files(
             # 如果指定了kb_name，使用KB的数据库名
             effective_target_db = target_database
             if kb_name:
-                kb = await kb_manager.get_kb(kb_name)
+                kb = await kb_manager.get_kb(kb_name, owner_user_id=user.get("id"), include_legacy=True)
                 if kb:
                     effective_target_db = kb["database_name"]
+                else:
+                    raise ValueError("知识库不存在或无权访问")
+            elif effective_target_db:
+                effective_target_db = namespace_database_name(effective_target_db, user)
+            else:
+                effective_target_db = namespace_database_name(Path(file.filename).stem, user)
 
-            file_info = await file_manager.save_uploaded_file(content, file.filename, target_database=effective_target_db)
+            file_info = await file_manager.save_uploaded_file(
+                content,
+                file.filename,
+                target_database=effective_target_db,
+                owner_user_id=user.get("id"),
+            )
 
             # 关联知识库
             if kb_name:
@@ -2848,7 +3013,10 @@ async def upload_files(
     return {"files": results}
 
 @app.delete("/files/{file_id}")
-async def delete_file(file_id: str, clean_database: bool = False):
+async def delete_file(file_id: str, clean_database: bool = False, user: dict = Depends(require_current_user)):
+    file_info_for_auth = file_manager.get_file_by_id(file_id, owner_user_id=user.get("id"), include_legacy=True)
+    if not file_info_for_auth:
+        raise HTTPException(status_code=404, detail="文件不存在或无权访问")
     """
     删除指定的文件
 
@@ -2882,7 +3050,8 @@ async def delete_file(file_id: str, clean_database: bool = False):
         raise HTTPException(status_code=500, detail=f"文件删除失败: {safe_str(e)}")
 
 @app.post("/database/clear")
-async def clear_database(database: str = "default"):
+async def clear_database(database: str = "default", user: dict = Depends(require_current_user)):
+    database = require_database_access(database, user) or namespace_database_name("default", user)
     """
     清空指定数据库的所有数据
 
@@ -2943,7 +3112,8 @@ async def clear_database(database: str = "default"):
         raise HTTPException(status_code=500, detail=f"清空数据库失败: {safe_str(e)}")
 
 @app.get("/database/status")
-async def get_database_status(database: str = "default"):
+async def get_database_status(database: str = "default", user: dict = Depends(require_current_user)):
+    database = require_database_access(database, user) or namespace_database_name("default", user)
     """
     获取数据库状态信息
 
@@ -2978,7 +3148,8 @@ async def get_database_status(database: str = "default"):
         raise HTTPException(status_code=500, detail=f"获取数据库状态失败: {safe_str(e)}")
 
 @app.get("/databases/{database_name}/diagnose")
-async def diagnose_database(database_name: str):
+async def diagnose_database(database_name: str, user: dict = Depends(require_current_user)):
+    database_name = require_database_access(database_name, user)
     """
     诊断数据库文件占用情况
 
@@ -3095,7 +3266,7 @@ async def diagnose_database(database_name: str):
         return {"error": safe_str(e), "message": f"诊断失败: {safe_str(e)}"}
 
 @app.delete("/databases/{database_name}")
-async def delete_database_endpoint(database_name: str):
+async def delete_database_endpoint(database_name: str, user: dict = Depends(require_current_user)):
     """
     删除指定数据库（支持HyperRAG和Cog-RAG双系统）
 
@@ -3203,6 +3374,7 @@ async def embed_files(request: FileEmbedRequest, user: dict = Depends(require_cu
     results = []
     
     try:
+        database_name = require_database_access(database_name, user)
         consume_document_quota_if_needed(user, len(request.file_ids))
         await preflight_hyperrag_api_services()
 
@@ -3219,7 +3391,7 @@ async def embed_files(request: FileEmbedRequest, user: dict = Depends(require_cu
                 
                 # 获取文件信息
                 print("获取文件信息...")
-                file_info = file_manager.get_file_by_id(file_id)
+                file_info = file_manager.get_file_by_id(file_id, owner_user_id=user.get("id"), include_legacy=True)
                 if not file_info:
                     error_msg = f"文件不存在: {file_id}"
                     print(f"[ERROR] {error_msg}")
@@ -3639,7 +3811,7 @@ async def embed_files_with_progress(request: FileEmbedRequest, user: dict = Depe
 
     # 如果指定了kb_name，从KB配置中读取默认参数
     if request.kb_name:
-        kb = await kb_manager.get_kb(request.kb_name)
+        kb = await kb_manager.get_kb(request.kb_name, owner_user_id=user.get("id"), include_legacy=True)
         if kb:
             if not request.target_database:
                 request.target_database = kb["database_name"]
@@ -3661,6 +3833,12 @@ async def embed_files_with_progress(request: FileEmbedRequest, user: dict = Depe
                 main_logger.warning(f"更新领域设置失败: {safe_str(e)}")
 
     # 立即返回处理开始的响应
+    if request.kb_name and not request.target_database:
+        raise HTTPException(status_code=404, detail="知识库不存在或无权访问")
+
+    if request.target_database:
+        request.target_database = require_database_access(request.target_database, user)
+
     total_files = len(request.file_ids)
     consume_document_quota_if_needed(user, total_files)
 
@@ -3695,7 +3873,7 @@ async def embed_files_with_progress(request: FileEmbedRequest, user: dict = Depe
         raise HTTPException(status_code=400, detail=user_friendly_error)
     
     # 异步处理文件嵌入
-    asyncio.create_task(process_files_with_progress(request, total_files))
+    asyncio.create_task(process_files_with_progress(request, total_files, user.get("id")))
     
     return {
         "message": "文档嵌入处理已开始",
@@ -3703,7 +3881,7 @@ async def embed_files_with_progress(request: FileEmbedRequest, user: dict = Depe
         "processing": True
     }
 
-async def process_files_with_progress(request: FileEmbedRequest, total_files: int):
+async def process_files_with_progress(request: FileEmbedRequest, total_files: int, owner_user_id: str | None = None):
     """异步处理文件嵌入并发送进度更新"""
     try:
         print(f"="*60)
@@ -3746,7 +3924,7 @@ async def process_files_with_progress(request: FileEmbedRequest, total_files: in
                 # 获取文件信息
                 print("正在获取文件信息...")
                 main_logger.info(f"获取文件信息: {file_id}")
-                file_info = file_manager.get_file_by_id(file_id)
+                file_info = file_manager.get_file_by_id(file_id, owner_user_id=owner_user_id, include_legacy=True)
                 if not file_info:
                     error_msg = f"文件不存在: {file_id}"
                     print(f"[ERROR] 错误: {error_msg}")

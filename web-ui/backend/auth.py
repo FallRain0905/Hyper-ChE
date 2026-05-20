@@ -43,6 +43,12 @@ MSG_DUPLICATE_EMAIL = "\u8be5\u90ae\u7bb1\u5df2\u6ce8\u518c"
 MSG_QUOTA_EXHAUSTED = "\u8bd5\u7528\u989d\u5ea6\u4e0d\u8db3"
 
 
+def _split_api_keys(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in re.split(r"[\n,;]+", value) if item.strip()]
+
+
 metadata = MetaData()
 
 users = Table(
@@ -78,6 +84,13 @@ user_api_keys = Table(
     Column("api_key_encrypted", Text, nullable=False),
     Column("enabled", Boolean, nullable=False, default=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+app_config = Table(
+    "app_config",
+    metadata,
+    Column("key", String(128), primary_key=True),
+    Column("value", Text, nullable=False),
 )
 
 
@@ -212,18 +225,81 @@ class AuthStore:
     def __init__(self) -> None:
         self.engine = make_engine()
         metadata.create_all(self.engine)
+        self.ensure_admin_user()
+
+    def get_config(self, key: str, default: str | None = None) -> str | None:
+        with self.engine.begin() as conn:
+            row = conn.execute(select(app_config.c.value).where(app_config.c.key == key)).first()
+            return row[0] if row else default
+
+    def set_config(self, key: str, value: str) -> None:
+        with self.engine.begin() as conn:
+            existing = conn.execute(select(app_config.c.key).where(app_config.c.key == key)).first()
+            if existing:
+                conn.execute(update(app_config).where(app_config.c.key == key).values(value=str(value)))
+            else:
+                conn.execute(insert(app_config).values(key=key, value=str(value)))
+
+    def get_quota_limits(self) -> dict[str, int]:
+        return {
+            "trial_docs_limit": int(self.get_config("trial_docs_limit", os.getenv("TRIAL_DOC_LIMIT", "3")) or 3),
+            "trial_llm_calls_limit": int(self.get_config("trial_llm_calls_limit", os.getenv("TRIAL_LLM_CALL_LIMIT", "50")) or 50),
+            "trial_embedding_calls_limit": int(self.get_config("trial_embedding_calls_limit", os.getenv("TRIAL_EMBEDDING_CALL_LIMIT", "200")) or 200),
+        }
+
+    def set_quota_limits(self, docs: int, llm: int, embedding: int) -> dict[str, int]:
+        docs = max(0, int(docs))
+        llm = max(0, int(llm))
+        embedding = max(0, int(embedding))
+        self.set_config("trial_docs_limit", str(docs))
+        self.set_config("trial_llm_calls_limit", str(llm))
+        self.set_config("trial_embedding_calls_limit", str(embedding))
+        return self.get_quota_limits()
+
+    def ensure_admin_user(self) -> None:
+        email = (os.getenv("HYPERCHE_ADMIN_EMAIL") or "admin@123.com").strip().lower()
+        password = os.getenv("HYPERCHE_ADMIN_PASSWORD") or "admin123"
+        display_name = os.getenv("HYPERCHE_ADMIN_NAME") or "HyperChE Admin"
+        now = utcnow()
+        with self.engine.begin() as conn:
+            row = conn.execute(select(users).where(users.c.email == email)).mappings().first()
+            if row:
+                conn.execute(
+                    update(users)
+                    .where(users.c.id == row["id"])
+                    .values(
+                        password_hash=hash_password(password),
+                        display_name=display_name,
+                        role="admin",
+                    )
+                )
+                self._ensure_quota(conn, row["id"])
+                return
+            user_id = secrets.token_hex(16)
+            conn.execute(
+                insert(users).values(
+                    id=user_id,
+                    email=email,
+                    password_hash=hash_password(password),
+                    display_name=display_name,
+                    role="admin",
+                    created_at=now,
+                    last_login_at=None,
+                )
+            )
+            self._ensure_quota(conn, user_id)
 
     @property
     def trial_docs_limit(self) -> int:
-        return int(os.getenv("TRIAL_DOC_LIMIT", "3"))
+        return self.get_quota_limits()["trial_docs_limit"]
 
     @property
     def trial_llm_limit(self) -> int:
-        return int(os.getenv("TRIAL_LLM_CALL_LIMIT", "50"))
+        return self.get_quota_limits()["trial_llm_calls_limit"]
 
     @property
     def trial_embedding_limit(self) -> int:
-        return int(os.getenv("TRIAL_EMBEDDING_CALL_LIMIT", "200"))
+        return self.get_quota_limits()["trial_embedding_calls_limit"]
 
     def _quota_reset_at(self) -> datetime:
         return utcnow() + timedelta(days=30)
@@ -321,6 +397,18 @@ class AuthStore:
         return self.get_user(payload.get("sub", ""))
 
     def get_quota(self, user_id: str) -> dict[str, Any]:
+        user = self.get_user(user_id)
+        if user and user.get("role") == "admin":
+            return {
+                "trial_docs_used": 0,
+                "trial_docs_limit": 999999,
+                "trial_llm_calls_used": 0,
+                "trial_llm_calls_limit": 999999,
+                "trial_embedding_calls_used": 0,
+                "trial_embedding_calls_limit": 999999,
+                "monthly_reset_at": None,
+                "unlimited": True,
+            }
         with self.engine.begin() as conn:
             self._ensure_quota(conn, user_id)
             row = conn.execute(select(user_quotas).where(user_quotas.c.user_id == user_id)).mappings().one()
@@ -335,6 +423,9 @@ class AuthStore:
             }
 
     def consume_quota(self, user_id: str, quota_type: str, amount: int = 1) -> None:
+        user = self.get_user(user_id)
+        if user and user.get("role") == "admin":
+            return
         column_map = {
             "docs": user_quotas.c.trial_docs_used,
             "llm": user_quotas.c.trial_llm_calls_used,
@@ -403,6 +494,17 @@ class AuthStore:
             if not row:
                 return None
             item = dict(row)
+            encrypted_key = conn.execute(
+                select(user_api_keys.c.api_key_encrypted).where(
+                    user_api_keys.c.id == key_id,
+                    user_api_keys.c.user_id == user_id,
+                )
+            ).scalar_one_or_none()
+            if encrypted_key:
+                decrypted = _fernet().decrypt(encrypted_key.encode("utf-8")).decode("utf-8")
+                item["api_key_count"] = len(_split_api_keys(decrypted))
+            else:
+                item["api_key_count"] = 0
             item["api_key"] = "***"
             item["created_at"] = item["created_at"].isoformat() if item["created_at"] else None
             return item
@@ -424,6 +526,14 @@ class AuthStore:
             result = []
             for row in rows:
                 item = dict(row)
+                encrypted_key = conn.execute(
+                    select(user_api_keys.c.api_key_encrypted).where(user_api_keys.c.id == row["id"])
+                ).scalar_one_or_none()
+                if encrypted_key:
+                    decrypted = _fernet().decrypt(encrypted_key.encode("utf-8")).decode("utf-8")
+                    item["api_key_count"] = len(_split_api_keys(decrypted))
+                else:
+                    item["api_key_count"] = 0
                 item["api_key"] = "***"
                 item["created_at"] = item["created_at"].isoformat() if item["created_at"] else None
                 result.append(item)
@@ -454,6 +564,36 @@ class AuthStore:
                 "modelName": row["model_name"],
                 "apiKey": _fernet().decrypt(row["api_key_encrypted"].encode("utf-8")).decode("utf-8"),
             }
+
+    def get_enabled_providers(self, user_id: str | None, provider_type: str) -> list[dict[str, Any]]:
+        if not user_id:
+            return []
+        with self.engine.begin() as conn:
+            rows = conn.execute(
+                select(user_api_keys)
+                .where(
+                    user_api_keys.c.user_id == user_id,
+                    user_api_keys.c.provider_type == provider_type,
+                    user_api_keys.c.enabled == True,  # noqa: E712
+                )
+                .order_by(user_api_keys.c.created_at.desc())
+            ).mappings().all()
+            providers = []
+            for row in rows:
+                api_key_text = _fernet().decrypt(row["api_key_encrypted"].encode("utf-8")).decode("utf-8")
+                api_keys = _split_api_keys(api_key_text)
+                if not api_keys:
+                    continue
+                providers.append(
+                    {
+                        "id": row["id"],
+                        "baseUrl": row["base_url"],
+                        "modelName": row["model_name"],
+                        "apiKey": "\n".join(api_keys),
+                        "apiKeys": api_keys,
+                    }
+                )
+            return providers
 
 
 auth_store = AuthStore()

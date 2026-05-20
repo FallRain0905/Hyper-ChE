@@ -50,6 +50,14 @@ const Setting: React.FC = () => {
   const [availableDomains, setAvailableDomains] = useState<any[]>([])
   const [userApiKeys, setUserApiKeys] = useState<any[]>([])
   const [userKeyLoading, setUserKeyLoading] = useState(false)
+  const [quotaConfig, setQuotaConfig] = useState<any>({
+    trial_docs_limit: 3,
+    trial_llm_calls_limit: 50,
+    trial_embedding_calls_limit: 200
+  })
+  const [quotaConfigLoading, setQuotaConfigLoading] = useState(false)
+  const isAdmin = authStore.user?.role === 'admin'
+  const adminOnlyStyle = { marginBottom: '24px', display: isAdmin ? undefined : 'none' }
 
   // 默认配置
   const defaultSettings = {
@@ -741,13 +749,50 @@ const Setting: React.FC = () => {
     }
   }
 
+  const loadQuotaConfig = async () => {
+    if (authStore.user?.role !== 'admin') {
+      return
+    }
+    try {
+      const response = await fetch(`${SERVER_URL}/admin/quota-config`)
+      if (response.ok) {
+        const data = await response.json()
+        setQuotaConfig(data.quota_config || quotaConfig)
+      }
+    } catch (error) {
+      console.error('加载额度配置失败:', error)
+    }
+  }
+
+  const saveQuotaConfig = async () => {
+    setQuotaConfigLoading(true)
+    try {
+      const response = await fetch(`${SERVER_URL}/admin/quota-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(quotaConfig)
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(data.detail || data.message || '保存额度配置失败')
+      }
+      setQuotaConfig(data.quota_config || quotaConfig)
+      message.success('默认试用额度已更新')
+    } catch (error: any) {
+      message.error(error.message || '保存额度配置失败')
+    } finally {
+      setQuotaConfigLoading(false)
+    }
+  }
+
   useEffect(() => {
     loadSettings()
     loadDatabases()
     loadDomains()
     authStore.refreshQuota()
     loadUserApiKeys()
-  }, [])
+    loadQuotaConfig()
+  }, [authStore.user?.role])
 
   return (
     <div className="p-6">
@@ -775,6 +820,64 @@ const Setting: React.FC = () => {
               <LanguageSelector />
             </Form.Item>
           </Card>
+
+          {isAdmin && (
+            <Card
+              title={
+                <span>
+                  <KeyOutlined style={{ marginRight: '8px' }} />
+                  Admin trial quota
+                </span>
+              }
+              style={{ marginBottom: '24px' }}
+            >
+              <Alert
+                message="Default quota for non-admin users"
+                description="Admin accounts are not charged against trial quotas. These values only apply when ordinary users use the platform default API pool."
+                type="info"
+                showIcon
+                style={{ marginBottom: '16px' }}
+              />
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Form.Item label="Document embedding quota">
+                    <InputNumber
+                      min={0}
+                      max={1000000}
+                      style={{ width: '100%' }}
+                      value={quotaConfig.trial_docs_limit}
+                      onChange={(value) => setQuotaConfig({ ...quotaConfig, trial_docs_limit: Number(value || 0) })}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item label="LLM QA quota">
+                    <InputNumber
+                      min={0}
+                      max={1000000}
+                      style={{ width: '100%' }}
+                      value={quotaConfig.trial_llm_calls_limit}
+                      onChange={(value) => setQuotaConfig({ ...quotaConfig, trial_llm_calls_limit: Number(value || 0) })}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item label="Embedding call quota">
+                    <InputNumber
+                      min={0}
+                      max={1000000}
+                      style={{ width: '100%' }}
+                      value={quotaConfig.trial_embedding_calls_limit}
+                      onChange={(value) => setQuotaConfig({ ...quotaConfig, trial_embedding_calls_limit: Number(value || 0) })}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Button type="primary" loading={quotaConfigLoading} onClick={saveQuotaConfig}>
+                Save trial quota
+              </Button>
+            </Card>
+          )}
 
           <Card
             title={
@@ -849,7 +952,11 @@ const Setting: React.FC = () => {
                 </Col>
                 <Col span={7}>
                   <Form.Item name="api_key" label="API Key" rules={[{ required: true, message: '请输入 API Key' }]}>
-                    <Password placeholder="sk-xxxxxxxxxxxxxxxx" />
+                    <Input.TextArea
+                      rows={4}
+                      placeholder={'sk-xxxxxxxxxxxxxxxx\nsk-yyyyyyyyyyyyyyyy'}
+                      autoSize={{ minRows: 3, maxRows: 8 }}
+                    />
                   </Form.Item>
                 </Col>
               </Row>
@@ -882,7 +989,10 @@ const Setting: React.FC = () => {
                       <div className="text-sm font-medium text-slate-900">
                         {item.provider_type.toUpperCase()} · {item.model_name}
                       </div>
-                      <div className="text-xs text-slate-500">{item.base_url}</div>
+                      <div className="text-xs text-slate-500">
+                        {item.base_url}
+                        {item.api_key_count ? ` · ${item.api_key_count} keys` : ''}
+                      </div>
                     </div>
                     <Space>
                       <Text type={item.enabled ? 'success' : 'secondary'}>{item.enabled ? '启用' : '停用'}</Text>
@@ -904,7 +1014,7 @@ const Setting: React.FC = () => {
                 {t('settings.api_config')}
               </span>
             }
-            style={{ marginBottom: '24px' }}
+            style={adminOnlyStyle}
           >
             <Alert
               message={t('settings.api_config')}
@@ -1024,7 +1134,7 @@ const Setting: React.FC = () => {
                 LLM Provider Pool
               </span>
             }
-            style={{ marginBottom: '24px' }}
+            style={adminOnlyStyle}
           >
             <Alert
               message="LLM Provider Pool"
@@ -1153,7 +1263,7 @@ const Setting: React.FC = () => {
                 嵌入模型配置
               </span>
             }
-            style={{ marginBottom: '24px' }}
+            style={adminOnlyStyle}
           >
             <Alert
               message="嵌入模型配置"
@@ -1304,7 +1414,7 @@ const Setting: React.FC = () => {
                 嵌入领域配置
               </span>
             }
-            style={{ marginBottom: '24px' }}
+            style={adminOnlyStyle}
           >
             <Alert
               message="嵌入领域配置"
@@ -1495,7 +1605,7 @@ const Setting: React.FC = () => {
 
           <Divider />
 
-          <Form.Item>
+          <Form.Item style={{ display: isAdmin ? undefined : 'none' }}>
             <Space>
               <Button
                 type="primary"
