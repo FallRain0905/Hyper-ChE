@@ -1,9 +1,10 @@
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci --legacy-peer-deps --no-audit --no-fund
+RUN npm install @rollup/rollup-linux-x64-gnu@4.59.0 --no-save --legacy-peer-deps --no-audit --no-fund
 
 COPY . .
 
@@ -12,7 +13,7 @@ ENV VITE_SERVER_URL=${VITE_SERVER_URL}
 
 RUN npm run build
 
-FROM node:20-alpine AS runtime
+FROM node:20-bookworm-slim AS runtime
 
 WORKDIR /app
 
