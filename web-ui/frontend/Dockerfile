@@ -3,7 +3,7 @@ FROM node:18-alpine AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps --no-audit --no-fund
 
 COPY . .
 
@@ -17,7 +17,7 @@ FROM node:18-alpine AS runtime
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --legacy-peer-deps --no-audit --no-fund
 
 COPY --from=builder /app/dist ./dist
 COPY server.js ./
