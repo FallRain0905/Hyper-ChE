@@ -760,6 +760,8 @@ async def get_current_user(request: Request) -> dict | None:
     user = auth_store.user_from_token(_extract_auth_token(request))
     if user:
         CURRENT_USER_ID.set(user["id"])
+    else:
+        CURRENT_USER_ID.set(None)
     return user
 
 
@@ -820,7 +822,8 @@ async def auth_login(payload: AuthLoginRequest, response: Response):
 
 @app.post("/auth/logout")
 async def auth_logout(response: Response):
-    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    secure_cookie = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/", secure=secure_cookie, httponly=True, samesite="lax")
     CURRENT_USER_ID.set(None)
     return {"success": True}
 

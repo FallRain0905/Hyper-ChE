@@ -1,10 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Authentication, quota, and per-user API key storage for HyperChE.
-
-The module uses PostgreSQL when DATABASE_URL is provided. For local development
-without a database service it falls back to a SQLite file, so the web app remains
-easy to run on a laptop.
-"""
+"""Authentication, quota, and per-user API key storage for HyperChE."""
 
 from __future__ import annotations
 
@@ -13,6 +8,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -39,6 +35,12 @@ from sqlalchemy.engine import Engine
 
 
 AUTH_COOKIE_NAME = "hyperche_session"
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+MSG_INVALID_EMAIL = "\u8bf7\u8f93\u5165\u6709\u6548\u90ae\u7bb1"
+MSG_WEAK_PASSWORD = "\u5bc6\u7801\u81f3\u5c11\u9700\u8981 8 \u4f4d"
+MSG_DUPLICATE_EMAIL = "\u8be5\u90ae\u7bb1\u5df2\u6ce8\u518c"
+MSG_QUOTA_EXHAUSTED = "\u8bd5\u7528\u989d\u5ea6\u4e0d\u8db3"
 
 
 metadata = MetaData()
@@ -83,6 +85,16 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _as_aware_utc(value: datetime | str | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _sqlite_url() -> str:
     path = os.getenv("HYPERCHE_SQLITE_PATH", os.path.join(os.path.dirname(__file__), "hyperche_app.db"))
     return f"sqlite:///{path}"
@@ -124,26 +136,45 @@ def _b64url_decode(value: str) -> bytes:
 
 
 def hash_password(password: str) -> str:
-    salt = secrets.token_urlsafe(18)
-    iterations = 260000
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations)
-    return f"pbkdf2_sha256${iterations}${salt}${_b64url(digest)}"
+    salt = secrets.token_bytes(16)
+    n = 2**14
+    r = 8
+    p = 1
+    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=n, r=r, p=p, dklen=32)
+    return f"scrypt_sha256${n}${r}${p}${_b64url(salt)}${_b64url(digest)}"
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
     try:
-        algorithm, iterations, salt, digest = stored_hash.split("$", 3)
-        if algorithm != "pbkdf2_sha256":
-            return False
-        candidate = hashlib.pbkdf2_hmac(
-            "sha256",
-            password.encode("utf-8"),
-            salt.encode("utf-8"),
-            int(iterations),
-        )
-        return hmac.compare_digest(_b64url(candidate), digest)
+        parts = stored_hash.split("$")
+        algorithm = parts[0]
+        if algorithm == "scrypt_sha256":
+            _, n, r, p, salt_b64, digest = parts
+            candidate = hashlib.scrypt(
+                password.encode("utf-8"),
+                salt=_b64url_decode(salt_b64),
+                n=int(n),
+                r=int(r),
+                p=int(p),
+                dklen=32,
+            )
+            return hmac.compare_digest(_b64url(candidate), digest)
+        if algorithm == "pbkdf2_sha256":
+            _, iterations, salt, digest = parts
+            candidate = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode("utf-8"),
+                salt.encode("utf-8"),
+                int(iterations),
+            )
+            return hmac.compare_digest(_b64url(candidate), digest)
+        return False
     except Exception:
         return False
+
+
+def needs_password_rehash(stored_hash: str) -> bool:
+    return not stored_hash.startswith("scrypt_sha256$")
 
 
 def create_token(user_id: str, role: str, expires_hours: int = 24 * 14) -> str:
@@ -154,7 +185,10 @@ def create_token(user_id: str, role: str, expires_hours: int = 24 * 14) -> str:
         "iat": int(time.time()),
         "exp": int(time.time() + expires_hours * 3600),
     }
-    signing_input = f"{_b64url(json.dumps(header, separators=(',', ':')).encode())}.{_b64url(json.dumps(payload, separators=(',', ':')).encode())}"
+    signing_input = (
+        f"{_b64url(json.dumps(header, separators=(',', ':')).encode())}."
+        f"{_b64url(json.dumps(payload, separators=(',', ':')).encode())}"
+    )
     signature = hmac.new(_secret().encode("utf-8"), signing_input.encode("ascii"), hashlib.sha256).digest()
     return f"{signing_input}.{_b64url(signature)}"
 
@@ -195,8 +229,8 @@ class AuthStore:
         return utcnow() + timedelta(days=30)
 
     def _ensure_quota(self, conn, user_id: str) -> None:
-        exists = conn.execute(select(user_quotas.c.user_id).where(user_quotas.c.user_id == user_id)).first()
-        if not exists:
+        row = conn.execute(select(user_quotas).where(user_quotas.c.user_id == user_id)).mappings().first()
+        if not row:
             conn.execute(
                 insert(user_quotas).values(
                     user_id=user_id,
@@ -206,21 +240,35 @@ class AuthStore:
                     monthly_reset_at=self._quota_reset_at(),
                 )
             )
+            return
+
+        reset_at = _as_aware_utc(row["monthly_reset_at"])
+        if reset_at and reset_at <= utcnow():
+            conn.execute(
+                update(user_quotas)
+                .where(user_quotas.c.user_id == user_id)
+                .values(
+                    trial_embedding_calls_used=0,
+                    trial_llm_calls_used=0,
+                    trial_docs_used=0,
+                    monthly_reset_at=self._quota_reset_at(),
+                )
+            )
 
     def create_user(self, email: str, password: str, display_name: str = "") -> dict[str, Any]:
         email = email.strip().lower()
-        display_name = display_name.strip() or email.split("@")[0]
-        if not email or "@" not in email:
-            raise ValueError("请输入有效邮箱")
+        display_name = (display_name.strip() or email.split("@")[0])[:255]
+        if not email or not EMAIL_RE.match(email):
+            raise ValueError(MSG_INVALID_EMAIL)
         if len(password) < 8:
-            raise ValueError("密码至少需要 8 位")
+            raise ValueError(MSG_WEAK_PASSWORD)
 
         user_id = secrets.token_hex(16)
         now = utcnow()
         with self.engine.begin() as conn:
             existing = conn.execute(select(users.c.id).where(users.c.email == email)).first()
             if existing:
-                raise ValueError("该邮箱已注册")
+                raise ValueError(MSG_DUPLICATE_EMAIL)
             conn.execute(
                 insert(users).values(
                     id=user_id,
@@ -241,7 +289,10 @@ class AuthStore:
             row = conn.execute(select(users).where(users.c.email == email)).mappings().first()
             if not row or not verify_password(password, row["password_hash"]):
                 return None
-            conn.execute(update(users).where(users.c.id == row["id"]).values(last_login_at=utcnow()))
+            values = {"last_login_at": utcnow()}
+            if needs_password_rehash(row["password_hash"]):
+                values["password_hash"] = hash_password(password)
+            conn.execute(update(users).where(users.c.id == row["id"]).values(**values))
         return self.get_user(row["id"])
 
     def get_user(self, user_id: str) -> dict[str, Any] | None:
@@ -303,10 +354,18 @@ class AuthStore:
             row = conn.execute(select(user_quotas).where(user_quotas.c.user_id == user_id)).mappings().one()
             used = int(row[column.name] or 0)
             if used + amount > limit:
-                raise PermissionError(f"试用额度不足：{quota_type} 已用 {used}/{limit}")
+                raise PermissionError(f"{MSG_QUOTA_EXHAUSTED}: {quota_type} {used}/{limit}")
             conn.execute(update(user_quotas).where(user_quotas.c.user_id == user_id).values({column.name: used + amount}))
 
-    def add_api_key(self, user_id: str, provider_type: str, base_url: str, model_name: str, api_key: str, enabled: bool = True) -> dict[str, Any]:
+    def add_api_key(
+        self,
+        user_id: str,
+        provider_type: str,
+        base_url: str,
+        model_name: str,
+        api_key: str,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
         provider_type = provider_type.strip().lower()
         if provider_type not in {"llm", "embedding"}:
             raise ValueError("provider_type must be llm or embedding")

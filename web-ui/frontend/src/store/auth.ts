@@ -32,6 +32,16 @@ class AuthStore {
     return !!this.user
   }
 
+  private formatError(data: any, fallback: string) {
+    if (Array.isArray(data?.detail)) {
+      return data.detail
+        .map((item: any) => item?.msg || item?.message)
+        .filter(Boolean)
+        .join('；') || fallback
+    }
+    return data?.detail || data?.message || fallback
+  }
+
   async fetchMe() {
     this.loading = true
     try {
@@ -62,53 +72,70 @@ class AuthStore {
   }
 
   async login(email: string, password: string) {
-    const response = await fetch(`${SERVER_URL}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ email, password })
-    })
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      throw new Error(data.detail || data.message || '登录失败')
+    this.loading = true
+    try {
+      const response = await fetch(`${SERVER_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email: email.trim(), password })
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(this.formatError(data, '登录失败'))
+      }
+      runInAction(() => {
+        this.user = data.user
+        this.quota = data.quota
+        this.initialized = true
+      })
+      return data.user
+    } finally {
+      runInAction(() => {
+        this.loading = false
+      })
     }
-    runInAction(() => {
-      this.user = data.user
-      this.quota = data.quota
-      this.initialized = true
-    })
-    return data.user
   }
 
   async register(email: string, password: string, display_name: string) {
-    const response = await fetch(`${SERVER_URL}/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ email, password, display_name })
-    })
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      throw new Error(data.detail || data.message || '注册失败')
+    this.loading = true
+    try {
+      const response = await fetch(`${SERVER_URL}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email: email.trim(), password, display_name: display_name.trim() })
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(this.formatError(data, '注册失败'))
+      }
+      runInAction(() => {
+        this.user = data.user
+        this.quota = data.quota
+        this.initialized = true
+      })
+      return data.user
+    } finally {
+      runInAction(() => {
+        this.loading = false
+      })
     }
-    runInAction(() => {
-      this.user = data.user
-      this.quota = data.quota
-      this.initialized = true
-    })
-    return data.user
   }
 
   async logout() {
-    await fetch(`${SERVER_URL}/auth/logout`, {
-      method: 'POST',
-      credentials: 'include'
-    })
-    runInAction(() => {
-      this.user = null
-      this.quota = null
-      this.initialized = true
-    })
+    try {
+      await fetch(`${SERVER_URL}/auth/logout`, {
+        method: 'POST',
+        credentials: 'include'
+      })
+    } finally {
+      runInAction(() => {
+        this.user = null
+        this.quota = null
+        this.initialized = true
+      })
+    }
   }
 
   async refreshQuota() {

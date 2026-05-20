@@ -50,6 +50,7 @@ const Landing = () => {
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [loading, setLoading] = useState(false)
+  const isSubmitting = loading || authStore.loading
 
   useEffect(() => {
     if (!authStore.initialized) {
@@ -67,13 +68,23 @@ const Landing = () => {
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
+    const nextEmail = email.trim()
+    const nextDisplayName = displayName.trim()
+    if (!nextEmail) {
+      message.warning('请输入邮箱')
+      return
+    }
+    if (mode === 'register' && password.length < 8) {
+      message.warning('密码至少需要 8 位')
+      return
+    }
     setLoading(true)
     try {
       if (mode === 'login') {
-        await authStore.login(email, password)
+        await authStore.login(nextEmail, password)
         message.success('登录成功')
       } else {
-        await authStore.register(email, password, displayName)
+        await authStore.register(nextEmail, password, nextDisplayName)
         message.success('注册成功，已进入试用')
       }
       navigate('/app/Hyper/chat')
@@ -148,12 +159,14 @@ const Landing = () => {
             <div id="auth" className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex rounded-lg bg-slate-100 p-1">
                 <button
+                  type="button"
                   className={`flex-1 rounded-md px-3 py-2 text-sm font-medium ${mode === 'login' ? 'bg-white text-teal-800 shadow-sm' : 'text-slate-600'}`}
                   onClick={() => setMode('login')}
                 >
                   登录
                 </button>
                 <button
+                  type="button"
                   className={`flex-1 rounded-md px-3 py-2 text-sm font-medium ${mode === 'register' ? 'bg-white text-teal-800 shadow-sm' : 'text-slate-600'}`}
                   onClick={() => setMode('register')}
                 >
@@ -175,6 +188,7 @@ const Landing = () => {
                       onChange={event => setDisplayName(event.target.value)}
                       className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-teal-600"
                       placeholder="你的名字或课题组名称"
+                      autoComplete="name"
                     />
                   </label>
                 )}
@@ -186,6 +200,7 @@ const Landing = () => {
                     className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-teal-600"
                     placeholder="name@example.com"
                     type="email"
+                    autoComplete="email"
                     required
                   />
                 </label>
@@ -197,16 +212,17 @@ const Landing = () => {
                     className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-teal-600"
                     placeholder="至少 8 位"
                     type="password"
+                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                     minLength={8}
                     required
                   />
                 </label>
                 <button
                   className="flex w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-3 text-sm font-medium text-white hover:bg-teal-800 disabled:opacity-60"
-                  disabled={loading}
+                  disabled={isSubmitting}
                   type="submit"
                 >
-                  {loading ? '处理中...' : mode === 'login' ? '登录并进入工作台' : '注册并开始试用'}
+                  {isSubmitting ? '处理中...' : mode === 'login' ? '登录并进入工作台' : '注册并开始试用'}
                   <ArrowRight size={16} />
                 </button>
               </form>
