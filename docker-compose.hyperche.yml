@@ -41,6 +41,10 @@ services:
       TRIAL_DOC_LIMIT: ${TRIAL_DOC_LIMIT:-3}
       TRIAL_LLM_CALL_LIMIT: ${TRIAL_LLM_CALL_LIMIT:-50}
       TRIAL_EMBEDDING_CALL_LIMIT: ${TRIAL_EMBEDDING_CALL_LIMIT:-200}
+      HYPERCHE_ADMIN_EMAIL: ${HYPERCHE_ADMIN_EMAIL:-admin@123.com}
+      HYPERCHE_ADMIN_PASSWORD: ${HYPERCHE_ADMIN_PASSWORD:-admin123}
+      HYPERCHE_ADMIN_NAME: ${HYPERCHE_ADMIN_NAME:-HyperChE Admin}
+      HYPERCHE_ENABLE_API_DOCS: ${HYPERCHE_ENABLE_API_DOCS:-false}
     volumes:
       - backend_uploads:/app/uploads
       - backend_hyperrag_cache:/app/hyperrag_cache
