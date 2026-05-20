@@ -91,9 +91,10 @@ def limit_async_func_call(max_size: int, waitting_time: float = 0.0001):
             while __current_size >= max_size:
                 await asyncio.sleep(waitting_time)
             __current_size += 1
-            result = await func(*args, **kwargs)
-            __current_size -= 1
-            return result
+            try:
+                return await func(*args, **kwargs)
+            finally:
+                __current_size -= 1
 
         return wait_func
 
@@ -136,13 +137,17 @@ def wrap_embedding_func_with_attrs(**kwargs):
 def load_json(file_name):
     if not os.path.exists(file_name):
         return None
-    with open(file_name, encoding="utf-8") as f:
+    with open(file_name, encoding="utf-8-sig") as f:
         return json.load(f)
 
 
 def write_json(json_obj, file_name):
-    with open(file_name, "w", encoding="utf-8") as f:
+    tmp_file_name = f"{file_name}.tmp"
+    with open(tmp_file_name, "w", encoding="utf-8") as f:
         json.dump(json_obj, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_file_name, file_name)
 
 
 def encode_string_by_tiktoken(content: str, model_name: str = "gpt-4o"):

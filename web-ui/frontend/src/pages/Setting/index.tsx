@@ -13,7 +13,9 @@ import {
   Row,
   Col,
   AutoComplete,
-  Checkbox
+  Checkbox,
+  Switch,
+  InputNumber
 } from 'antd'
 import {
   SettingOutlined,
@@ -23,7 +25,9 @@ import {
   SaveOutlined,
   ReloadOutlined,
   GlobalOutlined,
-  AppstoreOutlined
+  AppstoreOutlined,
+  PlusOutlined,
+  DeleteOutlined
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import LanguageSelector from '../../components/LanguageSelector'
@@ -52,6 +56,13 @@ const Setting: React.FC = () => {
     selectedDatabase: '',
     maxTokens: 2000,
     temperature: 0.7,
+    llmTimeout: 600,
+    llmModelMaxAsync: 16,
+    llmGlobalMaxAsync: 16,
+    llmPerKeyMaxAsync: 4,
+    llmMaxRetries: 1,
+    llmProviderStrategy: 'priority_round_robin',
+    llmProviders: [],
     // 嵌入模型配置
     embeddingModel: 'text-embedding-3-small',
     embeddingDim: 1536,
@@ -278,6 +289,39 @@ const Setting: React.FC = () => {
   ]
 
   // 加载设置
+  const formatProvidersForForm = (providers: any[] = []) => {
+    return providers.map(provider => ({
+      ...provider,
+      apiKeysText: Array.isArray(provider?.apiKeys)
+        ? provider.apiKeys.join('\n')
+        : (provider?.apiKeys || '')
+    }))
+  }
+
+  const formatProvidersForSave = (providers: any[] = []) => {
+    return (providers || [])
+      .map(provider => {
+        const apiKeysText = provider?.apiKeysText || ''
+        const apiKeys = Array.isArray(provider?.apiKeys)
+          ? provider.apiKeys
+          : String(apiKeysText)
+            .split(/[\n,;]+/)
+            .map(key => key.trim())
+            .filter(Boolean)
+        return {
+          name: provider?.name || '',
+          baseUrl: provider?.baseUrl || '',
+          modelName: provider?.modelName || '',
+          apiKeys,
+          enabled: provider?.enabled !== false,
+          maxAsync: Number(provider?.maxAsync || 1),
+          perKeyMaxAsync: provider?.perKeyMaxAsync ? Number(provider.perKeyMaxAsync) : undefined,
+          priority: Number(provider?.priority || 100)
+        }
+      })
+      .filter(provider => provider.name || provider.baseUrl || provider.modelName || provider.apiKeys.length > 0)
+  }
+
   const loadSettings = async () => {
     setLoading(true)
     try {
@@ -328,7 +372,8 @@ const Setting: React.FC = () => {
           ...settings,
           ...modeSettings,
           embeddingModel,
-          customEmbeddingModel
+          customEmbeddingModel,
+          llmProviders: formatProvidersForForm(settings.llmProviders || [])
         }
         console.log('🎯 [Settings] 最终设置的表单值:', JSON.stringify(finalSettings, null, 2)) // 调试日志
 
@@ -421,7 +466,8 @@ const Setting: React.FC = () => {
 
       const settingsToSave = {
         ...otherSettings,
-        embeddingModel: finalEmbeddingModel
+        embeddingModel: finalEmbeddingModel,
+        llmProviders: formatProvidersForSave(otherSettings.llmProviders || [])
       }
 
       console.log('💾 准备保存的完整设置:', JSON.stringify(settingsToSave, null, 2))
@@ -461,7 +507,8 @@ const Setting: React.FC = () => {
       }
       const settingsToSave = {
         ...otherSettings,
-        embeddingModel: finalEmbeddingModel
+        embeddingModel: finalEmbeddingModel,
+        llmProviders: formatProvidersForSave(otherSettings.llmProviders || [])
       }
       // 确保 availableModes 始终是数组
       const normalizedModes = Array.isArray(availableModes) ? availableModes : [availableModes]
@@ -511,6 +558,49 @@ const Setting: React.FC = () => {
   }
 
   // 测试数据库连接
+  const testProviderConnection = async (index: number) => {
+    const values = form.getFieldsValue()
+    const providers = formatProvidersForSave(values.llmProviders || [])
+    const provider = providers[index]
+    if (!provider || !provider.apiKeys?.length) {
+      message.error('Please enter at least one provider API key')
+      return
+    }
+
+    setTestResults({ ...testResults, [`provider-${index}`]: 'testing' })
+    try {
+      const response = await fetch(`${SERVER_URL}/test-api`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          apiKey: provider.apiKeys[0],
+          baseUrl: provider.baseUrl,
+          modelName: provider.modelName,
+          modelProvider: 'openai'
+        })
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        if (result.success) {
+          setTestResults({ ...testResults, [`provider-${index}`]: 'success' })
+          message.success('Provider connection succeeded')
+        } else {
+          setTestResults({ ...testResults, [`provider-${index}`]: 'failed' })
+          message.error(result.message || 'Provider connection failed')
+        }
+      } else {
+        setTestResults({ ...testResults, [`provider-${index}`]: 'failed' })
+        message.error('Provider connection failed')
+      }
+    } catch (error: any) {
+      setTestResults({ ...testResults, [`provider-${index}`]: 'failed' })
+      message.error('Provider connection failed: ' + error.message)
+    }
+  }
+
   const testDatabaseConnection = async () => {
     const values = form.getFieldsValue()
     if (!values.selectedDatabase) {
@@ -618,7 +708,7 @@ const Setting: React.FC = () => {
 
         <Form form={form} layout="vertical" onFinish={saveSettings} initialValues={defaultSettings}>
           {/* 添加调试信息 */}
-          {console.log('📋 Settings表单初始值:', defaultSettings)}
+          {(() => { console.log('📋 Settings表单初始值:', defaultSettings); return null })()}
           {/* 系统配置区块 */}
           <Card
             title={
@@ -758,6 +848,135 @@ const Setting: React.FC = () => {
           <Card
             title={
               <span>
+                <ApiOutlined style={{ marginRight: '8px' }} />
+                LLM Provider Pool
+              </span>
+            }
+            style={{ marginBottom: '24px' }}
+          >
+            <Alert
+              message="LLM Provider Pool"
+              description="Configure multiple OpenAI-compatible providers. If this list is empty, the legacy Base URL, model name, and API key fields above are used."
+              type="info"
+              showIcon
+              style={{ marginBottom: '16px' }}
+            />
+
+            <Row gutter={16}>
+              <Col span={6}>
+                <Form.Item name="llmGlobalMaxAsync" label="Global Max Async">
+                  <InputNumber min={1} max={32} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={6}>
+                <Form.Item name="llmPerKeyMaxAsync" label="Per Key Max Async">
+                  <InputNumber min={1} max={8} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={6}>
+                <Form.Item name="llmMaxRetries" label="Max Retries">
+                  <InputNumber min={0} max={5} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={6}>
+                <Form.Item name="llmTimeout" label="Timeout (s)">
+                  <InputNumber min={30} max={1800} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            <Form.List name="llmProviders">
+              {(fields, { add, remove }) => (
+                <>
+                  {fields.map(({ key, name, ...restField }) => (
+                    <div
+                      key={key}
+                      style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: 16, marginBottom: 12 }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <Text strong>{`Provider ${name + 1}`}</Text>
+                        <Space>
+                          <Button
+                            size="small"
+                            onClick={() => testProviderConnection(name)}
+                            loading={testResults[`provider-${name}`] === 'testing'}
+                          >
+                            Test
+                          </Button>
+                          <Button danger type="text" icon={<DeleteOutlined />} onClick={() => remove(name)} />
+                        </Space>
+                      </div>
+                      <Row gutter={16}>
+                        <Col span={8}>
+                          <Form.Item {...restField} name={[name, 'name']} label="Name">
+                            <Input placeholder="siliconflow-deepseek" />
+                          </Form.Item>
+                        </Col>
+                        <Col span={8}>
+                          <Form.Item {...restField} name={[name, 'baseUrl']} label="Base URL">
+                            <Input placeholder="https://api.siliconflow.cn/v1" />
+                          </Form.Item>
+                        </Col>
+                        <Col span={8}>
+                          <Form.Item {...restField} name={[name, 'modelName']} label="Model Name">
+                            <Input placeholder="deepseek-ai/DeepSeek-V4-Flash" />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                      <Row gutter={16}>
+                        <Col span={8}>
+                          <Form.Item {...restField} name={[name, 'apiKeysText']} label="API Keys">
+                            <Input.TextArea rows={4} placeholder="One API key per line" />
+                          </Form.Item>
+                        </Col>
+                        <Col span={4}>
+                          <Form.Item {...restField} name={[name, 'enabled']} label="Enabled" valuePropName="checked">
+                            <Switch />
+                          </Form.Item>
+                        </Col>
+                        <Col span={4}>
+                          <Form.Item {...restField} name={[name, 'maxAsync']} label="Provider Max">
+                            <InputNumber min={1} max={32} style={{ width: '100%' }} />
+                          </Form.Item>
+                        </Col>
+                        <Col span={4}>
+                          <Form.Item {...restField} name={[name, 'perKeyMaxAsync']} label="Per Key Max">
+                            <InputNumber min={1} max={8} style={{ width: '100%' }} />
+                          </Form.Item>
+                        </Col>
+                        <Col span={4}>
+                          <Form.Item {...restField} name={[name, 'priority']} label="Priority">
+                            <InputNumber min={0} max={999} style={{ width: '100%' }} />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                    </div>
+                  ))}
+                  <Button
+                    type="dashed"
+                    icon={<PlusOutlined />}
+                    onClick={() => add({
+                      name: '',
+                      baseUrl: '',
+                      modelName: '',
+                      apiKeysText: '',
+                      enabled: true,
+                      maxAsync: 1,
+                      perKeyMaxAsync: 1,
+                      priority: 100
+                    })}
+                    block
+                  >
+                    Add Provider
+                  </Button>
+                </>
+              )}
+            </Form.List>
+          </Card>
+
+          <Card
+            title={
+              <span>
                 <DatabaseOutlined style={{ marginRight: '8px' }} />
                 嵌入模型配置
               </span>
@@ -883,13 +1102,14 @@ const Setting: React.FC = () => {
               <Col span={24}>
                 <Form.Item
                   name="embeddingApiKey"
-                  label="嵌入API Key"
+                  label="嵌入API Keys"
                   rules={[{ required: true, message: '请输入嵌入API的Key' }]}
-                  extra="嵌入模型的API密钥，例如：sk-xxxxxxxxxxxxxxxx"
+                  extra="支持多个嵌入 API Key：每行一个，也可用逗号或分号分隔。调用失败时会自动轮换到下一个 Key。"
                 >
-                  <Password
-                    placeholder="请输入嵌入API的密钥"
-                    iconRender={visible => (visible ? <KeyOutlined /> : <KeyOutlined />)}
+                  <Input.TextArea
+                    rows={4}
+                    placeholder={'sk-xxxxxxxxxxxxxxxx\nsk-yyyyyyyyyyyyyyyy'}
+                    autoSize={{ minRows: 3, maxRows: 8 }}
                   />
                 </Form.Item>
               </Col>

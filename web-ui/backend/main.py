@@ -4,6 +4,7 @@ import io
 import re
 import logging  # Import logging early for SafeLogFilter class definition
 import traceback
+import hashlib
 from logging.handlers import RotatingFileHandler
 
 # Safe string conversion function for Windows encoding
@@ -237,8 +238,8 @@ import asyncio
 import numpy as np
 import importlib.util
 from pathlib import Path
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, Field
+from typing import List, Optional, Any, Dict
 from io import StringIO
 from datetime import datetime
 
@@ -298,6 +299,11 @@ API_KEY_POOL_STATE = {
     "llm": {"cursor": 0, "disabled": set()},
     "embedding": {"cursor": 0, "disabled": set()},
 }
+LLM_PROVIDER_POOL_STATE = {
+    "cursor": 0,
+    "keys": {},
+    "providers": {},
+}
 
 def get_runtime_settings_context() -> dict:
     """返回可安全写入日志的运行配置摘要。"""
@@ -320,6 +326,36 @@ def split_api_keys(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in re.split(r"[\n,;]+", value) if item.strip()]
+
+def mask_api_keys_for_settings(value: str | None) -> str:
+    """Return one masked line per configured key so the settings UI preserves key count."""
+    keys = split_api_keys(value)
+    return "\n".join("***" for _ in keys)
+
+def resolve_masked_api_key_text(new_value: str | None, existing_value: str | None) -> str:
+    """Restore masked API key placeholders when saving settings.
+
+    The frontend receives existing keys as one "***" per key. When saving, unchanged
+    masked entries are restored from the previous settings while newly typed entries
+    are kept. This also lets users add/remove individual keys in a multiline field.
+    """
+    new_keys = split_api_keys(new_value)
+    if not new_keys:
+        return ""
+
+    existing_keys = split_api_keys(existing_value)
+    if all(key == "***" for key in new_keys):
+        if len(new_keys) == len(existing_keys):
+            return "\n".join(existing_keys)
+
+    resolved = []
+    for index, key in enumerate(new_keys):
+        if key == "***":
+            if index < len(existing_keys):
+                resolved.append(existing_keys[index])
+        else:
+            resolved.append(key)
+    return "\n".join(resolved)
 
 def get_api_key_candidates(pool_name: str, primary: str | None, fallback: str | None = None) -> list[tuple[int, int, str]]:
     keys = split_api_keys(primary)
@@ -363,6 +399,280 @@ def summarize_key_pool(pool_name: str, primary: str | None, fallback: str | None
         "disabled_keys": sum(1 for key in keys if key in disabled),
         "enabled_keys": sum(1 for key in keys if key not in disabled),
     }
+
+def _coerce_positive_int(value: Any, default: int, minimum: int = 1) -> int:
+    try:
+        parsed = int(value)
+        return parsed if parsed >= minimum else default
+    except Exception:
+        return default
+
+def _fingerprint_key(key: str | None) -> str:
+    if not key:
+        return "nokey"
+    return hashlib.sha256(key.encode("utf-8", errors="ignore")).hexdigest()[:12]
+
+def _provider_id(provider: dict) -> str:
+    return "|".join(
+        [
+            safe_str(provider.get("name", "")),
+            safe_str(provider.get("baseUrl", "")),
+            safe_str(provider.get("modelName", "")),
+        ]
+    )
+
+def _llm_key_id(provider: dict, key_index: int, key: str | None) -> str:
+    return f"{_provider_id(provider)}|{key_index}|{_fingerprint_key(key)}"
+
+def normalize_llm_providers(settings: dict) -> list[dict]:
+    """Build enabled OpenAI-compatible LLM provider configs with legacy fallback."""
+    per_key_default = _coerce_positive_int(settings.get("llmPerKeyMaxAsync", 1), 1)
+    global_default = _coerce_positive_int(
+        settings.get("llmGlobalMaxAsync", settings.get("llmModelMaxAsync", 4)),
+        4,
+    )
+
+    raw_providers = settings.get("llmProviders")
+    providers: list[dict] = []
+    if isinstance(raw_providers, list):
+        for idx, raw in enumerate(raw_providers):
+            if not isinstance(raw, dict):
+                continue
+            api_keys = raw.get("apiKeys", [])
+            if isinstance(api_keys, str):
+                api_keys = split_api_keys(api_keys)
+            elif isinstance(api_keys, list):
+                api_keys = [safe_str(key).strip() for key in api_keys if safe_str(key).strip()]
+            else:
+                api_keys = []
+
+            provider = {
+                "name": raw.get("name") or f"llm-provider-{idx + 1}",
+                "baseUrl": raw.get("baseUrl") or settings.get("baseUrl"),
+                "modelName": raw.get("modelName") or settings.get("modelName", "gpt-5-mini"),
+                "apiKeys": api_keys,
+                "enabled": raw.get("enabled", True) is not False,
+                "maxAsync": _coerce_positive_int(raw.get("maxAsync"), max(1, len(api_keys) * per_key_default)),
+                "perKeyMaxAsync": _coerce_positive_int(raw.get("perKeyMaxAsync", per_key_default), per_key_default),
+                "priority": _coerce_positive_int(raw.get("priority", 100), 100, minimum=0),
+                "index": idx,
+            }
+            if provider["enabled"] and provider["baseUrl"] and provider["modelName"]:
+                providers.append(provider)
+
+    if not providers:
+        legacy_keys = split_api_keys(settings.get("apiKey"))
+        providers.append(
+            {
+                "name": "legacy-llm",
+                "baseUrl": settings.get("baseUrl"),
+                "modelName": settings.get("modelName", "gpt-5-mini"),
+                "apiKeys": legacy_keys,
+                "enabled": True,
+                "maxAsync": max(1, min(global_default, max(1, len(legacy_keys) * per_key_default))),
+                "perKeyMaxAsync": per_key_default,
+                "priority": 100,
+                "index": 0,
+            }
+        )
+
+    return providers
+
+def _pool_record(bucket: str, item_id: str, limit: int) -> dict:
+    records = LLM_PROVIDER_POOL_STATE.setdefault(bucket, {})
+    record = records.get(item_id)
+    if record is None or record.get("limit") != limit:
+        # Recreate only the limiter metadata; health state lives in the key record.
+        record = {
+            "limit": limit,
+            "semaphore": asyncio.Semaphore(max(1, limit)),
+            "active": 0,
+        }
+        records[item_id] = record
+    return record
+
+def _key_health_record(candidate: dict) -> dict:
+    records = LLM_PROVIDER_POOL_STATE.setdefault("keys", {})
+    item_id = candidate["key_id"]
+    return records.setdefault(
+        item_id,
+        {
+            "disabled": False,
+            "cooldown_until": 0.0,
+            "last_error": "",
+            "success_count": 0,
+            "failure_count": 0,
+            "timeout_count": 0,
+            "avg_latency": 0.0,
+        },
+    )
+
+def classify_llm_pool_error(error_message: str) -> str:
+    error_lower = error_message.lower()
+    if (
+        "permissiondenied" in error_lower
+        or "permission denied" in error_lower
+        or "insufficient" in error_lower
+        or "balance" in error_lower
+        or "quota" in error_lower
+        or "unauthorized" in error_lower
+        or "authentication" in error_lower
+        or "401" in error_message
+        or "403" in error_message
+    ):
+        return "disable"
+    if "429" in error_message or "rate" in error_lower or "limit" in error_lower:
+        return "cooldown"
+    if (
+        "connection" in error_lower
+        or "network" in error_lower
+        or "500" in error_message
+        or "502" in error_message
+        or "503" in error_message
+        or "504" in error_message
+    ):
+        return "cooldown"
+    return "fail"
+
+def summarize_llm_provider_pool(settings: dict) -> dict:
+    providers = normalize_llm_providers(settings)
+    total_keys = 0
+    enabled_keys = 0
+    disabled_keys = 0
+    cooldown_keys = 0
+    now = time.monotonic()
+    details = []
+    for provider in providers:
+        keys = provider.get("apiKeys") or [None]
+        provider_total = len(keys)
+        provider_enabled = 0
+        provider_disabled = 0
+        provider_cooldown = 0
+        for key_index, key in enumerate(keys, start=1):
+            candidate = {
+                "provider": provider,
+                "key_index": key_index,
+                "key_id": _llm_key_id(provider, key_index, key),
+            }
+            health = _key_health_record(candidate)
+            total_keys += 1
+            if health.get("disabled"):
+                disabled_keys += 1
+                provider_disabled += 1
+            elif health.get("cooldown_until", 0.0) > now:
+                cooldown_keys += 1
+                provider_cooldown += 1
+            else:
+                enabled_keys += 1
+                provider_enabled += 1
+        details.append(
+            {
+                "name": provider.get("name"),
+                "model": provider.get("modelName"),
+                "base_url": provider.get("baseUrl"),
+                "total_keys": provider_total,
+                "enabled_keys": provider_enabled,
+                "disabled_keys": provider_disabled,
+                "cooldown_keys": provider_cooldown,
+                "max_async": provider.get("maxAsync"),
+                "per_key_max_async": provider.get("perKeyMaxAsync"),
+                "priority": provider.get("priority"),
+            }
+        )
+    return {
+        "pool": "llm_providers",
+        "providers": len(providers),
+        "total_keys": total_keys,
+        "enabled_keys": enabled_keys,
+        "disabled_keys": disabled_keys,
+        "cooldown_keys": cooldown_keys,
+        "details": details,
+    }
+
+def get_llm_provider_candidates(settings: dict) -> list[dict]:
+    providers = sorted(normalize_llm_providers(settings), key=lambda item: (item.get("priority", 100), item.get("index", 0)))
+    now = time.monotonic()
+    candidates: list[dict] = []
+    for provider_pos, provider in enumerate(providers, start=1):
+        keys = provider.get("apiKeys") or [None]
+        key_total = len(keys)
+        for key_index, key in enumerate(keys, start=1):
+            candidate = {
+                "provider": provider,
+                "provider_index": provider_pos,
+                "provider_total": len(providers),
+                "key": key,
+                "key_index": key_index,
+                "key_total": key_total,
+                "provider_id": _provider_id(provider),
+                "key_id": _llm_key_id(provider, key_index, key),
+            }
+            health = _key_health_record(candidate)
+            if health.get("disabled"):
+                continue
+            if health.get("cooldown_until", 0.0) > now:
+                continue
+            candidates.append(candidate)
+
+    if not candidates:
+        return []
+    start = LLM_PROVIDER_POOL_STATE.get("cursor", 0) % len(candidates)
+    LLM_PROVIDER_POOL_STATE["cursor"] = LLM_PROVIDER_POOL_STATE.get("cursor", 0) + 1
+    return candidates[start:] + candidates[:start]
+
+async def acquire_llm_provider_slot(candidate: dict):
+    provider = candidate["provider"]
+    provider_record = _pool_record("providers", candidate["provider_id"], provider.get("maxAsync", 1))
+    key_record = _pool_record("key_slots", candidate["key_id"], provider.get("perKeyMaxAsync", 1))
+    await provider_record["semaphore"].acquire()
+    provider_record["active"] += 1
+    try:
+        await key_record["semaphore"].acquire()
+        key_record["active"] += 1
+    except Exception:
+        provider_record["active"] -= 1
+        provider_record["semaphore"].release()
+        raise
+
+    def release():
+        try:
+            key_record["active"] = max(0, key_record["active"] - 1)
+            key_record["semaphore"].release()
+        finally:
+            provider_record["active"] = max(0, provider_record["active"] - 1)
+            provider_record["semaphore"].release()
+
+    return release, provider_record, key_record
+
+def record_llm_provider_result(candidate: dict, status: str, duration: float | None = None, error_message: str | None = None, cooldown_seconds: int = 60) -> str:
+    health = _key_health_record(candidate)
+    action = "none"
+    if status == "success":
+        health["success_count"] += 1
+        if duration is not None:
+            previous = float(health.get("avg_latency", 0.0) or 0.0)
+            health["avg_latency"] = duration if previous <= 0 else previous * 0.8 + duration * 0.2
+        health["last_error"] = ""
+        action = "healthy"
+    elif status == "timeout":
+        health["timeout_count"] += 1
+        health["last_error"] = error_message or "timeout"
+        action = "record_timeout"
+    else:
+        health["failure_count"] += 1
+        health["last_error"] = error_message or status
+        action = classify_llm_pool_error(error_message or "")
+        if action == "disable":
+            health["disabled"] = True
+        elif action == "cooldown":
+            health["cooldown_until"] = time.monotonic() + max(1, cooldown_seconds)
+    return action
+
+def reset_llm_provider_pool_health() -> None:
+    for record in LLM_PROVIDER_POOL_STATE.setdefault("keys", {}).values():
+        record["disabled"] = False
+        record["cooldown_until"] = 0.0
+        record["last_error"] = ""
 
 app = FastAPI()
 
@@ -732,6 +1042,16 @@ async def get_theme_vertex_neighbor_endpoint(vertex_id: str, database: str = Non
 
 # 设置相关的API接口
 
+class LLMProviderModel(BaseModel):
+    name: str = ""
+    baseUrl: str = ""
+    modelName: str = ""
+    apiKeys: List[str] = Field(default_factory=list)
+    enabled: bool = True
+    maxAsync: int = 1
+    perKeyMaxAsync: Optional[int] = None
+    priority: int = 100
+
 class SettingsModel(BaseModel):
     apiKey: str = ""
     modelProvider: str = "openai"
@@ -740,6 +1060,13 @@ class SettingsModel(BaseModel):
     selectedDatabase: str = ""
     maxTokens: int = 2000
     temperature: float = 0.7
+    llmTimeout: float = 600
+    llmModelMaxAsync: int = 16
+    llmGlobalMaxAsync: int = 16
+    llmPerKeyMaxAsync: int = 4
+    llmMaxRetries: int = 1
+    llmProviderStrategy: str = "priority_round_robin"
+    llmProviders: List[LLMProviderModel] = Field(default_factory=list)
     # HyperRAG 嵌入模型设置
     embeddingModel: str = "text-embedding-3-small"
     embeddingDim: int = 1536
@@ -787,7 +1114,19 @@ async def get_settings():
             if 'apiKey' in settings_safe:
                 settings_safe['apiKey'] = '***' if settings_safe['apiKey'] else ''
             if 'embeddingApiKey' in settings_safe:
-                settings_safe['embeddingApiKey'] = '***' if settings_safe['embeddingApiKey'] else ''
+                settings_safe['embeddingApiKey'] = mask_api_keys_for_settings(settings_safe.get('embeddingApiKey'))
+            if isinstance(settings_safe.get('llmProviders'), list):
+                safe_providers = []
+                for provider in settings_safe.get('llmProviders', []):
+                    if not isinstance(provider, dict):
+                        continue
+                    safe_provider = provider.copy()
+                    keys = safe_provider.get('apiKeys') or []
+                    if isinstance(keys, str):
+                        keys = split_api_keys(keys)
+                    safe_provider['apiKeys'] = ['***' for key in keys if key]
+                    safe_providers.append(safe_provider)
+                settings_safe['llmProviders'] = safe_providers
             return settings_safe
         else:
             # 返回默认设置
@@ -799,6 +1138,13 @@ async def get_settings():
                 "selectedDatabase": "",
                 "maxTokens": 2000,
                 "temperature": 0.7,
+                "llmTimeout": 600,
+                "llmModelMaxAsync": 16,
+                "llmGlobalMaxAsync": 16,
+                "llmPerKeyMaxAsync": 4,
+                "llmMaxRetries": 1,
+                "llmProviderStrategy": "priority_round_robin",
+                "llmProviders": [],
                 "embeddingModel": "text-embedding-3-small",
                 "embeddingDim": 1536,
                 "embeddingBaseUrl": "",
@@ -814,6 +1160,13 @@ async def save_settings(settings: SettingsModel):
     """
     try:
         settings_dict = settings.dict()
+        existing_settings = {}
+        if os.path.exists(SETTINGS_FILE):
+            try:
+                with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                    existing_settings = json.load(f)
+            except Exception:
+                existing_settings = {}
 
         # 添加调试日志
         main_logger.info(
@@ -833,21 +1186,58 @@ async def save_settings(settings: SettingsModel):
                 # 如果没有现有设置文件，则设为空字符串
                 settings_dict['apiKey'] = ''
 
-        # 如果embeddingApiKey是***，则保持原有的embeddingApiKey不变
-        if settings_dict.get('embeddingApiKey') == '***':
-            # 读取现有设置中的embeddingApiKey
-            if os.path.exists(SETTINGS_FILE):
-                with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                    existing_settings = json.load(f)
-                # 保持原有的embeddingApiKey
-                settings_dict['embeddingApiKey'] = existing_settings.get('embeddingApiKey', '')
-            else:
-                # 如果没有现有设置文件，则设为空字符串
-                settings_dict['embeddingApiKey'] = ''
+        # embeddingApiKey supports multiple keys separated by newline/comma/semicolon.
+        # Preserve masked rows returned by GET /settings while allowing users to add/remove keys.
+        settings_dict['embeddingApiKey'] = resolve_masked_api_key_text(
+            settings_dict.get('embeddingApiKey'),
+            existing_settings.get('embeddingApiKey', ''),
+        )
 
         # 确保embedding相关字段被保存
         if 'embeddingBaseUrl' not in settings_dict:
             settings_dict['embeddingBaseUrl'] = ''
+
+        existing_providers = existing_settings.get('llmProviders') or []
+        if isinstance(settings_dict.get('llmProviders'), list):
+            resolved_providers = []
+            for provider_index, provider in enumerate(settings_dict.get('llmProviders', [])):
+                if not isinstance(provider, dict):
+                    continue
+                existing_provider = None
+                for old_provider in existing_providers:
+                    if not isinstance(old_provider, dict):
+                        continue
+                    if (
+                        old_provider.get('name') == provider.get('name')
+                        and old_provider.get('baseUrl') == provider.get('baseUrl')
+                        and old_provider.get('modelName') == provider.get('modelName')
+                    ):
+                        existing_provider = old_provider
+                        break
+                if existing_provider is None and provider_index < len(existing_providers):
+                    existing_provider = existing_providers[provider_index]
+
+                existing_keys = []
+                if isinstance(existing_provider, dict):
+                    existing_keys = existing_provider.get('apiKeys') or []
+                    if isinstance(existing_keys, str):
+                        existing_keys = split_api_keys(existing_keys)
+
+                new_keys = provider.get('apiKeys') or []
+                if isinstance(new_keys, str):
+                    new_keys = split_api_keys(new_keys)
+                resolved_keys = []
+                for key_index, key in enumerate(new_keys):
+                    key_text = safe_str(key).strip()
+                    if key_text == '***':
+                        if key_index < len(existing_keys):
+                            resolved_keys.append(existing_keys[key_index])
+                    elif key_text:
+                        resolved_keys.append(key_text)
+                provider['apiKeys'] = resolved_keys
+                resolved_providers.append(provider)
+            settings_dict['llmProviders'] = resolved_providers
+            reset_llm_provider_pool_health()
 
         main_logger.info(
             f"💾 [Settings] 准备保存的设置: "
@@ -859,6 +1249,23 @@ async def save_settings(settings: SettingsModel):
         return {"success": True, "message": "设置保存成功"}
     except Exception as e:
         main_logger.error(f"[ERROR] [Settings] 保存设置失败: {safe_str(e)}")
+        return {"success": False, "message": safe_str(e)}
+
+@app.get("/llm-provider-pool/status")
+async def get_llm_provider_pool_status():
+    try:
+        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+            settings = json.load(f)
+        return {"success": True, "data": summarize_llm_provider_pool(settings)}
+    except Exception as e:
+        return {"success": False, "message": safe_str(e)}
+
+@app.post("/llm-provider-pool/reset")
+async def reset_llm_provider_pool_status():
+    try:
+        reset_llm_provider_pool_health()
+        return {"success": True, "message": "LLM provider pool health reset"}
+    except Exception as e:
         return {"success": False, "message": safe_str(e)}
 
 @app.get("/domains")
@@ -933,18 +1340,42 @@ async def test_embedding():
         embedding_model = settings.get("embeddingModel", "text-embedding-3-small")
         api_key = settings.get("embeddingApiKey", settings.get("apiKey"))
         base_url = settings.get("embeddingBaseUrl", settings.get("baseUrl"))
+        key_candidates = get_api_key_candidates("embedding", api_key, settings.get("apiKey"))
 
-        main_logger.info(f"测试嵌入模型: {embedding_model}")
+        main_logger.info(
+            f"测试嵌入模型: {embedding_model}, "
+            f"Embedding Key池: {summarize_key_pool('embedding', api_key, settings.get('apiKey'))}"
+        )
 
         # 使用简单的测试文本
         test_texts = ["This is a test for embedding API connectivity."]
 
-        embeddings = await openai_embedding(
-            test_texts,
-            model=embedding_model,
-            api_key=api_key,
-            base_url=base_url,
-        )
+        if not key_candidates:
+            key_candidates = [(0, 0, None)]
+
+        embeddings = None
+        errors = []
+        for key_index, key_total, candidate_key in key_candidates:
+            try:
+                if candidate_key:
+                    main_logger.info(f"Embedding测试使用Key池候选: {key_index}/{key_total}")
+                embeddings = await openai_embedding(
+                    test_texts,
+                    model=embedding_model,
+                    api_key=candidate_key,
+                    base_url=base_url,
+                )
+                break
+            except Exception as e:
+                detailed_error = extract_detailed_exception_message(e)
+                errors.append(detailed_error)
+                if candidate_key:
+                    mark_api_key_unhealthy("embedding", candidate_key, detailed_error)
+                main_logger.error(
+                    f"Embedding测试Key候选失败: {key_index}/{key_total}, 错误: {detailed_error}"
+                )
+        if embeddings is None:
+            raise RuntimeError("所有 Embedding API Key 均测试失败: " + " || ".join(errors))
 
         main_logger.info(f"嵌入测试成功，维度: {embeddings.shape}")
 
@@ -1082,7 +1513,8 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
         main_logger.info(f"历史消息数量: {len(cleaned_history)} (原始: {len(history_messages)})")
 
         # 设置超时参数（默认600秒，适应Moonshot慢速响应）
-        timeout = float(settings.get("llmTimeout", kwargs.get('timeout', 240.0)))
+        timeout = float(settings.get("llmTimeout", kwargs.get('timeout', 600.0)))
+        deadline = time.monotonic() + timeout
         main_logger.info(f"超时设置: {timeout} 秒")
 
         errors = []
@@ -1093,6 +1525,10 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
             try:
                 if candidate_key:
                     main_logger.info(f"LLM调用使用Key池候选: {key_index}/{key_total}")
+                remaining_timeout = deadline - time.monotonic()
+                if remaining_timeout <= 0:
+                    raise asyncio.TimeoutError(f"LLM total timeout exceeded after {timeout:.1f}s")
+                attempt_timeout = max(1.0, min(timeout, remaining_timeout))
                 response = await asyncio.wait_for(
                     openai_complete_if_cache(
                         model_name,
@@ -1101,13 +1537,18 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
                         history_messages=cleaned_history,
                         api_key=candidate_key,
                         base_url=base_url,
-                        timeout=timeout,
+                        timeout=attempt_timeout,
                         **kwargs,
                     ),
-                    timeout=timeout + 5.0,
+                    timeout=attempt_timeout + 5.0,
                 )
                 main_logger.info(f"LLM调用完成，响应长度: {len(response)} 字符")
                 return response
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                error_msg = f"LLM call cancelled/timed out after total_timeout={timeout:.1f}s, key={key_index}/{key_total}"
+                errors.append(error_msg)
+                main_logger.warning(error_msg)
+                break
             except Exception as e:
                 error_msg = extract_detailed_exception_message(e)
                 errors.append(error_msg)
@@ -1118,6 +1559,8 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
                     raise
                 main_logger.warning(f"切换到下一个 LLM API Key 继续尝试")
 
+        if errors and all("timed out" in err.lower() or "timeout" in err.lower() for err in errors):
+            raise RuntimeError("LLM total timeout exceeded: " + " || ".join(errors))
         raise RuntimeError("所有 LLM API Key 均调用失败: " + " || ".join(errors))
 
     except Exception as e:
@@ -1245,6 +1688,7 @@ async def preflight_hyperrag_api_services() -> None:
     embedding_model = settings.get("embeddingModel", "text-embedding-3-small")
     embedding_api_key = settings.get("embeddingApiKey", settings.get("apiKey"))
     embedding_base_url = settings.get("embeddingBaseUrl", settings.get("baseUrl"))
+    llm_provider_candidates = get_llm_provider_candidates(settings)
     llm_key_candidates = get_api_key_candidates("llm", llm_api_key)
     embedding_key_candidates = get_api_key_candidates("embedding", embedding_api_key, llm_api_key)
 
@@ -1252,7 +1696,7 @@ async def preflight_hyperrag_api_services() -> None:
         "开始HyperRAG API预检: "
         f"llm_model={llm_model}, llm_base_url={llm_base_url}, "
         f"embedding_model={embedding_model}, embedding_base_url={embedding_base_url}, "
-        f"llm_key_pool={summarize_key_pool('llm', llm_api_key)}, "
+        f"llm_provider_pool={summarize_llm_provider_pool(settings)}, "
         f"embedding_key_pool={summarize_key_pool('embedding', embedding_api_key, llm_api_key)}"
     )
 
@@ -1331,6 +1775,242 @@ async def preflight_hyperrag_api_services() -> None:
         suggestion = extract_user_friendly_error(detail)
         raise RuntimeError(f"LLM服务预检失败: {detail}。建议: {suggestion}")
 
+async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[], **kwargs) -> str:
+    """HyperRAG LLM function backed by the multi-provider API key pool."""
+    cleaned_history = []
+    model_name = None
+    base_url = None
+    timeout = None
+    provider_name = None
+    try:
+        main_logger.info(f"LLM call queued: prompt_chars={len(prompt) if prompt is not None else 0}")
+        if system_prompt:
+            main_logger.info(f"LLM system prompt chars: {len(system_prompt)}")
+
+        if history_messages:
+            for msg in history_messages:
+                if msg.get('role') != 'assistant' or msg.get('content', '').strip():
+                    cleaned_history.append(msg)
+
+        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+            settings = json.load(f)
+
+        timeout = float(settings.get("llmTimeout", kwargs.get('timeout', 600.0)))
+        max_retries = _coerce_positive_int(settings.get("llmMaxRetries", 1), 1, minimum=0)
+        max_attempts = max(1, max_retries + 1)
+        provider_candidates = get_llm_provider_candidates(settings)
+        main_logger.info(
+            "LLM provider pool: "
+            f"{json.dumps(redact_for_log(summarize_llm_provider_pool(settings)), ensure_ascii=False)}"
+        )
+        main_logger.info(f"LLM history messages: {len(cleaned_history)} (raw: {len(history_messages)})")
+
+        if not provider_candidates:
+            raise RuntimeError("No healthy LLM provider/key candidates are available")
+
+        errors = []
+        for attempt_pos, candidate in enumerate(provider_candidates[:max_attempts], start=1):
+            provider = candidate["provider"]
+            provider_name = provider.get("name")
+            model_name = provider.get("modelName")
+            base_url = provider.get("baseUrl")
+            candidate_key = candidate.get("key")
+            release_slot = None
+            started_at = time.monotonic()
+            try:
+                release_slot, provider_record, key_record = await acquire_llm_provider_slot(candidate)
+                main_logger.info(
+                    "LLM request start: "
+                    f"provider={provider_name}, model={model_name}, base_url={base_url}, "
+                    f"key={candidate['key_index']}/{candidate['key_total']}, "
+                    f"prompt_chars={len(prompt) if prompt else 0}, timeout={timeout}, "
+                    f"provider_active={provider_record['active']}/{provider_record['limit']}, "
+                    f"key_active={key_record['active']}/{key_record['limit']}, "
+                    f"attempt={attempt_pos}/{max_attempts}"
+                )
+                response = await asyncio.wait_for(
+                    openai_complete_if_cache(
+                        model_name,
+                        prompt,
+                        system_prompt=system_prompt,
+                        history_messages=cleaned_history,
+                        api_key=candidate_key,
+                        base_url=base_url,
+                        timeout=timeout,
+                        **kwargs,
+                    ),
+                    timeout=timeout + 5.0,
+                )
+                duration = time.monotonic() - started_at
+                record_llm_provider_result(candidate, "success", duration=duration)
+                main_logger.info(
+                    "LLM request done: "
+                    f"provider={provider_name}, key={candidate['key_index']}/{candidate['key_total']}, "
+                    f"duration={duration:.1f}s, response_chars={len(response)}, status=success"
+                )
+                return response
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                duration = time.monotonic() - started_at
+                error_msg = (
+                    f"LLM call cancelled/timed out after timeout={timeout:.1f}s, "
+                    f"provider={provider_name}, key={candidate['key_index']}/{candidate['key_total']}"
+                )
+                errors.append(error_msg)
+                action = record_llm_provider_result(candidate, "timeout", duration=duration, error_message=error_msg)
+                main_logger.warning(
+                    "LLM request failed: "
+                    f"provider={provider_name}, key={candidate['key_index']}/{candidate['key_total']}, "
+                    f"duration={duration:.1f}s, error_type=timeout, action={action}, fallback=next_provider"
+                )
+            except Exception as e:
+                duration = time.monotonic() - started_at
+                error_msg = extract_detailed_exception_message(e)
+                errors.append(error_msg)
+                action = record_llm_provider_result(
+                    candidate,
+                    "fail",
+                    duration=duration,
+                    error_message=error_msg,
+                    cooldown_seconds=_coerce_positive_int(settings.get("llmKeyCooldownSeconds", 60), 60),
+                )
+                main_logger.error(
+                    "LLM request failed: "
+                    f"provider={provider_name}, key={candidate['key_index']}/{candidate['key_total']}, "
+                    f"duration={duration:.1f}s, error_type={action}, action={action}, "
+                    f"fallback=next_provider, error={error_msg}"
+                )
+                if attempt_pos >= max_attempts:
+                    raise
+            finally:
+                if release_slot:
+                    release_slot()
+
+        if errors and all("timed out" in err.lower() or "timeout" in err.lower() for err in errors):
+            raise RuntimeError("LLM total timeout exceeded: " + " || ".join(errors))
+        raise RuntimeError("All LLM provider/key candidates failed: " + " || ".join(errors))
+
+    except Exception as e:
+        log_detailed_exception(
+            main_logger,
+            "LLM调用失败",
+            e,
+            {
+                "provider": provider_name,
+                "model": model_name,
+                "base_url": base_url,
+                "prompt_chars": len(prompt) if prompt is not None else 0,
+                "system_prompt_chars": len(system_prompt) if system_prompt else 0,
+                "history_count": len(cleaned_history) if "cleaned_history" in locals() else len(history_messages),
+                "timeout": timeout,
+            },
+        )
+        raise
+
+async def preflight_hyperrag_api_services() -> None:
+    """Preflight embedding plus the multi-provider LLM pool."""
+    if not HYPERRAG_AVAILABLE:
+        raise RuntimeError("HyperRAG is not available")
+
+    with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+        settings = json.load(f)
+
+    embedding_model = settings.get("embeddingModel", "text-embedding-3-small")
+    embedding_api_key = settings.get("embeddingApiKey", settings.get("apiKey"))
+    embedding_base_url = settings.get("embeddingBaseUrl", settings.get("baseUrl"))
+    embedding_key_candidates = get_api_key_candidates("embedding", embedding_api_key, settings.get("apiKey"))
+    if not embedding_key_candidates:
+        embedding_key_candidates = [(0, 0, None)]
+
+    main_logger.info(
+        "HyperRAG API preflight start: "
+        f"embedding_model={embedding_model}, embedding_base_url={embedding_base_url}, "
+        f"llm_provider_pool={summarize_llm_provider_pool(settings)}, "
+        f"embedding_key_pool={summarize_key_pool('embedding', embedding_api_key, settings.get('apiKey'))}"
+    )
+
+    embedding_errors = []
+    embedding_ok = False
+    for key_index, key_total, candidate_key in embedding_key_candidates:
+        try:
+            await openai_embedding(
+                ["HyperRAG embedding preflight"],
+                model=embedding_model,
+                api_key=candidate_key,
+                base_url=embedding_base_url,
+                timeout=30.0,
+            )
+            embedding_ok = True
+            main_logger.info(f"HyperRAG API preflight: embedding OK, key={key_index}/{key_total}")
+            break
+        except Exception as e:
+            detailed_error = log_detailed_exception(
+                main_logger,
+                "HyperRAG API preflight failed - embedding",
+                e,
+                {
+                    "key_index": key_index,
+                    "key_total": key_total,
+                    "embedding_model": embedding_model,
+                    "embedding_base_url": embedding_base_url,
+                    "runtime_settings": get_runtime_settings_context(),
+                },
+            )
+            embedding_errors.append(detailed_error)
+            if candidate_key:
+                mark_api_key_unhealthy("embedding", candidate_key, detailed_error)
+    if not embedding_ok:
+        detail = " || ".join(embedding_errors)
+        suggestion = extract_user_friendly_error(detail)
+        raise RuntimeError(f"Embedding service preflight failed: {detail}. Suggestion: {suggestion}")
+
+    llm_candidates = get_llm_provider_candidates(settings)
+    if not llm_candidates:
+        raise RuntimeError("LLM service preflight failed: no healthy provider/key candidates")
+    llm_errors = []
+    llm_ok = False
+    for candidate in llm_candidates:
+        provider = candidate["provider"]
+        try:
+            await openai_complete_if_cache(
+                provider.get("modelName"),
+                "Reply exactly: OK",
+                api_key=candidate.get("key"),
+                base_url=provider.get("baseUrl"),
+                timeout=30.0,
+                max_tokens=8,
+            )
+            llm_ok = True
+            main_logger.info(
+                "HyperRAG API preflight: LLM OK, "
+                f"provider={provider.get('name')}, key={candidate['key_index']}/{candidate['key_total']}"
+            )
+            break
+        except Exception as e:
+            detailed_error = log_detailed_exception(
+                main_logger,
+                "HyperRAG API preflight failed - LLM",
+                e,
+                {
+                    "provider": provider.get("name"),
+                    "key_index": candidate["key_index"],
+                    "key_total": candidate["key_total"],
+                    "model": provider.get("modelName"),
+                    "base_url": provider.get("baseUrl"),
+                    "runtime_settings": get_runtime_settings_context(),
+                },
+            )
+            llm_errors.append(detailed_error)
+            record_llm_provider_result(
+                candidate,
+                "fail",
+                error_message=detailed_error,
+                cooldown_seconds=_coerce_positive_int(settings.get("llmKeyCooldownSeconds", 60), 60),
+            )
+    if not llm_ok:
+        detail = " || ".join(llm_errors)
+        suggestion = extract_user_friendly_error(detail)
+        raise RuntimeError(f"LLM service preflight failed: {detail}. Suggestion: {suggestion}")
+
 def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_overlap: int = None):
     """
     获取或创建指定数据库的 HyperRAG 实例
@@ -1397,6 +2077,7 @@ def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_o
         hyperrag_kwargs = {
             "working_dir": db_working_dir,
             "llm_model_func": get_hyperrag_llm_func,
+            "llm_model_max_async": int(settings.get("llmGlobalMaxAsync", settings.get("llmModelMaxAsync", 4))),
             "embedding_func": EmbeddingFunc(
                 embedding_dim=embedding_dim,  # text-embedding-3-small 的维度
                 max_token_size=8192,

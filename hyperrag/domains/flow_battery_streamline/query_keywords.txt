@@ -1,28 +1,40 @@
 {DOMAIN_CONTEXT}
 
-Extract structured keywords from the query. Output JSON only.
+Extract query keywords for redox flow battery retrieval.
 
-Keyword types:
-- theme_keywords: overarching research topics (e.g., electrolyte design, membrane selection, electrode modification, degradation/failure, operating optimization, techno-economic analysis)
-- entity_keywords: specific materials, components, or entities mentioned/implied
-- condition_keywords: numeric constraints or parameter names mentioned/implied
+High-level keywords should capture broad research intent, mechanisms, systems, and comparison themes.
+Low-level keywords should capture exact materials, active species, membranes, electrodes, additives, conditions, metrics, and degradation terms.
 
-OUTPUT FORMAT — JSON object, nothing else:
+Return JSON only, using this exact schema:
 {{
-  "theme_keywords": ["...", "..."],
-  "entity_keywords": ["...", "..."],
-  "condition_keywords": ["...", "..."]
+  "high_level_keywords": ["<theme keyword>", "..."],
+  "low_level_keywords": ["<specific keyword>", "..."]
 }}
 
-EXAMPLE:
-Query: "How does temperature affect vanadium redox flow battery performance?"
-Output:
-{{
-  "theme_keywords": ["temperature effects", "operating conditions"],
-  "entity_keywords": ["vanadium redox flow battery", "VRFB"],
-  "condition_keywords": ["temperature"]
-}}
+Examples of high-level keywords:
+- iron-chromium redox flow battery
+- vanadium redox flow battery
+- electrolyte additive strategy
+- electrode catalyst design
+- membrane crossover control
+- capacity fade mechanism
+- operation-performance relationship
 
-Query: {QUERY}
+Examples of low-level keywords:
+- Fe2+/Fe3+
+- Cr2+/Cr3+
+- VO2+/VO^2+
+- VOSO4
+- H2SO4
+- HCl
+- glycine
+- Nafion 212
+- graphite felt
+- current density
+- energy efficiency
+- capacity retention
 
-Output:
+Query:
+{QUERY}
+
+Output ONLY the JSON object. No prose before or after.

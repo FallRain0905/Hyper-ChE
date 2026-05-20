@@ -1,47 +1,75 @@
 {DOMAIN_CONTEXT}
 
-Extract ALL entities from the text below. Output a JSON array.
+Extract ALL entities from the text below. Output a strict JSON array.
 
-ENTITY TYPES (assign exactly one):
+ENTITY TYPES - assign exactly one:
+1. ACTIVE_SPECIES - redox-active molecules/ions, redox couples, supporting electrolytes, additives, solvents, salt reagents.
+2. MEMBRANE - ion-exchange membranes, porous separators, membrane blends, membrane modifications.
+3. ELECTRODE - electrodes, current collectors, bipolar plates, catalysts and modified electrode states.
+4. CONDITION - operating or processing parameters. subtype must be "operating" or "processing".
+5. METRIC - performance metrics or material characterization. subtype must be "performance" or "material_property".
+6. DEGRADATION - failure phenomena and mechanisms, including capacity fade, crossover, HER, passivation, imbalance, decomposition.
+7. SYSTEM - physical devices, cells, stacks, pumps, tanks, test systems, furnaces, workstations.
 
-1. ACTIVE_SPECIES — redox-active molecules/ions, supporting electrolytes, additives, solvents
-2. MEMBRANE — ion-exchange membranes, porous separators, modifications
-3. ELECTRODE — electrodes, bipolar plates, current collectors (each derived name = separate entity)
-4. CONDITION (subtype required: "operating" | "processing") — cell operation or synthesis parameters
-5. METRIC (subtype required: "performance" | "material_property") — cell indicators or material characterization
-6. DEGRADATION — failure phenomena and underlying mechanisms
-7. SYSTEM — physical devices / equipment
+CRITICAL RULES:
+R1. Extract exact chemical species when they appear in the text.
+    Important RFB species include: VO2+, VO^2+, VO2^+, VO2+, V2+, V3+, V4+, V5+, Cr2+, Cr3+, Fe2+, Fe3+,
+    VOSO4, H2SO4, HCl, FeCl2, FeCl3, CrCl2, CrCl3, Bi, Bi3+, BiCl3, glycine, EDTA, TEMPO, quinone, viologen.
+    Preserve the original spelling used in the source text whenever possible.
+R2. Chemical identity precision matters. A metal, ion, redox couple, salt, additive, and solvent are different entities.
+    Example: "Bi", "Bi3+", and "BiCl3" must be separate entities if all are mentioned.
+R3. Redox couples are entities when the text discusses the couple as a functional pair.
+    Example: "Fe2+/Fe3+", "Cr2+/Cr3+", "VO2+/VO^2+".
+R4. Derived electrode names are separate entities.
+    Example: "GF", "Bio-GF-O", and "Bi-Bio-GF-O" are three ELECTRODE entities. Record base material and treatment in key_attribute.
+R5. Material variables and characterization terms are entities when tied to performance or mechanism.
+    Examples: "oxygen vacancy", "BET surface area", "Rct", "Delta Ep", "contact angle", "ID/IG ratio".
+R6. Numeric values must be split into value + unit fields. Ranges use value_min + value_max + unit.
+R7. Preserve original names. Do not translate entity names. Do not canonicalize chemical notation in the entity name.
+R8. Extract named battery systems as SYSTEM entities when they are specific research objects.
+    Examples: "vanadium redox flow battery", "VRFB", "iron-chromium redox flow battery", "ICRFB",
+    "neutral aqueous organic redox flow battery", "zinc-bromine flow battery".
+    Do not create the generic entity "redox flow battery" unless the text uses it as a named system.
+R9. Extract functional groups or chemical moieties when they are linked to membrane/electrode design, ion transport, crossover, or stability.
+    Use ACTIVE_SPECIES for standalone chemical groups/additives/moieties such as "sulfonate", "imidazolium", "quaternary ammonium", "carboxyl", "hydroxyl".
+    Use MEMBRANE or ELECTRODE only when the name denotes a material or modified material state.
+R10. Never output entity type "MECHANISM". Mechanistic concepts belong to DEGRADATION when they describe failure/pathway,
+    or METRIC with subtype "material_property" when they are characterization/evidence terms.
 
-RULES:
-R1: Derived electrode names are SEPARATE entities. "GF", "Bio-GF-O", "Bi-Bio-GF-O" → 3 entities. Record base+treatment in key_attribute.
-R2: Chemical identity precision. Metal ≠ ion ≠ couple ≠ salt. "Bi" ≠ "Bi³⁺" ≠ "BiCl₃".
-R3: Numeric values MUST split into value + unit fields. Ranges use value_min + value_max.
-R4: Preserve original names. Canonicalization is downstream.
-
-OUTPUT FORMAT — JSON array, nothing else:
+OUTPUT FORMAT - JSON array only:
 [
   {{
-    "name": "<original name>",
-    "type": "<one of 7 types>",
-    "subtype": "<for CONDITION/METRIC only; null otherwise>",
+    "name": "<original entity name from text>",
+    "type": "<ACTIVE_SPECIES | MEMBRANE | ELECTRODE | CONDITION | METRIC | DEGRADATION | SYSTEM>",
+    "subtype": "<operating | processing | performance | material_property | null>",
     "value": <number or null>,
     "value_min": <number or null>,
     "value_max": <number or null>,
     "unit": "<string or null>",
-    "description": "<1-2 sentences>",
-    "key_attribute": "<identifying trait; REQUIRED for ELECTRODE; null if N/A>"
+    "description": "<1-2 sentences grounded in the text>",
+    "key_attribute": "<identifying trait; required for derived ELECTRODE entities; otherwise null>"
   }}
 ]
 
 EXAMPLE:
-Text: "The electrolytes contain 1.2 mol/L FeCl₂·4H₂O and 2.5 mol/L HCl. Nafion 212 membrane. Current density 80-200 mA/cm²."
+Text: "The electrolyte contained 1.5 M VOSO4 in 3 M H2SO4. The VO2+/VO^2+ redox couple was tested with Nafion 212 at 80 mA cm-2, giving an EE of 82%."
 Output:
 [
-  {{"name":"FeCl₂·4H₂O","type":"ACTIVE_SPECIES","subtype":null,"value":1.2,"value_min":null,"value_max":null,"unit":"mol/L","description":"Iron(II) chloride tetrahydrate, positive-side active species precursor.","key_attribute":"Fe(II) salt, source of Fe²⁺/Fe³⁺ couple"}},
-  {{"name":"HCl","type":"ACTIVE_SPECIES","subtype":null,"value":2.5,"value_min":null,"value_max":null,"unit":"mol/L","description":"Hydrochloric acid as supporting electrolyte.","key_attribute":"supporting electrolyte"}},
-  {{"name":"Nafion 212","type":"MEMBRANE","subtype":null,"value":null,"value_min":null,"value_max":null,"unit":null,"description":"PFSA cation-exchange membrane.","key_attribute":"commercial PFSA membrane"}},
-  {{"name":"current density","type":"CONDITION","subtype":"operating","value":null,"value_min":80,"value_max":200,"unit":"mA/cm²","description":"Current density range for testing.","key_attribute":null}}
+  {{"name":"VOSO4","type":"ACTIVE_SPECIES","subtype":null,"value":1.5,"value_min":null,"value_max":null,"unit":"M","description":"Vanadyl sulfate used as the vanadium source in the electrolyte.","key_attribute":"vanadium salt"}},
+  {{"name":"H2SO4","type":"ACTIVE_SPECIES","subtype":null,"value":3,"value_min":null,"value_max":null,"unit":"M","description":"Sulfuric acid supporting electrolyte.","key_attribute":"supporting electrolyte"}},
+  {{"name":"VO2+/VO^2+","type":"ACTIVE_SPECIES","subtype":null,"value":null,"value_min":null,"value_max":null,"unit":null,"description":"Vanadium redox couple discussed in the electrolyte test.","key_attribute":"V(V)/V(IV) redox couple"}},
+  {{"name":"Nafion 212","type":"MEMBRANE","subtype":null,"value":null,"value_min":null,"value_max":null,"unit":null,"description":"Cation-exchange membrane used in the cell.","key_attribute":"commercial PFSA membrane"}},
+  {{"name":"80 mA cm-2","type":"CONDITION","subtype":"operating","value":80,"value_min":null,"value_max":null,"unit":"mA cm-2","description":"Current density used during testing.","key_attribute":null}},
+  {{"name":"EE","type":"METRIC","subtype":"performance","value":82,"value_min":null,"value_max":null,"unit":"%","description":"Energy efficiency reported for the test.","key_attribute":null}}
 ]
+
+NEGATIVE EXAMPLES:
+- Wrong: {{"name":"capacity fade mechanism","type":"MECHANISM", ...}}
+  Correct: {{"name":"capacity fade mechanism","type":"DEGRADATION", ...}}
+- Wrong: omit "vanadium redox flow battery" when it is the tested system.
+  Correct: extract it as SYSTEM.
+- Wrong: relation-stage-only concepts such as "sulfonate" are omitted even though the text links them to membrane ion transport.
+  Correct: extract "sulfonate" as ACTIVE_SPECIES with key_attribute "functional group".
 
 TEXT:
 {CHUNK_TEXT}

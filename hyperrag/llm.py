@@ -27,7 +27,7 @@ from tenacity import (
 from pydantic import BaseModel, Field
 from typing import List, Dict, Callable, Any
 from .base import BaseKVStorage
-from .utils import compute_args_hash, wrap_embedding_func_with_attrs
+from .utils import compute_args_hash, logger, wrap_embedding_func_with_attrs
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -54,22 +54,28 @@ async def openai_complete_if_cache(
         AsyncOpenAI(timeout=timeout) if base_url is None else AsyncOpenAI(base_url=base_url, timeout=timeout)
     )
     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
+    skip_cache = kwargs.pop("skip_cache", False)
     messages = []
     if system_prompt is not None:
         messages.append({"role": "system", "content": system_prompt})
     messages.extend(history_messages)
     messages.append({"role": "user", "content": prompt})
-    if hashing_kv is not None:
+    if hashing_kv is not None and not skip_cache:
         args_hash = compute_args_hash(model, messages)
         if_cache_return = await hashing_kv.get_by_id(args_hash)
         if if_cache_return is not None:
+            cached_return = if_cache_return["return"] or ""
+            logger.info(
+                f"LLM cache hit: model={model}, prompt_chars={len(prompt)}, "
+                f"response_chars={len(cached_return)}"
+            )
             return if_cache_return["return"]
 
     response = await openai_async_client.chat.completions.create(
         model=model, messages=messages, **kwargs
     )
 
-    if hashing_kv is not None:
+    if hashing_kv is not None and not skip_cache:
         await hashing_kv.upsert(
             {args_hash: {"return": response.choices[0].message.content, "model": model}}
         )

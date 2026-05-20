@@ -436,6 +436,108 @@ def convert_json_relation_to_standard_format(relation: dict, chunk_key: str = ""
 
     return {}
 
+_SUBSCRIPT_TRANSLATION = str.maketrans({
+    "₀": "0", "₁": "1", "₂": "2", "₃": "3", "₄": "4",
+    "₅": "5", "₆": "6", "₇": "7", "₈": "8", "₉": "9",
+    "⁰": "0", "¹": "1", "²": "2", "³": "3", "⁴": "4",
+    "⁵": "5", "⁶": "6", "⁷": "7", "⁸": "8", "⁹": "9",
+})
+
+def _normalize_entity_reference(value: str) -> str:
+    value = str(value or "").translate(_SUBSCRIPT_TRANSLATION).lower()
+    value = re.sub(r"\[u\+208([0-9])\]", r"\1", value)
+    value = re.sub(r"\[u\+207([0-9])\]", r"\1", value)
+    value = re.sub(r"[\s_\-–—−]+", "", value)
+    return value
+
+def _strip_numeric_suffix_for_lookup(value: str) -> str:
+    value = str(value or "").translate(_SUBSCRIPT_TRANSLATION).lower()
+    value = re.sub(r"\b\d+(?:\.\d+)?\s*(?:%|mg/l|g/l|mol/l|mmol|mm|h|min|s|khz|w|mpa|cycles?|cycle|ppm|ppb)\b", "", value)
+    value = re.sub(r"\b\d+(?:\.\d+)?\b", "", value)
+    value = re.sub(r"[\s_\-–—−]+", "", value)
+    return value
+
+def _build_entity_reference_lookup(entities_json: list[dict]) -> dict[str, str]:
+    lookup = {}
+
+    def add(key: str, name: str):
+        if not key:
+            return
+        existing = lookup.get(key)
+        if existing is None:
+            lookup[key] = name
+        elif existing != name:
+            lookup[key] = ""
+
+    for entity in entities_json:
+        name = entity.get("name", "")
+        if not name:
+            continue
+        add(_normalize_entity_reference(name), name)
+        if entity.get("type") in {"CONDITION", "METRIC"}:
+            add(_strip_numeric_suffix_for_lookup(name), name)
+
+    return {key: value for key, value in lookup.items() if value}
+
+def _canonicalize_entity_reference(value: str, lookup: dict[str, str]) -> str | None:
+    return lookup.get(_normalize_entity_reference(value)) or lookup.get(_strip_numeric_suffix_for_lookup(value))
+
+def _filter_relations_to_known_entities(
+    low_relations: list[dict],
+    high_relations: list[dict],
+    entities_json: list[dict],
+    chunk_key: str,
+) -> tuple[list[dict], list[dict]]:
+    """Ensure relation vertices reference entities from the current chunk extraction."""
+    lookup = _build_entity_reference_lookup(entities_json)
+    filtered_low = []
+    filtered_high = []
+    skipped = []
+
+    for relation in low_relations:
+        source = _canonicalize_entity_reference(relation.get("source"), lookup)
+        target = _canonicalize_entity_reference(relation.get("target"), lookup)
+        if not source or not target:
+            skipped.append({
+                "kind": "low",
+                "missing": [x for x, y in [(relation.get("source"), source), (relation.get("target"), target)] if not y],
+                "relation_type": relation.get("relation_type"),
+            })
+            continue
+        relation = dict(relation)
+        relation["source"] = source
+        relation["target"] = target
+        filtered_low.append(relation)
+
+    for relation in high_relations:
+        vertices = relation.get("vertices", [])
+        canonical_vertices = []
+        missing_vertices = []
+        for vertex in vertices:
+            canonical = _canonicalize_entity_reference(vertex, lookup)
+            if canonical:
+                canonical_vertices.append(canonical)
+            else:
+                missing_vertices.append(vertex)
+        if missing_vertices or len(set(canonical_vertices)) < 3:
+            skipped.append({
+                "kind": "high",
+                "missing": missing_vertices,
+                "relation_type": relation.get("relation_type"),
+            })
+            continue
+        relation = dict(relation)
+        relation["vertices"] = list(dict.fromkeys(canonical_vertices))
+        filtered_high.append(relation)
+
+    if skipped:
+        logger.warning(
+            f"[{chunk_key}] Relation entity validation skipped {len(skipped)} invalid relations/hyperedges; "
+            f"examples={skipped[:5]}"
+        )
+
+    return filtered_low, filtered_high
+
 def validate_domain_output(entities: list, relations: list, domain: str = 'default'):
     """
     Validate domain-specific output using DomainValidator
@@ -1083,9 +1185,9 @@ async def _merge_edges_then_upsert(
         if description:
             logger.warning(f"[{source_id}] Edge description: {description[:500]}")
         if unknown_reference_count > len(id_set) * 0.5:
-            logger.error(f"[{source_id}] CRITICAL: More than 50% vertices are UNKNOWN in this edge")
-            logger.error(f"[{source_id}] Unknown vertex names: {unknown_references[:10]}")  # Log first 10 to avoid flooding
-            logger.error(f"[{source_id}] This likely indicates composite names (e.g., 'CP + MEMBr') or numeric suffixes (e.g., 'CE 99.1%')")
+            logger.warning(f"[{source_id}] HIGH UNKNOWN RATE: More than 50% vertices are UNKNOWN in this edge")
+            logger.warning(f"[{source_id}] Unknown vertex names: {unknown_references[:10]}")  # Log first 10 to avoid flooding
+            logger.warning(f"[{source_id}] This likely indicates composite names (e.g., 'CP + MEMBr') or numeric suffixes (e.g., 'CE 99.1%')")
     description = await _handle_relation_summary(  # 应该重新写一个针对超边描述进行合并的函数
         id_set, description, global_config
     )
@@ -1333,7 +1435,14 @@ async def _process_json_format_extraction(
         except Exception as e:
             _log_step_exception(chunk_key, "Step 2b", "High-order relation extraction error", e)
 
-    # Convert all relations to standard format
+    low_relations_json, high_relations_json = _filter_relations_to_known_entities(
+        low_relations_json,
+        high_relations_json,
+        entities_json,
+        chunk_key,
+    )
+
+    # Convert all relations to standard format after entity-reference validation.
     relations = []
     for relation_json in low_relations_json:
         standard_relation = convert_json_relation_to_standard_format(relation_json, chunk_key)

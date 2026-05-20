@@ -3,33 +3,35 @@
 From the entities below, extract BOTH low-order relations and high-order hyperedges in ONE pass.
 
 Use the low-order relations as the reasoning scaffold for high-order hyperedges:
-1. First identify direct pairwise relations between entities.
-2. Then group strongly connected pairs into 3+ entity hyperedges.
-3. High-order hyperedges should be logical summaries of the low-order relations, not independent new facts.
+1. Identify direct pairwise relations between entities.
+2. Group strongly connected pairs into 3+ entity hyperedges.
+3. High-order hyperedges must summarize facts supported by the text and the low-order relations.
 
 CRITICAL - Vertex Name Matching:
-You MUST use the EXACT entity names from the Entities (K_v) list below.
-NEVER create new vertex names.
-NEVER append numbers, units, or values to vertex names.
-All numeric values belong in the entity fields shown in K_v, NOT in relation vertex names.
+- Use ONLY exact entity names from the Entities (K_v) list.
+- Never create new vertex names.
+- Never append numbers, units, or values to vertex names.
+- If a useful concept is absent from K_v, mention it in description/evidence_span but omit it from source/target/vertices.
+- If K_v contains a broader named system such as "vanadium redox flow battery" but not a shorthand such as "VRFB",
+  use the broader exact K_v name. Do not create the shorthand as a new vertex.
+- If K_v contains a redox couple such as "VO2+/VO^2+" but not individual ions such as "VO2+" or "VO^2+",
+  use the redox couple entity. Do not create individual-ion vertices.
 
-Wrong: "CE 99.1%", "temperature 60C", "3 M HCl", "CP + MEMBr"
-Correct: "CE", "temperature", "HCl", "CP", "MEMBr"
-
-CRITICAL - If a useful concept is absent from K_v:
-Do NOT invent a vertex for it.
-Mention the missing concept in description/evidence_span if needed, but omit it from vertices.
+Wrong vertices: "EE 82%", "temperature 60 C", "3 M H2SO4", "VO2+" if K_v only contains "VO2+/VO^2+".
+Correct vertices: "EE", "temperature", "H2SO4", "VO2+/VO^2+" when those names appear in K_v.
 
 RELATION TYPES:
-- COMPOSITION: A is component/precursor/product of B (electrolyte formulation, electrode synthesis, membrane modification)
-- OPERATION: A and B co-present in same experimental setup (material + condition + metric)
-- DEGRADATION: A causes/explains/suffers B (failure mechanism, efficiency loss)
-- COMPARISON: same-type candidates compared under shared criterion
+- COMPOSITION: A is component, precursor, product, dopant, additive, solvent, or modification of B.
+- OPERATION: A and B are co-present in the same experimental setup, operating condition, or performance measurement.
+- DEGRADATION: A causes, mitigates, indicates, explains, or suffers B.
+- COMPARISON: A and B are compared under a shared metric, condition, process, or application target.
 
-COMPARISON trigger:
-When text presents a series of same-type entities with measured values, create:
-1. low_order_relations for the compared pairs when useful
-2. one COMPARISON high_order_hyperedge including all candidate entity names and the shared metric entity name
+HIGH-ORDER HYPEREDGE PATTERNS:
+- Electrolyte formulation: active species + acid/supporting electrolyte + additive/solvent + concentration conditions.
+- Electrode design: electrode + catalyst/modification + processing condition + material metric.
+- Operation-performance: active species/system/electrode/membrane + condition + performance metric.
+- Degradation/mechanism: material/species + degradation phenomenon + mechanism evidence/metric.
+- Comparison: multiple materials/species/membranes/conditions + shared metric.
 
 Entities (K_v):
 {K_v_JSON}
@@ -37,7 +39,7 @@ Entities (K_v):
 Text:
 {CHUNK_TEXT}
 
-OUTPUT FORMAT - strict JSON object, nothing else:
+OUTPUT FORMAT - strict JSON object only:
 {{
   "low_order_relations": [
     {{

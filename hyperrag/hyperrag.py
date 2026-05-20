@@ -89,7 +89,7 @@ class HyperRAG:
     # llm_model_name: str = "meta-llama/Llama-3.2-1B-Instruct"  #'meta-llama/Llama-3.2-1B'#'google/gemma-2-2b-it'
     llm_model_name: str = ""
     llm_model_max_token_size: int = 32768
-    llm_model_max_async: int = 16
+    llm_model_max_async: int = 4
     llm_model_kwargs: dict = field(default_factory=dict)
 
     llm_model_stream_func: callable = None

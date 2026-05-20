@@ -1,62 +1,38 @@
 {DOMAIN_CONTEXT}
 
-From the entities below, find connections among 3+ entities and construct hyperedges. If themes are not strongly associated, create separate hyperedges.
+Extract high-order hyperedges connecting 3 or more entities from K_v.
 
-RELATION TYPES:
-- COMPOSITION: components form/produce X (ACTIVE_SPECIES + CONDITION[processing] → product). Typical: 3-8 vertices.
-- OPERATION: material+condition setup → measured metrics. Highest cardinality: 5-15 vertices.
-- DEGRADATION: under conditions, failure/mechanism occurred. Typical: 3-7 vertices.
-- COMPARISON: same-type candidates show different values under shared criterion. Typical: 4-10 vertices.
+CRITICAL:
+- vertices must contain exact entity names from K_v only.
+- Do not invent missing entities.
+- Do not put numeric values in vertex names.
+- Prefer hyperedges that connect material/species + condition + metric or mechanism.
+- Use broader exact K_v entities instead of inventing narrower vertices.
+  Example: use "vanadium redox flow battery" if K_v contains it and the sentence uses "VRFB".
 
-CRITICAL — Vertex Name Matching:
-You MUST use the EXACT entity names from the Entities (K_v) list above.
-NEVER append numbers, units, or values to vertex names.
-❌ WRONG: "CE 99.1%", "temperature 60°C", "Nafion 117 thickness 183μm"
-✅ CORRECT: "CE", "temperature", "Nafion 117"
-All numeric values should be in the entity's value/value_min/value_max fields, NOT in the name.
-
-CRITICAL — No Composite Names:
-NEVER create composite names (combining multiple entities with +, -, /, etc.).
-If you want to show "CP and MEMBr together", create a hyperedge with ["CP", "MEMBr"] in vertices.
-❌ WRONG: "CP + MEMBr", "CP-ON + TEABr", "A/B/C", "A-B"
-✅ CORRECT: ["CP", "MEMBr"], ["CP-ON", "TEABr"], ["A", "B", "C"]
-Composite relationships should be expressed through hyperedges, not composite vertex names.
-
-CRITICAL — COMPARISON trigger:
-When text presents a SERIES of same-type entities with measured values (e.g., "A: x; B: y; C: z" or data tables), you MUST create a COMPARISON hyperedge including ALL candidates and ALL their metric values.
-
-OUTPUT FORMAT — JSON array, nothing else:
-[
-  {{
-    "vertices": ["<entity_1>", "<entity_2>", ...],
-    "relation_type": "COMPOSITION | OPERATION | DEGRADATION | COMPARISON",
-    "description": "<detailed description covering all entities>",
-    "generalization": "<one-sentence summary>",
-    "keywords": "<overarching concepts>",
-    "strength": <0-10 integer>,
-    "evidence_span": "<verbatim quote ≤120 chars>"
-  }}
-]
-
-EXAMPLE:
-Text: "BET: RCC 0.614 m²/g; TCC 0.706 m²/g; BCC 0.800 m²/g; TBCC 0.904 m²/g."
-Output:
-[
-  {{
-    "vertices":["RCC","TCC","BCC","TBCC"],
-    "relation_type":"COMPARISON",
-    "description":"BET surface area comparison. TBCC highest (0.904), RCC lowest (0.614).",
-    "generalization":"TBCC > BCC > TCC > RCC in BET surface area",
-    "keywords":"specific surface area, electrode modification",
-    "strength":9,
-    "evidence_span":"RCC electrode: 0.614 m²/g; TCC electrode: 0.706 m²/g"
-  }}
-]
+HYPEREDGE TYPES:
+- COMPOSITION: formulation or material design involving 3+ components/variables.
+- OPERATION: experiment linking species/material/system + condition + performance metric.
+- DEGRADATION: mechanism linking species/material + failure phenomenon + evidence/metric/condition.
+- COMPARISON: multiple candidates compared under a shared metric or condition.
 
 Entities (K_v):
 {K_v_JSON}
 
 Text:
 {CHUNK_TEXT}
+
+OUTPUT FORMAT - strict JSON array only:
+[
+  {{
+    "vertices": ["<entity name from K_v>", "<entity name from K_v>", "..."],
+    "relation_type": "COMPOSITION | OPERATION | DEGRADATION | COMPARISON",
+    "description": "<detailed description covering all entities>",
+    "generalization": "<one-sentence summary>",
+    "keywords": "<overarching concepts>",
+    "strength": <0-10 integer>,
+    "evidence_span": "<verbatim quote from text, <=120 chars>"
+  }}
+]
 
 Output ONLY the JSON array. No prose before or after.

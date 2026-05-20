@@ -1,10 +1,12 @@
 import asyncio
 import html
+import json
 import os
 from dataclasses import dataclass
 from typing import Any, Union, cast, List, Set, Tuple, Optional, Dict
 import numpy as np
 from nano_vectordb import NanoVectorDB
+from nano_vectordb.dbs import array_to_buffer_string
 from hyperdb import HypergraphDB
 from .utils import load_json, logger, write_json
 from .base import (
@@ -111,7 +113,17 @@ class NanoVectorDBStorage(BaseVectorStorage):
         return results
 
     async def index_done_callback(self):
-        self._client.save()
+        storage_file = self._client.storage_file
+        tmp_file = f"{storage_file}.tmp"
+        storage = {
+            **self._client._NanoVectorDB__storage,
+            "matrix": array_to_buffer_string(self._client._NanoVectorDB__storage["matrix"]),
+        }
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(storage, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, storage_file)
 
 
 @dataclass

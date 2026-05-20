@@ -16,6 +16,8 @@ import {
     Layers,
     BookOpen,
     GitCompare,
+    ChevronDown,
+    ChevronRight,
 } from 'lucide-react'
 import { Tag } from 'antd'
 import {
@@ -38,6 +40,61 @@ import DatabaseSelector from '../../components/DatabaseSelector'
 import RetrievalInfo from '../../components/RetrievalInfo'
 import RetrievalHyperGraph from '../../components/RetrievalHyperGraph'
 import { conversations as defaultConversations } from './data'
+
+const LazyRetrievalGraph = ({
+    entities = [],
+    hyperedges = [],
+    themes = [],
+    height = '300px',
+    mode = 'hyper',
+    graphId = 'retrieval-graph'
+}) => {
+    const [expanded, setExpanded] = useState(false)
+    const entityCount = entities?.length || 0
+    const hyperedgeCount = hyperedges?.length || 0
+    const themeCount = themes?.length || 0
+    const hasGraphData = entityCount > 0 || hyperedgeCount > 0 || themeCount > 0
+
+    if (!hasGraphData) {
+        return null
+    }
+
+    return (
+        <div className="mt-4 rounded-md border border-gray-200 bg-white">
+            <button
+                type="button"
+                onClick={() => setExpanded(prev => !prev)}
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+            >
+                <span className="flex items-center gap-2 font-medium">
+                    {expanded ? (
+                        <ChevronDown className="h-4 w-4" />
+                    ) : (
+                        <ChevronRight className="h-4 w-4" />
+                    )}
+                    Retrieval hypergraph visualization
+                </span>
+                <span className="text-xs text-gray-500">
+                    {entityCount} entities | {hyperedgeCount} hyperedges
+                    {themeCount > 0 ? ` | ${themeCount} themes` : ''}
+                </span>
+            </button>
+
+            {expanded && (
+                <div className="border-t border-gray-200 p-3">
+                    <RetrievalHyperGraph
+                        entities={entities}
+                        hyperedges={hyperedges}
+                        themes={themes}
+                        height={height}
+                        mode={mode}
+                        graphId={graphId}
+                    />
+                </div>
+            )}
+        </div>
+    )
+}
 
 const HyperRAGHome = () => {
     // State
@@ -770,15 +827,13 @@ return
 
                                                                     {((message.compareResults.mode1.entities && message.compareResults.mode1.entities.length > 0) ||
                                                                         (message.compareResults.mode1.hyperedges && message.compareResults.mode1.hyperedges.length > 0)) && (
-                                                                            <div className="mt-4">
-                                                                                <RetrievalHyperGraph
-                                                                                    entities={message.compareResults.mode1.entities || []}
-                                                                                    hyperedges={message.compareResults.mode1.hyperedges || []}
-                                                                                    height="300px"
-                                                                                    mode={message.compareResults.mode1.mode}
-                                                                                    graphId={`compare-graph-1-${message.id}`}
-                                                                                />
-                                                                            </div>
+                                                                            <LazyRetrievalGraph
+                                                                                entities={message.compareResults.mode1.entities || []}
+                                                                                hyperedges={message.compareResults.mode1.hyperedges || []}
+                                                                                height="300px"
+                                                                                mode={message.compareResults.mode1.mode}
+                                                                                graphId={`compare-graph-1-${message.id}`}
+                                                                            />
                                                                         )}
                                                                 </div>
                                                             )}
@@ -835,15 +890,13 @@ return
 
                                                                     {((message.compareResults.mode2.entities && message.compareResults.mode2.entities.length > 0) ||
                                                                         (message.compareResults.mode2.hyperedges && message.compareResults.mode2.hyperedges.length > 0)) && (
-                                                                            <div className="mt-4">
-                                                                                <RetrievalHyperGraph
-                                                                                    entities={message.compareResults.mode2.entities || []}
-                                                                                    hyperedges={message.compareResults.mode2.hyperedges || []}
-                                                                                    height="300px"
-                                                                                    mode={message.compareResults.mode2.mode}
-                                                                                    graphId={`compare-graph-2-${message.id}`}
-                                                                                />
-                                                                            </div>
+                                                                            <LazyRetrievalGraph
+                                                                                entities={message.compareResults.mode2.entities || []}
+                                                                                hyperedges={message.compareResults.mode2.hyperedges || []}
+                                                                                height="300px"
+                                                                                mode={message.compareResults.mode2.mode}
+                                                                                graphId={`compare-graph-2-${message.id}`}
+                                                                            />
                                                                         )}
                                                                 </div>
                                                             )}
@@ -889,17 +942,16 @@ return
 
                                                                 {/* 超图可视化展示 */}
                                                                 {((message.entities && message.entities.length > 0) ||
-                                                                    (message.hyperedges && message.hyperedges.length > 0)) && (
-                                                                        <div className="mt-4">
-                                                                            <RetrievalHyperGraph
-                                                                                entities={message.entities || []}
-                                                                                hyperedges={message.hyperedges || []}
-                                                                                themes={message.themes || []}  // 添加主题信息用于可视化
-                                                                                height="400px"
-                                                                                mode={message.role}
-                                                                                graphId={`retrieval-graph-${message.id}`}
-                                                                            />
-                                                                        </div>
+                                                                    (message.hyperedges && message.hyperedges.length > 0) ||
+                                                                    (message.themes && message.themes.length > 0)) && (
+                                                                        <LazyRetrievalGraph
+                                                                            entities={message.entities || []}
+                                                                            hyperedges={message.hyperedges || []}
+                                                                            themes={message.themes || []}
+                                                                            height="400px"
+                                                                            mode={message.role}
+                                                                            graphId={`retrieval-graph-${message.id}`}
+                                                                        />
                                                                     )}
                                                             </div>
                                                         </div>

@@ -1,14 +1,28 @@
 {DOMAIN_CONTEXT}
 
-From the entities below, identify all clearly related pairs. Output a JSON array.
+Extract direct pairwise relations between the entities below.
 
-RELATION TYPES (assign one per pair):
-- COMPOSITION: A is component/precursor/product of B (e.g., electrolyte formulation, electrode synthesis)
-- OPERATION: A and B co-present in same experimental setup (e.g., material tested under condition)
-- DEGRADATION: A causes/explains/suffers B (e.g., failure mechanism, efficiency loss)
-- COMPARISON: A and B compared under shared criterion (note: 3+ candidates → high-order extraction)
+CRITICAL:
+- source and target must be exact names from K_v.
+- Do not invent missing entities.
+- Do not put numeric values in source/target names.
+- If a relation needs a missing concept, omit the relation.
+- Use the closest exact K_v entity when it is clearly equivalent in the text.
+  Example: use "VO2+/VO^2+" if K_v has that redox couple and the text sentence refers to the same vanadium ions.
 
-OUTPUT FORMAT — JSON array, nothing else:
+RELATION TYPES:
+- COMPOSITION: component, precursor, product, additive, dopant, solvent, membrane/electrode modification.
+- OPERATION: co-present in the same experiment, condition, device, or performance measurement.
+- DEGRADATION: causes, mitigates, indicates, explains, or suffers a failure phenomenon.
+- COMPARISON: compared under a shared condition, metric, or design variable.
+
+Entities (K_v):
+{K_v_JSON}
+
+Text:
+{CHUNK_TEXT}
+
+OUTPUT FORMAT - strict JSON array only:
 [
   {{
     "source": "<entity name from K_v>",
@@ -19,19 +33,5 @@ OUTPUT FORMAT — JSON array, nothing else:
     "strength": <0-10 integer>
   }}
 ]
-
-EXAMPLE:
-Text: "TBCC electrode shows CE of 95.2% at 140 mA/cm². Prepared by thermal treatment at 400°C for 6h."
-Output:
-[
-  {{"source":"TBCC electrode","target":"thermal treatment at 400°C","relation_type":"COMPOSITION","description":"TBCC produced by thermal treatment","keywords":"electrode synthesis, thermal modification","strength":8}},
-  {{"source":"TBCC electrode","target":"95.2% CE at 140 mA/cm²","relation_type":"OPERATION","description":"TBCC achieved 95.2% CE at 140 mA/cm²","keywords":"performance, coulombic efficiency","strength":9}}
-]
-
-Entities (K_v):
-{K_v_JSON}
-
-Text:
-{CHUNK_TEXT}
 
 Output ONLY the JSON array. No prose before or after.
