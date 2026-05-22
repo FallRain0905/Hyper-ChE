@@ -2280,6 +2280,9 @@ async def hyper_query(
     }
 
     if query_param.only_need_context:
+        if query_param.return_type == "json":
+            contextJson["response"] = context or ""
+            return contextJson
         return context
     if context is None:
         return PROMPTS["fail_response"]

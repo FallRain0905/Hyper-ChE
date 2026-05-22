@@ -435,8 +435,8 @@ const Setting: React.FC = () => {
       console.error('加载数据库列表失败:', error)
       // 如果API不存在，提供一些默认选项
       setAvailableDatabases([
-        { name: 'hypergraph_wukong', description: '西游记超图' },
-        { name: 'hypergraph_A_Christmas_Carol', description: '圣诞颂歌超图' }
+        { name: 'example', description: 'HyperChE 化工示例库' },
+        { name: 'case1', description: '液流电池示例库' }
       ])
     }
   }

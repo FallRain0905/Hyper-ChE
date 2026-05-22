@@ -3,6 +3,10 @@ import App from '@/App'
 import ErrorPage from '@/ErrorPage'
 import Home from '@/pages/Home'
 import Landing from '@/pages/Landing'
+import WhyHypergraph from '@/pages/Landing/WhyHypergraph'
+import TryDemo from '@/pages/Landing/TryDemo'
+import FlowBatteryDemo from '@/pages/Landing/FlowBatteryDemo'
+import PFASDemo from '@/pages/Landing/PFASDemo'
 import Files from '@/pages/Files'
 import Graph from '@/pages/Hyper/Graph'
 import FullGraph from '@/pages/Hyper/FullGraph'
@@ -23,6 +27,22 @@ export const routers = [
   {
     path: '/',
     element: <Landing />,
+  },
+  {
+    path: '/why-hypergraph',
+    element: <WhyHypergraph />,
+  },
+  {
+    path: '/try',
+    element: <TryDemo />,
+  },
+  {
+    path: '/demo/flow-battery',
+    element: <FlowBatteryDemo />,
+  },
+  {
+    path: '/demo/pfas',
+    element: <PFASDemo />,
   },
   {
     path: '/app',

@@ -227,6 +227,7 @@ if sys.platform == 'win32' and 'uvicorn' not in sys.modules:
         pass
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect, Form, Request, Response, Depends
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from auth import AUTH_COOKIE_NAME, auth_store, create_token
 from db import get_hypergraph, getFrequentVertices, get_vertices, get_hyperedges, get_vertice, get_vertice_neighbor, get_hyperedge_neighbor_server, add_vertex, add_hyperedge, delete_vertex, delete_hyperedge, update_vertex, update_hyperedge, get_hyperedge_detail, db_manager, get_theme_hypergraph, get_theme_vertices, get_theme_hyperedges, get_theme_vertex_neighbor
@@ -256,7 +257,7 @@ if importlib.util.find_spec("hyperrag") is None:
 try:
     from hyperrag import HyperRAG, QueryParam
     from hyperrag.utils import EmbeddingFunc
-    from hyperrag.llm import openai_embedding, openai_complete_if_cache
+    from hyperrag.llm import openai_embedding, openai_complete_if_cache, openai_complete_stream_if_cache
     HYPERRAG_AVAILABLE = True
 except ImportError as e:
     print(f"HyperRAG not available: {e}")
@@ -2300,6 +2301,144 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
         )
         raise
 
+async def get_hyperrag_llm_stream_func(prompt, system_prompt=None, history_messages=[], **kwargs):
+    """Streaming HyperRAG LLM function backed by the same multi-provider API key pool."""
+    cleaned_history = []
+    model_name = None
+    base_url = None
+    timeout = None
+    provider_name = None
+    try:
+        main_logger.info(f"LLM stream call queued: prompt_chars={len(prompt) if prompt is not None else 0}")
+        if system_prompt:
+            main_logger.info(f"LLM stream system prompt chars: {len(system_prompt)}")
+
+        if history_messages:
+            for msg in history_messages:
+                if msg.get('role') != 'assistant' or msg.get('content', '').strip():
+                    cleaned_history.append(msg)
+
+        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+            settings = json.load(f)
+
+        timeout = float(settings.get("llmTimeout", kwargs.get('timeout', 600.0)))
+        max_retries = _coerce_positive_int(settings.get("llmMaxRetries", 1), 1, minimum=0)
+        max_attempts = max(1, max_retries + 1)
+        current_user_id = CURRENT_USER_ID.get()
+        user_llm_candidates = get_user_llm_provider_candidates(current_user_id, settings)
+        if user_llm_candidates:
+            provider_candidates = user_llm_candidates
+        else:
+            consume_platform_quota(current_user_id, "llm", 1)
+            provider_candidates = get_llm_provider_candidates(settings)
+
+        if not provider_candidates:
+            raise RuntimeError("No healthy LLM provider/key candidates are available")
+
+        errors = []
+        for attempt_pos, candidate in enumerate(provider_candidates[:max_attempts], start=1):
+            provider = candidate["provider"]
+            provider_name = provider.get("name")
+            model_name = provider.get("modelName")
+            base_url = provider.get("baseUrl")
+            candidate_key = candidate.get("key")
+            release_slot = None
+            started_at = time.monotonic()
+            response_chars = 0
+            try:
+                release_slot, provider_record, key_record = await acquire_llm_provider_slot(candidate)
+                main_logger.info(
+                    "LLM stream request start: "
+                    f"provider={provider_name}, model={model_name}, base_url={base_url}, "
+                    f"key={candidate['key_index']}/{candidate['key_total']}, "
+                    f"prompt_chars={len(prompt) if prompt else 0}, timeout={timeout}, "
+                    f"provider_active={provider_record['active']}/{provider_record['limit']}, "
+                    f"key_active={key_record['active']}/{key_record['limit']}, "
+                    f"attempt={attempt_pos}/{max_attempts}"
+                )
+
+                async with asyncio.timeout(timeout + 5.0):
+                    async for token in openai_complete_stream_if_cache(
+                        model_name,
+                        prompt,
+                        system_prompt=system_prompt,
+                        history_messages=cleaned_history,
+                        api_key=candidate_key,
+                        base_url=base_url,
+                        timeout=timeout,
+                        **kwargs,
+                    ):
+                        if token:
+                            response_chars += len(token)
+                            yield token
+
+                duration = time.monotonic() - started_at
+                record_llm_provider_result(candidate, "success", duration=duration)
+                main_logger.info(
+                    "LLM stream request done: "
+                    f"provider={provider_name}, key={candidate['key_index']}/{candidate['key_total']}, "
+                    f"duration={duration:.1f}s, response_chars={response_chars}, status=success"
+                )
+                return
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                duration = time.monotonic() - started_at
+                error_msg = (
+                    f"LLM stream cancelled/timed out after timeout={timeout:.1f}s, "
+                    f"provider={provider_name}, key={candidate['key_index']}/{candidate['key_total']}"
+                )
+                errors.append(error_msg)
+                action = record_llm_provider_result(candidate, "timeout", duration=duration, error_message=error_msg)
+                main_logger.warning(
+                    "LLM stream request failed: "
+                    f"provider={provider_name}, key={candidate['key_index']}/{candidate['key_total']}, "
+                    f"duration={duration:.1f}s, error_type=timeout, action={action}, fallback=next_provider"
+                )
+                if response_chars:
+                    raise
+            except Exception as e:
+                duration = time.monotonic() - started_at
+                error_msg = extract_detailed_exception_message(e)
+                errors.append(error_msg)
+                action = record_llm_provider_result(
+                    candidate,
+                    "fail",
+                    duration=duration,
+                    error_message=error_msg,
+                    cooldown_seconds=_coerce_positive_int(settings.get("llmKeyCooldownSeconds", 60), 60),
+                )
+                main_logger.error(
+                    "LLM stream request failed: "
+                    f"provider={provider_name}, key={candidate['key_index']}/{candidate['key_total']}, "
+                    f"duration={duration:.1f}s, error_type={action}, action={action}, "
+                    f"fallback=next_provider, error={error_msg}"
+                )
+                if response_chars or attempt_pos >= max_attempts:
+                    raise
+            finally:
+                if release_slot:
+                    release_slot()
+
+        if errors and all("timed out" in err.lower() or "timeout" in err.lower() for err in errors):
+            raise RuntimeError("LLM stream total timeout exceeded: " + " || ".join(errors))
+        raise RuntimeError("All LLM stream provider/key candidates failed: " + " || ".join(errors))
+
+    except Exception as e:
+        log_detailed_exception(
+            main_logger,
+            "LLM stream call failed",
+            e,
+            {
+                "provider": provider_name,
+                "model": model_name,
+                "base_url": base_url,
+                "prompt_chars": len(prompt) if prompt is not None else 0,
+                "system_prompt_chars": len(system_prompt) if system_prompt else 0,
+                "history_count": len(cleaned_history) if "cleaned_history" in locals() else len(history_messages),
+                "timeout": timeout,
+            },
+        )
+        raise
+
 async def preflight_hyperrag_api_services() -> None:
     """Preflight embedding plus the multi-provider LLM pool."""
     if not HYPERRAG_AVAILABLE:
@@ -2483,6 +2622,7 @@ def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_o
         hyperrag_kwargs = {
             "working_dir": db_working_dir,
             "llm_model_func": get_hyperrag_llm_func,
+            "llm_model_stream_func": get_hyperrag_llm_stream_func,
             "llm_model_max_async": int(settings.get("llmGlobalMaxAsync", settings.get("llmModelMaxAsync", 4))),
             "embedding_func": EmbeddingFunc(
                 embedding_dim=embedding_dim,  # text-embedding-3-small 的维度
@@ -2617,6 +2757,58 @@ class QueryModel(BaseModel):
     response_type: str = "Multiple Paragraphs"
     database: str = None  # 添加数据库参数
 
+def normalize_query_result(result: Any) -> dict:
+    """Normalize RAG query output so endpoints never call .get on None."""
+    if result is None:
+        return {"response": "", "entities": [], "themes": [], "hyperedges": [], "text_units": []}
+    if isinstance(result, str):
+        return {"response": result, "entities": [], "themes": [], "hyperedges": [], "text_units": []}
+    if isinstance(result, dict):
+        return {
+            "response": result.get("response", ""),
+            "entities": result.get("entities", []),
+            "themes": result.get("themes", []),
+            "hyperedges": result.get("hyperedges", []),
+            "text_units": result.get("text_units", []),
+        }
+    return {"response": safe_str(result), "entities": [], "themes": [], "hyperedges": [], "text_units": []}
+
+
+def resolve_public_demo_database() -> tuple[str | None, dict | None]:
+    """Resolve the read-only public demo database."""
+    configured = file_manager.sanitize_database_name(os.getenv("HYPERCHE_PUBLIC_DEMO_DATABASE", "public_example"))
+    metadata = getattr(kb_manager, "_load_metadata", lambda: {})()
+
+    configured_dir = os.path.join(hyperrag_working_dir, configured)
+    if os.path.isdir(configured_dir):
+        return configured, metadata.get(configured)
+    if configured in metadata:
+        return metadata[configured].get("database_name", configured), metadata[configured]
+
+    for kb in metadata.values():
+        if kb.get("name") == "example" or kb.get("database_name") == "example":
+            return kb.get("database_name"), kb
+    return None, None
+
+
+def build_rag_query_response(query: QueryModel, result: Any, database: str, rag_system: str = "hyperrag") -> dict:
+    normalized = normalize_query_result(result)
+    payload = {
+        "success": True,
+        "response": normalized["response"],
+        "entities": normalized["entities"],
+        "hyperedges": normalized["hyperedges"],
+        "text_units": normalized["text_units"],
+        "mode": query.mode,
+        "rag_system": rag_system,
+        "question": query.question,
+        "database": database or "default",
+    }
+    if normalized["themes"]:
+        payload["themes"] = normalized["themes"]
+    return payload
+
+
 @app.post("/hyperrag/insert")
 async def insert_document(doc: DocumentModel, user: dict = Depends(require_current_user)):
     """
@@ -2736,6 +2928,109 @@ async def query_hyperrag(query: QueryModel, user: dict = Depends(require_current
         
     except Exception as e:
         return {"success": False, "message": f"Query failed: {safe_str(e)}"}
+
+@app.post("/public/demo/query")
+async def public_demo_query(query: QueryModel):
+    """Read-only public demo query endpoint backed by the example chemical KB."""
+    try:
+        if query.mode not in ["hyper", "graph", "naive"]:
+            query.mode = "hyper"
+        if not HYPERRAG_AVAILABLE:
+            return {"success": False, "message": "HyperRAG is not available"}
+
+        database, kb = resolve_public_demo_database()
+        if not database:
+            return {
+                "success": False,
+                "message": "Public demo database is not configured. Set HYPERCHE_PUBLIC_DEMO_DATABASE or create an example KB.",
+            }
+
+        rag = get_or_create_hyperrag(database)
+        if kb and kb.get("domain"):
+            rag.domain = kb.get("domain")
+
+        param = QueryParam(
+            mode=query.mode,
+            top_k=query.top_k,
+            max_token_for_text_unit=query.max_token_for_text_unit,
+            max_token_for_entity_context=query.max_token_for_entity_context,
+            max_token_for_relation_context=query.max_token_for_relation_context,
+            only_need_context=query.only_need_context,
+            response_type=query.response_type,
+            return_type='json'
+        )
+        result = await rag.aquery(query.question, param)
+        payload = build_rag_query_response(query, result, database, "hyperrag")
+        payload["demo"] = True
+        payload["kb_name"] = kb.get("name") if kb else "example"
+        payload["domain"] = getattr(rag, "domain", None)
+        return payload
+
+    except Exception as e:
+        main_logger.error(f"Public demo query failed: {safe_str(e)}")
+        return {"success": False, "message": f"Public demo query failed: {safe_str(e)}"}
+
+@app.post("/public/demo/query/stream")
+async def public_demo_query_stream(query: QueryModel):
+    """Read-only public demo query endpoint with SSE streaming for Hyper-RAG answers."""
+    async def event_stream():
+        try:
+            if query.mode not in ["hyper", "naive", "llm"]:
+                yield f"event: error\ndata: {json.dumps({'message': 'Streaming currently supports hyper, naive, and llm modes only.'}, ensure_ascii=False)}\n\n"
+                return
+            if not HYPERRAG_AVAILABLE:
+                yield f"event: error\ndata: {json.dumps({'message': 'HyperRAG is not available'}, ensure_ascii=False)}\n\n"
+                return
+
+            database, kb = resolve_public_demo_database()
+            if not database:
+                yield f"event: error\ndata: {json.dumps({'message': 'Public demo database is not configured.'}, ensure_ascii=False)}\n\n"
+                return
+
+            rag = get_or_create_hyperrag(database)
+            if kb and kb.get("domain"):
+                rag.domain = kb.get("domain")
+
+            meta = {
+                "success": True,
+                "demo": True,
+                "database": database,
+                "kb_name": kb.get("name") if kb else "example",
+                "domain": getattr(rag, "domain", None),
+                "mode": query.mode,
+            }
+            yield f"event: meta\ndata: {json.dumps(meta, ensure_ascii=False)}\n\n"
+
+            param = QueryParam(
+                mode=query.mode,
+                top_k=query.top_k,
+                max_token_for_text_unit=query.max_token_for_text_unit,
+                max_token_for_entity_context=query.max_token_for_entity_context,
+                max_token_for_relation_context=query.max_token_for_relation_context,
+                only_need_context=False,
+                response_type=query.response_type,
+                return_type='text'
+            )
+            async for token in rag.astream_query(query.question, param):
+                yield f"event: token\ndata: {json.dumps({'text': token}, ensure_ascii=False)}\n\n"
+
+            yield f"event: done\ndata: {json.dumps({'success': True}, ensure_ascii=False)}\n\n"
+        except asyncio.CancelledError:
+            main_logger.info("Public demo stream cancelled by client")
+            raise
+        except Exception as e:
+            main_logger.error(f"Public demo stream failed: {safe_str(e)}")
+            yield f"event: error\ndata: {json.dumps({'message': f'Public demo stream failed: {safe_str(e)}'}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
 
 @app.get("/hyperrag/status")
 async def get_hyperrag_status(database: str = None):

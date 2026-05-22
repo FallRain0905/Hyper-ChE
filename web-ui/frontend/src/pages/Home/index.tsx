@@ -40,7 +40,6 @@ import { SERVER_URL } from '../../utils'
 import DatabaseSelector from '../../components/DatabaseSelector'
 import RetrievalInfo from '../../components/RetrievalInfo'
 import RetrievalHyperGraph from '../../components/RetrievalHyperGraph'
-import { conversations as defaultConversations } from './data'
 
 const LazyRetrievalGraph = ({
     entities = [],
@@ -118,8 +117,8 @@ const HyperRAGHome = () => {
     // Storage keys
     const storageScope = authStore.user?.id || authStore.user?.email || 'anonymous'
     const STORAGE_KEYS = {
-        CONVERSATIONS: `hyperrag_conversations_v2_${storageScope}`,
-        ACTIVE_ID: `hyperrag_active_conversation_v2_${storageScope}`
+        CONVERSATIONS: `hyperrag_conversations_v3_${storageScope}`,
+        ACTIVE_ID: `hyperrag_active_conversation_v3_${storageScope}`
     }
 
     // 定义所有可用的模式配置
@@ -203,11 +202,22 @@ return 'You'
 
     const loadFromStorage = () => {
         try {
-            const savedConversations = localStorage.getItem(STORAGE_KEYS.CONVERSATIONS) || JSON.stringify(defaultConversations)
+            const savedConversations = localStorage.getItem(STORAGE_KEYS.CONVERSATIONS)
             const savedActiveId = localStorage.getItem(STORAGE_KEYS.ACTIVE_ID)
 
             if (savedConversations) {
                 const parsed = JSON.parse(savedConversations)
+                if (!Array.isArray(parsed) || parsed.length === 0) {
+                    const defaultConv = {
+                        id: 'default',
+                        title: 'New Conversation',
+                        messages: [],
+                        createdAt: new Date()
+                    }
+                    setConversations([defaultConv])
+                    setActiveConversationId('default')
+                    return
+                }
                 setConversations(parsed)
 
                 if (savedActiveId && parsed.find((c) => c.id === savedActiveId)) {
@@ -228,6 +238,14 @@ return 'You'
             }
         } catch (error) {
             console.error('Failed to load from storage:', error)
+            const fallbackConv = {
+                id: 'default',
+                title: 'New Conversation',
+                messages: [],
+                createdAt: new Date()
+            }
+            setConversations([fallbackConv])
+            setActiveConversationId('default')
         }
     }
 
