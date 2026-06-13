@@ -1,0 +1,4 @@
+web-ui/backend/hyperrag_cache/case1/*.json filter=lfs diff=lfs merge=lfs -text
+web-ui/backend/hyperrag_cache/case1/*.hgdb filter=lfs diff=lfs merge=lfs -text
+web-ui/backend/hyperrag_cache/case2/*.json filter=lfs diff=lfs merge=lfs -text
+web-ui/backend/hyperrag_cache/case2/*.hgdb filter=lfs diff=lfs merge=lfs -text

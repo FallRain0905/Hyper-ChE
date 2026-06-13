@@ -1,424 +1,198 @@
-# Hyper-RAG
+# HyperChE
 
-<div align="center">
-  <h1>Hyper-RAG</h1>
-  <p><em>Combating LLM Hallucinations using Hypergraph-Driven Retrieval-Augmented Generation</em></p>
-</div>
+HyperChE is a domain-adaptive hypergraph RAG platform for chemical engineering literature. It is built on top of the original [Hyper-RAG](https://github.com/iMoonLab/Hyper-RAG) project and extends it toward chemical knowledge modeling, Web deployment, domain prompts, public demos, and multi-provider API management.
 
-![Performance](https://img.shields.io/github/languages/top/iMoonLab/Hyper-RAG?color=purple)
-![Size](https://img.shields.io/github/repo-size/iMoonLab/Hyper-RAG?color=purple)
-![License](https://img.shields.io/github/license/iMoonLab/Hyper-RAG?color=purple)
+The central idea is that chemical literature often contains facts that are not naturally pairwise: a conclusion may depend on a joint combination of system type, material, active species, condition, metric, and mechanistic evidence. HyperChE preserves these higher-order relations as hyperedges, so retrieval can return a more complete experimental context than plain vector RAG or pairwise graph RAG.
 
----
+## Relationship To The Original Hyper-RAG
 
-## 概述 / Overview
+This repository is a derivative research and application project based on the original Hyper-RAG framework.
 
-**Hyper-RAG** 是一个基于超图（Hypergraph）的检索增强生成（RAG）方法，旨在减少大语言模型（LLM）的幻觉问题。
+Original Hyper-RAG provides:
 
-Hyper-RAG 通过以下方式增强 RAG：
-- **超图建模**：能够建模超越成对关系的复杂实体关联
-- **原生超图数据库**：使用 [Hypergraph-DB](https://github.com/iMoonLab/Hypergraph-DB) 作为基础
-- **多层级关系**：同时捕获低阶和高阶关联
-- **性能优化**：在多个数据集上超越传统 RAG 方法
+- Hypergraph-driven retrieval augmented generation.
+- Low-order and high-order relation modeling.
+- Hypergraph storage, entity/relation vector indexes, and RAG query logic.
+- Baseline Hyper-RAG / Graph-RAG / naive RAG query modes.
 
-### 核心特性
+HyperChE adds:
 
-| 特性 | 说明 |
-|------|------|
-| :heavy_check_mark: **超图知识建模** | 使用超图全面建模领域特定知识中的关联，比传统图数据组织更复杂 |
-| :heavy_check_mark: **原生 Hypergraph-DB 集成** | 基于 Hypergraph-DB 构建，支持快速检索高阶关联 |
-| :heavy_check_mark: **卓越性能** | 在 NeurologyCorp 数据集上比直接 LLM 使用平均提升 12.3%，超越 Graph RAG 和 Light RAG |
-| :heavy_check_mark: **广泛验证** | 在九个多样化数据集上比 Light RAG 提升 35.5% |
-| :heavy_check_mark: **高效检索** | 轻量级变体 Hyper-RAG-Lite 检索速度提升 2 倍 |
+- Chemical-engineering-oriented domain adaptation.
+- JSON-based structured extraction for entities, low-order relations, and high-order hyperedges.
+- Domain prompt packs for flow batteries and PFAS piezocatalysis.
+- A React + FastAPI Web application branded as HyperChE.
+- Login/register, admin settings, user API key management, trial quotas, and public demo pages.
+- Multi-provider LLM and embedding API key pooling.
+- Public demo streaming responses through SSE.
+- Two curated case databases for paper experiments and platform demonstration.
 
----
+## Current Case Databases
 
-## 项目结构 / Project Structure
+Only two curated case databases are kept in this formal repository:
 
+| Case | Path | Domain | Description |
+| --- | --- | --- | --- |
+| Case 1 | `web-ui/backend/hyperrag_cache/case1` | `flow_battery_streamline` | Flow battery literature, including VRFB, ICRFB, membrane materials, electrode modification, additives, conditions, metrics, and degradation mechanisms. |
+| Case 2 | `web-ui/backend/hyperrag_cache/case2` | `pfas_piezocatalysis` | PFAS/PFOA/PFOS/GenX removal, enrichment, degradation, defluorination, mineralization, piezocatalysis, contact-electro-catalysis, and mechanism evidence. |
+
+The case databases contain large vector files. They are tracked with Git LFS. Before cloning or pushing this repository, install Git LFS:
+
+```bash
+git lfs install
 ```
+
+## Project Structure
+
+```text
 Hyper-RAG/
-├── hyperrag/              # 核心超图 RAG 库
-│   ├── domains/           # 领域配置（支持自定义领域）
-│   │   ├── default/       # 默认领域（分隔符格式）
-│   │   └── flow_battery/  # 液流电池领域（JSON格式）
-├── web-ui/                # Web 界面（React + FastAPI）
-└── reproduce/             # 论文复现代码
+├── hyperrag/                         # Core Hyper-RAG library and chemical domain prompts
+│   └── domains/
+│       ├── default/
+│       ├── flow_battery/
+│       ├── flow_battery_streamline/
+│       └── pfas_piezocatalysis/
+├── web-ui/
+│   ├── backend/                      # FastAPI backend
+│   │   └── hyperrag_cache/
+│   │       ├── case1/                # Curated flow-battery case database
+│   │       └── case2/                # Curated PFAS case database
+│   └── frontend/                     # React frontend
+├── deploy/
+│   └── nginx.hyperche.conf           # Container Nginx config
+├── docker-compose.hyperche.yml       # Production-style Docker Compose stack
+└── .env.hyperche.example             # Deployment environment example
 ```
 
----
+## Main Features
 
-## 用户界面 / User Interfaces
+- Literature upload and knowledge-base management.
+- Domain selection for chemical subfields.
+- LLM-based structured extraction of entities and hyperedges.
+- Hypergraph construction and visualization.
+- Hyper-RAG, Graph-RAG, and naive RAG query modes.
+- Collapsible retrieval graph in answers to avoid heavy rendering.
+- Public demo page with streaming Hyper-RAG answers.
+- Admin-managed global API providers and user-managed personal API keys.
+- PostgreSQL-backed login/register and quota management for public testing.
 
-本项目提供三种用户界面：
+## Domain Adaptation
 
-### 1. Web-UI (React + FastAPI)
+HyperChE currently includes two chemical domain prompt packs.
 
-功能完整的 Web 应用，支持超图可视化和文档处理。
+### Flow Battery
 
-**特性：**
-- 完整超图可视化（Full Graph）
-- 顶点详情查看（Vertex Details）
-- 文档上传和处理
-- 实时处理进度显示
-- 支持多种 LLM 提供商
+Representative entity types include:
 
-**启动方式：**
+- `ACTIVE_SPECIES`
+- `MEMBRANE`
+- `ELECTRODE`
+- `CONDITION`
+- `METRIC`
+- `DEGRADATION`
+- `SYSTEM`
+
+Representative relation / hyperedge types include:
+
+- `COMPOSITION`
+- `OPERATION`
+- `DEGRADATION`
+- `COMPARISON`
+
+### PFAS Piezocatalysis
+
+Representative entity types include:
+
+- `PFAS_TARGET`
+- `CATALYST_MATERIAL`
+- `MATERIAL_FEATURE`
+- `PIEZO_PROPERTY`
+- `PROCESS_STRATEGY`
+- `CONDITION`
+- `METRIC`
+- `ACTIVE_SPECIES`
+- `MECHANISM_EVIDENCE`
+- `WATER_MATRIX`
+
+Representative relation / hyperedge types include:
+
+- `MATERIAL_DESIGN`
+- `OPERATION_PERFORMANCE`
+- `MECHANISM_PATHWAY`
+- `ADSORPTION_ORIENTATION`
+- `CHARGE_TRANSFER`
+- `COUPLING_STRATEGY`
+- `MATRIX_APPLICATION`
+- `COMPARISON`
+
+## Local Development
+
+### Backend
 
 ```bash
-cd web-ui
-
-# 方式 1: 直接启动（开发环境）
-npm install                # 安装前端依赖
+cd web-ui/backend
+python -m venv .venv
+.venv/Scripts/activate  # Windows
 pip install -r requirements.txt
-python main.py             # 启动后端
-# 前端访问 http://localhost:3000
-# 后端访问 http://localhost:8000
-
-# 方式 2: Docker 部署
-docker-compose up
-# 访问 http://localhost:5000
+python main.py
 ```
 
-**详细文档：** [Web-UI README](web-ui/README.md)
-
----
-
-## 领域适配 / Domain Adaptation
-
-Hyper-RAG 支持领域定制，可为特定领域定义专用的实体类型、关系类型和提示词模板。
-
-### 领域配置结构
-
-```
-hyperrag/domains/
-├── default/                      # 默认领域
-│   ├── config.json               # 领域配置
-│   └── entity_extraction.txt     # 实体提取模板
-└── flow_battery/                 # 液流电池领域（示例）
-    ├── config.json               # 7种实体 + 4种关系
-    ├── entity_extraction.txt     # 实体提取模板
-    ├── low_order_extraction.txt  # 低阶关系提取模板
-    ├── high_order_extraction.txt # 高阶关系提取模板
-    └── query_keywords.txt        # 查询关键词模板
-```
-
-### 液流电池领域示例
-
-液流电池领域提取 **7 种实体类型**：
-
-| 实体类型 | 说明 |
-|---------|------|
-| ACTIVE_SPECIES | 氧化还原活性物质 |
-| MEMBRANE | 离子交换膜 |
-| ELECTRODE | 电极材料 |
-| CONDITION | 实验条件 |
-| METRIC | 性能指标 |
-| DEGRADATION | 退化机制 |
-| SYSTEM | 系统/装置 |
-
-提取 **4 种关系类型**：
-
-| 关系类型 | 说明 |
-|---------|------|
-| COMPOSITION | 组成/制备关系 |
-| OPERATION | 操作条件关系 |
-| DEGRADATION | 退化/失效关系 |
-| COMPARISON | 对比关系 |
-
-### 使用方法
-
-在 Web UI 的 **设置页面** 选择嵌入领域，或通过代码指定：
-
-```python
-from hyperrag import HyperRAG
-
-# 方式1: 通过配置
-rag = HyperRAG(
-    working_dir="./cache",
-    domain="flow_battery"  # 指定领域
-)
-
-# 方式2: 运行时设置
-from hyperrag.prompt import set_domain
-set_domain("flow_battery")
-```
-
-### 自定义新领域
-
-1. 在 `hyperrag/domains/` 下创建新目录
-2. 编写 `config.json` 定义本体（实体类型、关系类型）
-3. 编写提示词模板文件
-4. 后端自动识别新领域
-
----
-
-### 2. Gradio
-
-轻量级 Web 界面，使用 AntV G6 进行超图可视化，支持文档嵌入处理。
-
-**特性：**
-- 超图视图（G6 + BubbleSets）
-- 顶点详情视图
-- 文档模式 - 使用真实 HyperRAG LLM 进行实体提取
-- 支持文档分块、实体提取、超边构建
-
-**启动方式：**
+### Frontend
 
 ```bash
-cd gradio
-
-# 配置 LLM API（在 settings.json 中设置 API Key）
-# 或运行后按界面提示配置
-
-pip install -r requirements.txt
-python app.py
-# 访问 http://localhost:7860
+cd web-ui/frontend
+npm install
+npm run dev
 ```
 
-**配置文件示例 (settings.json)：**
+The frontend uses `VITE_SERVER_URL` to locate the backend. In local development, the default backend URL is usually `http://localhost:8000`.
 
-```json
-{
-  "apiKey": "your-api-key-here",
-  "modelProvider": "openai",
-  "modelName": "gpt-4o-mini",
-  "baseUrl": "https://api.openai.com/v1",
-  "embeddingModel": "text-embedding-3-small",
-  "embeddingDim": 1536,
-  "maxTokens": 2000,
-  "temperature": 0.7
-}
-```
+## Docker Deployment
 
----
-
-### 3. Streamlit
-
-基于 Streamlit 的界面，提供交互式超图查询和可视化。
-
-**启动方式：**
+Copy the environment example and edit secrets:
 
 ```bash
-cd streamlit
-
-pip install -r requirements.txt
-streamlit run app.py
+cp .env.hyperche.example .env
 ```
 
----
-
-## 安装 / Installation
-
-### 环境要求
-
-- Python 3.8+
-- Node.js 18+ (仅 Web-UI)
-- Docker & Docker Compose (可选，用于部署)
-
-### 标准安装
+Start the stack:
 
 ```bash
-# 克隆项目
-git clone https://github.com/iMoonLab/Hyper-RAG.git
-cd Hyper-RAG
-
-# 安装依赖
-pip install -r requirements.txt
+docker compose -f docker-compose.hyperche.yml --env-file .env up -d --build
 ```
 
-### Docker 安装
+The stack includes:
 
-```bash
-# 使用 Docker Compose 启动
-cd web-ui
-docker-compose up
+- PostgreSQL
+- Redis
+- FastAPI backend
+- React frontend
+- Nginx reverse proxy
 
-# 或手动构建并运行
-docker build -t hyper-rag .
-docker run -p 5000:5000 hyper-rag
+For public demo queries, set:
+
+```env
+HYPERCHE_PUBLIC_DEMO_DATABASE=case1
 ```
 
----
+or:
 
-## 快速开始 / Quick Start
-
-### 1. 配置 LLM API
-
-编辑或创建 `my_config.py` 文件：
-
-```python
-LLM_BASE_URL = "your-llm-url"      # 例如: https://api.openai.com/v1
-LLM_API_KEY = "your-api-key"
-LLM_MODEL = "gpt-4o-mini"         # 或其他支持的模型
-
-EMB_BASE_URL = "your-embedding-url"
-EMB_API_KEY = "your-api-key"
-EMB_MODEL = "text-embedding-3-small"
-EMB_DIM = 1536                     # 嵌入维度
+```env
+HYPERCHE_PUBLIC_DEMO_DATABASE=case2
 ```
 
-### 2. 运行 Demo
+## API Configuration
 
-```bash
-# 运行示例
-python examples/hyperrag_demo.py
+Global platform API providers are configured by the admin user in the Web settings page. Personal user API keys can also be added in the settings page and will take priority for that user's requests.
 
-# 或按步骤运行完整流程
-# 1. 预处理数据
-python reproduce/Step_0.py
+The backend supports OpenAI-compatible providers for both LLM and embedding calls. Multiple keys and multiple providers can be configured to improve throughput and failover.
 
-# 2. 构建超图
-python reproduce/Step_1.py
+## Notes For Repository Maintenance
 
-# 3. 提取问题
-python reproduce/Step_2_extract_question.py
+- Do not commit local upload folders, user databases, SQLite files, logs, or raw literature PDFs.
+- Only the curated `case1` and `case2` HyperRAG databases are allowed under `web-ui/backend/hyperrag_cache/`.
+- Large database files must remain under Git LFS.
+- Local conversation examples are intentionally cleared from `web-ui/frontend/src/pages/Home/data.js`.
 
-# 4. 回答问题
-python reproduce/Step_3_response_question.py
-```
+## License And Attribution
 
-### 3. 文档嵌入流程
-
-文档嵌入采用 **三步流水线**（领域适配时）：
-
-```
-文档 → 分块 → 并行处理每个块:
-  Step 1: 实体提取 (LLM) → JSON 解析
-  Step 2: 低阶关系提取 (LLM) → 二元关系
-  Step 3: 高阶关系提取 (LLM) → 超边
-       ↓
-实体合并 + 摘要 → 关系合并 + 摘要 → 写入超图
-```
-
-**数据库机制**：
-- 每个文档创建独立数据库（基于文件名）
-- 数据库支持增量写入，同名实体会合并
-- 存储位置：`web-ui/backend/hyperrag_cache/<数据库名>/`
-
-### 4. 查询模式
-
-支持多种查询模式：
-
-```python
-from hyperrag import HyperRAG, QueryParam
-
-# 初始化 HyperRAG
-rag = HyperRAG(
-    working_dir="./cache",
-    llm_model_func=your_llm_func,
-    embedding_func=your_embedding_func
-)
-
-# 插入文档
-rag.ainsert("你的文档内容...")
-
-# 查询
-param = QueryParam(
-    mode="hyper",              # hyper, hyper-lite, naive, graph, llm
-    top_k=60,
-    max_token_for_text_unit=1600,
-    max_token_for_entity_context=300,
-    max_token_for_relation_context=1600,
-    response_type="Multiple Paragraphs"
-)
-
-result = rag.aquery("你的问题...", param)
-```
-
-**查询模式说明：**
-
-| 模式 | 说明 |
-|------|------|
-| `hyper` | 完整超图模式，使用实体和超边检索 |
-| `hyper-lite` | 轻量级模式，仅使用实体检索 |
-| `naive` | 朴素 RAG，直接检索文本块 |
-| `graph` | 图模式，二元关系检索 |
-| `llm` | 纯 LLM，不检索 |
-
----
-
-## 评估 / Evaluation
-
-本项目提供两种评估方法：
-
-### Scoring-based 评估
-
-基于评分的评估方法，允许对多个模型输出进行量化比较。
-
-```bash
-python evaluate/evaluate_by_scoring.py
-```
-
-### Selection-based 评估
-
-基于选择的评估方法，适用于预选候选模型的场景。
-
-```bash
-python evaluate/evaluate_by_selection.py
-```
-
----
-
-## 性能基准 / Benchmarks
-
-| 数据集 | Hyper-RAG | Graph RAG | Light RAG | Direct LLM |
-|----------|------------|------------|------------|-------------|
-| NeurologyCorp | +12.3% | - | - | - |
-
-**详细评估结果请参考论文：** [arXiv:2504.08758](https://arxiv.org/abs/2504.08758)
-
----
-
-## 贡献 / Contributing
-
-欢迎贡献！如果你想贡献代码，请遵循以下步骤：
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
----
-
-## 许可证 / License
-
-本项目采用 Apache 2.0 许可证 - 详见 [LICENSE](LICENSE) 文件。
-
----
-
-## 致谢 / Acknowledgments
-
-- 感谢 [LightRAG](https://github.com/HKUDS/LightRAG) 和 [Hypergraph-DB](https://github.com/iMoonLab/Hypergraph-DB) 项目，为 Hyper-RAG 的实现提供了基础
-
----
-
-## 引用 / Citation
-
-如果您在研究中使用了 Hyper-RAG，请使用以下格式引用：
-
-```bibtex
-@misc{feng2025hyperrag,
-  title={Hyper-RAG: Combating LLM Hallucinations using Hypergraph-Driven Retrieval-Augmented Generation},
-  author={Yifan Feng and Hao Hu and Xingliang Hou and Shiquan Liu and Shihui Ying and Shaoyi Du and Han Hu and Yue Gao},
-  year={2025},
-  eprint={2504.08758},
-  archivePrefix={arXiv},
-  primaryClass={cs.IR},
-  url={https://arxiv.org/abs/2504.08758}
-}
-```
-
----
-
-## 联系方式 / Contact
-
-- **团队**: iMoon Lab, Tsinghua University
-- **Email**: [evanfeng97@gmail.com](mailto:evanfeng97@gmail.com)
-- **GitHub**: [iMoonLab/Hyper-RAG](https://github.com/iMoonLab/Hyper-RAG)
-
----
-
-<div align="center">
-  <sub>如有问题，欢迎提交 Issue 或联系作者</sub>
-</div>
+This project is based on the original Hyper-RAG project by iMoonLab. Please cite and acknowledge the original Hyper-RAG work when using HyperChE in academic or derivative projects.

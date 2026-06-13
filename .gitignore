@@ -178,8 +178,32 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# web-ui
-web-ui/backend/settings.json    
-web-ui/backend/hyperrag_cache/
+# web-ui runtime files
+web-ui/backend/settings.json
 web-ui/backend/uploads/
 web-ui/backend/files.db
+web-ui/backend/*.db
+web-ui/backend/knowledge_bases/
+
+# Keep only the two curated case databases for the formal repository.
+web-ui/backend/hyperrag_cache/*
+!web-ui/backend/hyperrag_cache/case1/
+!web-ui/backend/hyperrag_cache/case1/**
+!web-ui/backend/hyperrag_cache/case2/
+!web-ui/backend/hyperrag_cache/case2/**
+web-ui/backend/hyperrag_cache/**/*.log
+web-ui/backend/hyperrag_cache/**/*.bak
+web-ui/backend/hyperrag_cache/**/*.tmp
+
+# Local research materials and generated corpora
+/corpus/
+/external/
+/kb/
+/original/
+/scripts/
+/thesis-materials/
+/hyperrag_cache/
+/cograg_cache/
+/uploads/
+/files/
+/knowledge_bases/
