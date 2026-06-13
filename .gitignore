@@ -207,3 +207,5 @@ web-ui/backend/hyperrag_cache/**/*.tmp
 /uploads/
 /files/
 /knowledge_bases/
+
+.claude/
