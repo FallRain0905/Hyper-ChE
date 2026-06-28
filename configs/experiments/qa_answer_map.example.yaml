@@ -1,0 +1,6 @@
+answers:
+  graph_final: outputs/answers/graph_final.json
+  hyper_base: outputs/answers/hyper_base.json
+  hyper_chem_prompt: outputs/answers/hyper_chem_prompt.json
+  hyper_norm: outputs/answers/hyper_norm.json
+  hyper_final: outputs/answers/hyper_final.json

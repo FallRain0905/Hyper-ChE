@@ -1,0 +1,22 @@
+{DOMAIN_CONTEXT}
+
+Extract high-order hyperedges involving 3 or more entities when the text states one shared fact. Use exact K_v names only.
+
+Entities (K_v):
+{K_v_JSON}
+
+Text:
+{CHUNK_TEXT}
+
+Output strict JSON array only:
+[
+  {{
+    "vertices": ["<entity name from K_v>", "<entity name from K_v>", "..."],
+    "relation_type": "ASSOCIATED_WITH | PART_OF | CAUSES_OR_AFFECTS | COMPARES_WITH",
+    "description": "<detailed description covering all vertices>",
+    "generalization": "<one-sentence summary>",
+    "keywords": "<overarching concepts>",
+    "strength": <0-10 integer>,
+    "evidence_span": "<short quote from text, <=120 chars>"
+  }}
+]

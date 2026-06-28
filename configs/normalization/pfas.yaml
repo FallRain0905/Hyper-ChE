@@ -1,0 +1,83 @@
+canonical_entities:
+  - canonical_id: pfas:pfoa
+    canonical_name: PFOA
+    type: PFAS_TARGET
+    aliases: ["perfluorooctanoic acid", "perfluorooctanoate", "C7F15COOH"]
+    properties:
+      chain_class: long_chain
+
+  - canonical_id: pfas:pfos
+    canonical_name: PFOS
+    type: PFAS_TARGET
+    aliases: ["perfluorooctane sulfonate", "perfluorooctanesulfonate", "perfluorooctanesulfonic acid"]
+    properties:
+      chain_class: long_chain
+
+  - canonical_id: pfas:pfba
+    canonical_name: PFBA
+    type: PFAS_TARGET
+    aliases: ["perfluorobutanoic acid", "perfluorobutanoate"]
+    properties:
+      chain_class: short_chain
+
+  - canonical_id: pfas:pfbs
+    canonical_name: PFBS
+    type: PFAS_TARGET
+    aliases: ["perfluorobutane sulfonate", "perfluorobutanesulfonate", "perfluorobutanesulfonic acid"]
+    properties:
+      chain_class: short_chain
+
+  - canonical_id: pfas:genx
+    canonical_name: GenX
+    type: PFAS_TARGET
+    aliases: ["HFPO-DA", "hexafluoropropylene oxide dimer acid", "GenX chemicals"]
+
+  - canonical_id: pfas:ptfe
+    canonical_name: PTFE
+    type: PFAS_TARGET
+    aliases: ["polytetrafluoroethylene", "Teflon"]
+
+  - canonical_id: catalyst:batio3
+    canonical_name: BaTiO3
+    type: CATALYST_MATERIAL
+    aliases: ["BaTiO₃", "BTO", "barium titanate"]
+
+  - canonical_id: catalyst:bifeo3
+    canonical_name: BiFeO3
+    type: CATALYST_MATERIAL
+    aliases: ["BiFeO₃", "BFO", "bismuth ferrite"]
+
+  - canonical_id: catalyst:bdd
+    canonical_name: BDD
+    type: CATALYST_MATERIAL
+    aliases: ["boron-doped diamond", "boron doped diamond electrode"]
+
+  - canonical_id: material_feature:oxygen_vacancy
+    canonical_name: oxygen vacancy
+    type: MATERIAL_FEATURE
+    aliases: ["oxygen vacancies", "OV", "OVs", "Vo"]
+
+  - canonical_id: material_feature:heterojunction
+    canonical_name: heterojunction
+    type: MATERIAL_FEATURE
+    aliases: ["heterostructure", "heterointerface"]
+
+  - canonical_id: piezo_property:d33
+    canonical_name: d33
+    type: PIEZO_PROPERTY
+    aliases: ["piezoelectric coefficient d33", "d₃₃"]
+
+  - canonical_id: process:piezocatalysis
+    canonical_name: piezocatalysis
+    type: PROCESS_STRATEGY
+    aliases: ["piezo-catalysis", "piezocatalytic degradation", "piezoelectric catalysis"]
+
+  - canonical_id: process:contact_electro_catalysis
+    canonical_name: contact-electro-catalysis
+    type: PROCESS_STRATEGY
+    aliases: ["CEC", "contact electro catalysis", "contact-electrocatalysis"]
+
+  - canonical_id: water_matrix:afff
+    canonical_name: AFFF
+    type: WATER_MATRIX
+    aliases: ["aqueous film-forming foam", "AFFF-impacted water", "AFFF impacted groundwater"]

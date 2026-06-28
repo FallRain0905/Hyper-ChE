@@ -202,7 +202,6 @@ web-ui/backend/hyperrag_cache/**/*.tmp
 /external/
 /kb/
 /original/
-/scripts/
 /thesis-materials/
 /hyperrag_cache/
 /cograg_cache/

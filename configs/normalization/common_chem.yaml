@@ -1,0 +1,41 @@
+canonical_entities:
+  - canonical_id: active_species:hydroxyl_radical
+    canonical_name: ·OH
+    type: ACTIVE_SPECIES
+    aliases: ["•OH", ".OH", "OH radical", "hydroxyl radical", "hydroxyl radicals"]
+    properties:
+      species_class: radical
+
+  - canonical_id: active_species:sulfate_radical
+    canonical_name: SO4·-
+    type: ACTIVE_SPECIES
+    aliases: ["SO4•−", "SO4•-", "SO4 radical", "sulfate radical", "SO4^- radical"]
+    properties:
+      species_class: radical
+
+  - canonical_id: active_species:superoxide_radical
+    canonical_name: O2·-
+    type: ACTIVE_SPECIES
+    aliases: ["O2•−", "O2•-", "superoxide radical", "superoxide"]
+    properties:
+      species_class: radical
+
+  - canonical_id: active_species:hydrogen_peroxide
+    canonical_name: H2O2
+    type: ACTIVE_SPECIES
+    aliases: ["H₂O₂", "hydrogen peroxide"]
+
+  - canonical_id: evidence:epr
+    canonical_name: EPR
+    type: MECHANISM_EVIDENCE
+    aliases: ["electron paramagnetic resonance", "ESR", "electron spin resonance"]
+
+  - canonical_id: evidence:dft
+    canonical_name: DFT
+    type: MECHANISM_EVIDENCE
+    aliases: ["density functional theory", "DFT calculation", "DFT calculations"]
+
+  - canonical_id: evidence:lc_ms
+    canonical_name: LC-MS
+    type: MECHANISM_EVIDENCE
+    aliases: ["LCMS", "LC-MS/MS", "liquid chromatography-mass spectrometry"]

@@ -106,6 +106,15 @@ class HyperRAG:
     convert_response_to_json_func: callable = convert_response_to_json
     domain: str = "default"
 
+    # experiment controls
+    prompt_profile: str = "chemistry"
+    enable_entity_normalization: bool = True
+    enable_measurement_instances: bool = True
+    enable_efu_repair: bool = True
+    enable_hybrid_rerank: bool = True
+    experiment_mode: str = "hyper_final"
+    query_mode: str = "hyper"
+
     def __post_init__(self):
         log_file = os.path.join(self.working_dir, "HyperRAG.log")
         set_logger(log_file)
@@ -119,6 +128,27 @@ class HyperRAG:
         if not os.path.exists(self.working_dir):
             logger.info(f"Creating working directory {self.working_dir}")
             os.makedirs(self.working_dir)
+
+        try:
+            from .experiment import write_run_config
+
+            write_run_config(
+                self.working_dir,
+                {
+                    "experiment_mode": self.experiment_mode,
+                    "query_mode": self.query_mode,
+                    "prompt_profile": self.prompt_profile,
+                    "domain": self.domain,
+                    "effective_domain": self.domain,
+                    "enable_entity_normalization": self.enable_entity_normalization,
+                    "enable_measurement_instances": self.enable_measurement_instances,
+                    "enable_efu_repair": self.enable_efu_repair,
+                    "enable_hybrid_rerank": self.enable_hybrid_rerank,
+                    "corpus_id": os.path.basename(os.path.normpath(self.working_dir)),
+                },
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to write run_config.json: {exc}")
 
         self.full_docs = self.key_string_value_json_storage_cls(
             namespace="full_docs", global_config=asdict(self)
@@ -173,7 +203,7 @@ class HyperRAG:
         )
 
         if getattr(self, "llm_model_stream_func", None) is not None:
-            # 先把 hashing_kv 注入到 stream func（供 openai_complete_stream_if_cache 使用）
+            # 鍏堟妸 hashing_kv 娉ㄥ叆鍒?stream func锛堜緵 openai_complete_stream_if_cache 浣跨敤锛?
             self.llm_model_stream_func = limit_async_gen_call(self.llm_model_max_async)(
                 partial(
                     self.llm_model_stream_func,
@@ -205,18 +235,28 @@ class HyperRAG:
 
             inserting_chunks = {}
             for doc_key, doc in new_docs.items():
-                chunks = {
-                    compute_mdhash_id(dp["content"], prefix="chunk-hyperrag-"): {
+                chunks = {}
+                for dp in chunking_by_token_size(
+                    doc["content"],
+                    overlap_token_size=self.chunk_overlap_token_size,
+                    max_token_size=self.chunk_token_size,
+                    tiktoken_model=self.tiktoken_model_name,
+                ):
+                    source_chunk_id = dp.get("source_chunk_id")
+                    if source_chunk_id:
+                        safe_chunk_id = "".join(
+                            ch if ch.isalnum() or ch in {"-", "_", "."} else "_"
+                            for ch in str(source_chunk_id)
+                        ).strip("._-")
+                        chunk_key = f"chunk-hyperrag-{safe_chunk_id}"
+                        if chunk_key in inserting_chunks or chunk_key in chunks:
+                            chunk_key = f"{chunk_key}-{compute_mdhash_id(dp['content'])[-8:]}"
+                    else:
+                        chunk_key = compute_mdhash_id(dp["content"], prefix="chunk-hyperrag-")
+                    chunks[chunk_key] = {
                         **dp,
                         "full_doc_id": doc_key,
                     }
-                    for dp in chunking_by_token_size(
-                        doc["content"],
-                        overlap_token_size=self.chunk_overlap_token_size,
-                        max_token_size=self.chunk_token_size,
-                        tiktoken_model=self.tiktoken_model_name,
-                    )
-                }
                 inserting_chunks.update(chunks)
             _add_chunk_keys = await self.text_chunks.filter_keys(
                 list(inserting_chunks.keys())
@@ -322,13 +362,13 @@ class HyperRAG:
 
     async def astream_query(self, query: str, param: QueryParam = QueryParam()):
         """
-        流式查询：返回 async generator（逐 token / 逐块）
-        依赖 self.llm_model_stream_func，不提供则抛错。
+        娴佸紡鏌ヨ锛氳繑鍥?async generator锛堥€?token / 閫愬潡锛?
+        渚濊禆 self.llm_model_stream_func锛屼笉鎻愪緵鍒欐姏閿欍€?
         """
         if self.llm_model_stream_func is None:
             raise AttributeError("llm_model_stream_func is not set, streaming is unavailable.")
 
-        # 把 stream func 放进 global_config
+        # 鎶?stream func 鏀捐繘 global_config
         cfg = asdict(self)
         cfg["llm_model_stream_func"] = self.llm_model_stream_func
 
@@ -382,3 +422,5 @@ class HyperRAG:
                 continue
             tasks.append(cast(StorageNameSpace, storage_inst).query_done_callback())
         await asyncio.gather(*tasks)
+
+

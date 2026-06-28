@@ -1,0 +1,117 @@
+canonical_entities:
+  - canonical_id: system:vrfb
+    canonical_name: vanadium redox flow battery
+    type: SYSTEM
+    aliases: ["VRFB", "VRB", "all-vanadium redox flow battery", "all vanadium flow battery", "vanadium flow battery"]
+
+  - canonical_id: system:icrfb
+    canonical_name: iron-chromium redox flow battery
+    type: SYSTEM
+    aliases: ["ICRFB", "Fe-Cr redox flow battery", "Fe/Cr flow battery", "iron chromium flow battery"]
+
+  - canonical_id: system:slfb
+    canonical_name: soluble lead flow battery
+    type: SYSTEM
+    aliases: ["SLFB", "soluble lead-acid flow battery", "soluble lead flow cell"]
+
+  - canonical_id: active_species:vo_2_plus
+    canonical_name: VO^2+ (V(IV))
+    type: ACTIVE_SPECIES
+    aliases: ["VO²⁺", "VO^2+", "vanadyl ion", "V(IV)", "VO(II)"]
+    properties:
+      oxidation_state: V(IV)
+
+  - canonical_id: active_species:vo2_2_plus
+    canonical_name: VO2+ (V(V))
+    type: ACTIVE_SPECIES
+    aliases: ["V(V)", "VO2(V)"]
+    properties:
+      oxidation_state: V(V)
+      note: "Kept as a separate canonical id from V(IV); display name may need domain-specific disambiguation."
+
+  - canonical_id: active_species:v2_plus
+    canonical_name: V2+
+    type: ACTIVE_SPECIES
+    aliases: ["V²⁺", "V(II)"]
+    properties:
+      oxidation_state: V(II)
+
+  - canonical_id: active_species:v3_plus
+    canonical_name: V3+
+    type: ACTIVE_SPECIES
+    aliases: ["V³⁺", "V(III)"]
+    properties:
+      oxidation_state: V(III)
+
+  - canonical_id: active_species:fe2_fe3
+    canonical_name: Fe2+/Fe3+
+    type: ACTIVE_SPECIES
+    aliases: ["Fe²⁺/Fe³⁺", "Fe2+/Fe3+", "Fe(II)/Fe(III)", "Fe3+/Fe2+"]
+
+  - canonical_id: active_species:cr2_cr3
+    canonical_name: Cr2+/Cr3+
+    type: ACTIVE_SPECIES
+    aliases: ["Cr²⁺/Cr³⁺", "Cr2+/Cr3+", "Cr(II)/Cr(III)", "Cr3+/Cr2+"]
+
+  - canonical_id: active_species:h2so4
+    canonical_name: H2SO4
+    type: ACTIVE_SPECIES
+    aliases: ["H₂SO₄", "sulfuric acid", "sulphuric acid"]
+
+  - canonical_id: active_species:hcl
+    canonical_name: HCl
+    type: ACTIVE_SPECIES
+    aliases: ["hydrochloric acid"]
+
+  - canonical_id: membrane:nafion
+    canonical_name: Nafion
+    type: MEMBRANE
+    aliases: ["Nafion membrane", "Nafion series membrane"]
+
+  - canonical_id: membrane:nafion_117
+    canonical_name: Nafion 117
+    type: MEMBRANE
+    parent_id: membrane:nafion
+    aliases: ["N117", "Nafion117", "Nafion-117"]
+
+  - canonical_id: membrane:nafion_115
+    canonical_name: Nafion 115
+    type: MEMBRANE
+    parent_id: membrane:nafion
+    aliases: ["N115", "Nafion115", "Nafion-115"]
+
+  - canonical_id: membrane:nafion_212
+    canonical_name: Nafion 212
+    type: MEMBRANE
+    parent_id: membrane:nafion
+    aliases: ["N212", "Nafion212", "Nafion-212"]
+
+  - canonical_id: electrode:graphite_felt
+    canonical_name: graphite felt
+    type: ELECTRODE
+    aliases: ["GF", "graphite felt electrode"]
+
+  - canonical_id: electrode:carbon_felt
+    canonical_name: carbon felt
+    type: ELECTRODE
+    aliases: ["CF", "carbon felt electrode"]
+
+  - canonical_id: degradation:her
+    canonical_name: hydrogen evolution reaction
+    type: DEGRADATION
+    aliases: ["HER", "hydrogen evolution", "H2 evolution"]
+
+  - canonical_id: metric:ce
+    canonical_name: coulombic efficiency
+    type: METRIC
+    aliases: ["CE", "coulombic efficiency (%)"]
+
+  - canonical_id: metric:ve
+    canonical_name: voltage efficiency
+    type: METRIC
+    aliases: ["VE", "voltaic efficiency", "voltage efficiency (%)"]
+
+  - canonical_id: metric:ee
+    canonical_name: energy efficiency
+    type: METRIC
+    aliases: ["EE", "energy efficiency (%)"]

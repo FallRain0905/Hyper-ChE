@@ -16,3 +16,4 @@ python-docx
 SQLAlchemy
 psycopg[binary]
 cryptography
+rapidfuzz

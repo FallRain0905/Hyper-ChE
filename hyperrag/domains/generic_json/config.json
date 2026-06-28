@@ -1,0 +1,53 @@
+{
+  "domain_name": "generic_json",
+  "domain_description": "Generic JSON extraction profile for baseline Hyper-RAG experiments.",
+  "domain_context": "You are a careful information extraction system. Extract entities, pairwise relations, and high-order hyperedges from the given text using the JSON schema exactly. Do not apply any chemistry-specific ontology or canonicalization rules.",
+  "entity_types": [
+    {"name": "ENTITY", "description": "Named object, material, concept, actor, method, condition, metric, event, or mechanism mentioned in the text."},
+    {"name": "CONCEPT", "description": "Abstract concept, process, mechanism, property, or theme."},
+    {"name": "CONDITION", "description": "A condition or parameter with optional numeric value and unit."},
+    {"name": "METRIC", "description": "A metric, result, score, measurement, or performance indicator."}
+  ],
+  "relation_types": [
+    {"name": "ASSOCIATED_WITH", "description": "Two entities are directly related in the same local fact."},
+    {"name": "PART_OF", "description": "An entity is a component, member, or part of another entity."},
+    {"name": "CAUSES_OR_AFFECTS", "description": "An entity causes, affects, explains, enables, or inhibits another entity."},
+    {"name": "COMPARES_WITH", "description": "Entities are compared under a shared property, condition, or metric."}
+  ],
+  "output_format": "json",
+  "language": "English",
+  "critical_rules": [
+    "Preserve original entity names from the text.",
+    "Do not canonicalize or merge aliases.",
+    "Split numeric values into value/unit or value_min/value_max/unit when explicit.",
+    "Use only entity names from K_v when writing relations or hyperedges."
+  ],
+  "entity_fields": [
+    {"name": "name", "type": "string", "required": true},
+    {"name": "type", "type": "enum", "required": true, "values": ["ENTITY", "CONCEPT", "CONDITION", "METRIC"]},
+    {"name": "subtype", "type": "string", "required": false},
+    {"name": "value", "type": "number", "required": false},
+    {"name": "value_min", "type": "number", "required": false},
+    {"name": "value_max", "type": "number", "required": false},
+    {"name": "unit", "type": "string", "required": false},
+    {"name": "description", "type": "string", "required": true},
+    {"name": "key_attribute", "type": "string", "required": false}
+  ],
+  "relation_fields": [
+    {"name": "source", "type": "string", "required": true},
+    {"name": "target", "type": "string", "required": true},
+    {"name": "relation_type", "type": "enum", "required": true, "values": ["ASSOCIATED_WITH", "PART_OF", "CAUSES_OR_AFFECTS", "COMPARES_WITH"]},
+    {"name": "description", "type": "string", "required": true},
+    {"name": "keywords", "type": "string", "required": true},
+    {"name": "strength", "type": "integer", "required": true, "range": [0, 10]}
+  ],
+  "hyperedge_fields": [
+    {"name": "vertices", "type": "array", "required": true},
+    {"name": "relation_type", "type": "enum", "required": true, "values": ["ASSOCIATED_WITH", "PART_OF", "CAUSES_OR_AFFECTS", "COMPARES_WITH"]},
+    {"name": "description", "type": "string", "required": true},
+    {"name": "generalization", "type": "string", "required": true},
+    {"name": "keywords", "type": "string", "required": true},
+    {"name": "strength", "type": "integer", "required": true, "range": [0, 10]},
+    {"name": "evidence_span", "type": "string", "required": false}
+  ]
+}

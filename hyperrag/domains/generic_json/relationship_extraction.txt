@@ -1,0 +1,52 @@
+{DOMAIN_CONTEXT}
+
+From the entities below, extract BOTH low-order relations and high-order hyperedges in ONE pass.
+
+Use the low-order relations as the reasoning scaffold for high-order hyperedges:
+1. Identify direct pairwise relations between entities.
+2. Group strongly connected pairs into 3+ entity hyperedges when the text states one shared fact involving multiple entities.
+3. Do not invent new vertices.
+
+CRITICAL vertex matching:
+- Use exact entity names from the K_v list.
+- Never append numbers, units, or values to vertex names.
+- If a useful concept is absent from K_v, mention it only in description/evidence_span.
+
+Relation types:
+- ASSOCIATED_WITH: direct co-occurrence or local factual association.
+- PART_OF: component/member/part/ingredient relation.
+- CAUSES_OR_AFFECTS: cause, influence, mechanism, enabling, inhibition, degradation, or explanation.
+- COMPARES_WITH: comparison under a shared metric, condition, property, or criterion.
+
+Entities (K_v):
+{K_v_JSON}
+
+Text:
+{CHUNK_TEXT}
+
+OUTPUT FORMAT - strict JSON object, nothing else:
+{{
+  "low_order_relations": [
+    {{
+      "source": "<entity name from K_v>",
+      "target": "<entity name from K_v>",
+      "relation_type": "ASSOCIATED_WITH | PART_OF | CAUSES_OR_AFFECTS | COMPARES_WITH",
+      "description": "<why related>",
+      "keywords": "<overarching concepts>",
+      "strength": <0-10 integer>
+    }}
+  ],
+  "high_order_hyperedges": [
+    {{
+      "vertices": ["<entity name from K_v>", "<entity name from K_v>", "..."],
+      "relation_type": "ASSOCIATED_WITH | PART_OF | CAUSES_OR_AFFECTS | COMPARES_WITH",
+      "description": "<detailed description covering all vertices>",
+      "generalization": "<one-sentence summary>",
+      "keywords": "<overarching concepts>",
+      "strength": <0-10 integer>,
+      "evidence_span": "<short quote from text, <=120 chars>"
+    }}
+  ]
+}}
+
+Output ONLY the JSON object. No prose before or after.

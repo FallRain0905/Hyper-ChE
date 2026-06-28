@@ -1,0 +1,27 @@
+equivalences:
+  measurement:ee_80_percent: measurement:ee_80_0_percent
+  measurement:ce_99_percent: measurement:ce_99_0_percent
+  measurement:ee_80: measurement:ee_80_0_percent
+  measurement:ce_99: measurement:ce_99_0_percent
+  condition:current_100_ma_cm2: condition:current_density_100_ma_cm2
+  condition:current_80_ma_cm2: condition:current_density_80_ma_cm2
+  condition:temperature_25_degc: condition:temperature_25_c
+  condition:temperature_40_degc: condition:temperature_40_c
+  condition:ph_14_ph: condition:ph_14
+  metric:ce_96_1: measurement:ce_96_1_percent
+  metric:ve_82_4: measurement:ve_82_4_percent
+  metric:ee_79_2: measurement:ee_79_2_percent
+  metric:ee_80_0: measurement:ee_80_0_percent
+  metric:ce_99_0: measurement:ce_99_0_percent
+  metric:capacity_retention_86: measurement:capacity_retention_86_percent
+  metric:capacity_retention_74: measurement:capacity_retention_74_percent
+  metric:capacity_retention_68: measurement:capacity_retention_68_percent
+  metric:iec_1_42: measurement:iec_1_42_mmol_g
+  metric:energydensity: metric:energy_density
+  metric:mass_transfer: degradation:mass_transfer_limitation
+  metric:peakseparation: evidence:smaller_cv_peak_separation
+  metric:peak_separation: evidence:smaller_cv_peak_separation
+  degradation:electrodepolarization: degradation:electrode_polarization
+  degradation:localpolarization: degradation:local_polarization
+  degradation:unevenpbdeposition: degradation:uneven_pb_deposition
+  metric:voltageloss: metric:voltage_loss

@@ -1,0 +1,10 @@
+caches:
+  graph_final: web-ui/backend/hyperrag_cache/flow_benchmark_hyper_final
+  hyper_base: web-ui/backend/hyperrag_cache/flow_benchmark_hyper_base
+  hyper_chem_prompt: web-ui/backend/hyperrag_cache/flow_benchmark_hyper_chem_prompt
+  hyper_norm: web-ui/backend/hyperrag_cache/flow_benchmark_hyper_norm
+  hyper_final: web-ui/backend/hyperrag_cache/flow_benchmark_hyper_final
+  final_no_measurement: web-ui/backend/hyperrag_cache/flow_benchmark_final_no_measurement
+  final_no_repair: web-ui/backend/hyperrag_cache/flow_benchmark_final_no_repair
+  final_no_rerank: web-ui/backend/hyperrag_cache/flow_benchmark_final_no_rerank
+  final_full: web-ui/backend/hyperrag_cache/flow_benchmark_final_full

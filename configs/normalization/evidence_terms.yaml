@@ -1,0 +1,20 @@
+canonical_entities:
+  - canonical_id: evidence:fluoride_release
+    canonical_name: fluoride release
+    type: MECHANISM_EVIDENCE
+    aliases: ["F- release", "F− release", "fluoride ion release", "fluoride yield"]
+
+  - canonical_id: evidence:scavenger_test
+    canonical_name: scavenger test
+    type: MECHANISM_EVIDENCE
+    aliases: ["quenching experiment", "radical scavenger experiment", "scavenging test"]
+
+  - canonical_id: evidence:control_experiment
+    canonical_name: control experiment
+    type: MECHANISM_EVIDENCE
+    aliases: ["blank control", "control test", "control experiments"]
+
+  - canonical_id: evidence:isotope_labeling
+    canonical_name: isotope labeling
+    type: MECHANISM_EVIDENCE
+    aliases: ["isotopic labeling", "isotope labelling", "isotopic labelling"]

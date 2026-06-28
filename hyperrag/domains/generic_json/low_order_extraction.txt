@@ -1,0 +1,21 @@
+{DOMAIN_CONTEXT}
+
+Extract direct pairwise relations between entities. Use exact K_v names only.
+
+Entities (K_v):
+{K_v_JSON}
+
+Text:
+{CHUNK_TEXT}
+
+Output strict JSON array only:
+[
+  {{
+    "source": "<entity name from K_v>",
+    "target": "<entity name from K_v>",
+    "relation_type": "ASSOCIATED_WITH | PART_OF | CAUSES_OR_AFFECTS | COMPARES_WITH",
+    "description": "<why related>",
+    "keywords": "<overarching concepts>",
+    "strength": <0-10 integer>
+  }}
+]

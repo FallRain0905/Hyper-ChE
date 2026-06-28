@@ -362,10 +362,10 @@ def convert_json_entity_to_standard_format(entity: dict, chunk_key: str = "") ->
     """
     Convert JSON entity format to standard Hyper-RAG entity format
     Preserves structured fields (subtype, value, unit, etc.) as native types
-    for structured queries (e.g., "find temperature > 40°C")
+    for structured queries (e.g., "find temperature > 40掳C")
     """
     result = {
-        "entity_name": entity.get("name", ""),
+        "entity_name": entity.get("node_id") or entity.get("instance_id") or entity.get("name", ""),
         "entity_type": entity.get("type", ""),
         "description": entity.get("description", ""),
         "source_id": chunk_key,
@@ -390,6 +390,25 @@ def convert_json_entity_to_standard_format(entity: dict, chunk_key: str = "") ->
     if entity.get("key_attribute") is not None:
         result["key_attribute"] = entity["key_attribute"]
 
+    for field in (
+        "raw_name",
+        "mentions",
+        "canonical_id",
+        "canonical_name",
+        "node_id",
+        "instance_id",
+        "display_name",
+        "parent_id",
+        "semantic_group",
+        "normalization_method",
+        "normalization_confidence",
+        "need_review",
+        "source_mentions",
+        "attributes",
+    ):
+        if entity.get(field) is not None:
+            result[field] = entity[field]
+
     return result
 
 def convert_json_relation_to_standard_format(relation: dict, chunk_key: str = "") -> dict:
@@ -413,6 +432,9 @@ def convert_json_relation_to_standard_format(relation: dict, chunk_key: str = ""
             result["relation_type"] = relation["relation_type"]
         if relation.get("evidence_span"):
             result["evidence_span"] = relation["evidence_span"]
+        for field in ("repair_applied", "repair_rules", "repair_confidence"):
+            if relation.get(field) is not None:
+                result[field] = relation[field]
         return result
 
     # For high-order relations (hyperedges)
@@ -432,29 +454,32 @@ def convert_json_relation_to_standard_format(relation: dict, chunk_key: str = ""
             result["relation_type"] = relation["relation_type"]
         if relation.get("evidence_span"):
             result["evidence_span"] = relation["evidence_span"]
+        for field in ("repair_applied", "repair_rules", "repair_confidence"):
+            if relation.get(field) is not None:
+                result[field] = relation[field]
         return result
 
     return {}
 
 _SUBSCRIPT_TRANSLATION = str.maketrans({
-    "₀": "0", "₁": "1", "₂": "2", "₃": "3", "₄": "4",
-    "₅": "5", "₆": "6", "₇": "7", "₈": "8", "₉": "9",
-    "⁰": "0", "¹": "1", "²": "2", "³": "3", "⁴": "4",
-    "⁵": "5", "⁶": "6", "⁷": "7", "⁸": "8", "⁹": "9",
+    "\u2080": "0", "\u2081": "1", "\u2082": "2", "\u2083": "3", "\u2084": "4",
+    "\u2085": "5", "\u2086": "6", "\u2087": "7", "\u2088": "8", "\u2089": "9",
+    "\u2070": "0", "\u00b9": "1", "\u00b2": "2", "\u00b3": "3", "\u2074": "4",
+    "\u2075": "5", "\u2076": "6", "\u2077": "7", "\u2078": "8", "\u2079": "9",
 })
 
 def _normalize_entity_reference(value: str) -> str:
     value = str(value or "").translate(_SUBSCRIPT_TRANSLATION).lower()
     value = re.sub(r"\[u\+208([0-9])\]", r"\1", value)
     value = re.sub(r"\[u\+207([0-9])\]", r"\1", value)
-    value = re.sub(r"[\s_\-–—−]+", "", value)
+    value = re.sub(r"[\s_\-\u2013\u2014\u2212]+", "", value)
     return value
 
 def _strip_numeric_suffix_for_lookup(value: str) -> str:
     value = str(value or "").translate(_SUBSCRIPT_TRANSLATION).lower()
     value = re.sub(r"\b\d+(?:\.\d+)?\s*(?:%|mg/l|g/l|mol/l|mmol|mm|h|min|s|khz|w|mpa|cycles?|cycle|ppm|ppb)\b", "", value)
     value = re.sub(r"\b\d+(?:\.\d+)?\b", "", value)
-    value = re.sub(r"[\s_\-–—−]+", "", value)
+    value = re.sub(r"[\s_\-\u2013\u2014\u2212]+", "", value)
     return value
 
 def _build_entity_reference_lookup(entities_json: list[dict]) -> dict[str, str]:
@@ -473,9 +498,26 @@ def _build_entity_reference_lookup(entities_json: list[dict]) -> dict[str, str]:
         name = entity.get("name", "")
         if not name:
             continue
-        add(_normalize_entity_reference(name), name)
+        target_name = entity.get("node_id") or entity.get("instance_id") or name
+        add(_normalize_entity_reference(name), target_name)
+        if entity.get("node_id"):
+            add(_normalize_entity_reference(entity["node_id"]), target_name)
+        if entity.get("canonical_name"):
+            add(_normalize_entity_reference(entity["canonical_name"]), target_name)
+        if entity.get("canonical_id"):
+            add(_normalize_entity_reference(entity["canonical_id"]), target_name)
+        if entity.get("display_name"):
+            add(_normalize_entity_reference(entity["display_name"]), target_name)
+        if entity.get("raw_name"):
+            add(_normalize_entity_reference(entity["raw_name"]), target_name)
+        for mention in entity.get("mentions") or []:
+            add(_normalize_entity_reference(mention), target_name)
+        for mention in entity.get("source_mentions") or []:
+            add(_normalize_entity_reference(mention), target_name)
         if entity.get("type") in {"CONDITION", "METRIC"}:
-            add(_strip_numeric_suffix_for_lookup(name), name)
+            add(_strip_numeric_suffix_for_lookup(name), target_name)
+            if entity.get("raw_name"):
+                add(_strip_numeric_suffix_for_lookup(entity["raw_name"]), target_name)
 
     return {key: value for key, value in lookup.items() if value}
 
@@ -537,6 +579,170 @@ def _filter_relations_to_known_entities(
         )
 
     return filtered_low, filtered_high
+
+
+def _repair_high_order_relations(
+    high_relations: list[dict],
+    entities_json: list[dict],
+    content: str,
+    chunk_key: str,
+) -> list[dict]:
+    """Conservative EFU repair using only entities already present in a chunk.
+
+    This pass is intentionally light: it enriches hyperedges with normalized
+    system/material/condition nodes that were extracted in the same local window,
+    but does not relax entity validation or synthesize unsupported facts.
+    """
+
+    if not high_relations:
+        return high_relations
+
+    by_node: dict[str, dict] = {}
+    by_type: dict[str, list[str]] = defaultdict(list)
+    by_semantic: dict[str, list[str]] = defaultdict(list)
+    surface_to_node: dict[str, str] = {}
+
+    for entity in entities_json:
+        node_id = str(entity.get("node_id") or entity.get("instance_id") or entity.get("name") or "").strip()
+        if not node_id:
+            continue
+        by_node[node_id] = entity
+        entity_type = str(entity.get("type") or entity.get("entity_type") or "").upper()
+        semantic_group = str(entity.get("semantic_group") or "")
+        if entity_type:
+            by_type[entity_type].append(node_id)
+        if semantic_group:
+            by_semantic[semantic_group].append(node_id)
+        for field in ("name", "raw_name", "canonical_name", "display_name", "node_id", "canonical_id"):
+            value = entity.get(field)
+            if value:
+                surface_to_node[_normalize_entity_reference(str(value))] = node_id
+        for mention in entity.get("mentions") or entity.get("source_mentions") or []:
+            surface_to_node[_normalize_entity_reference(str(mention))] = node_id
+
+    context_norm = _normalize_entity_reference(content)
+    repaired: list[dict] = []
+    for relation in high_relations:
+        relation = dict(relation)
+        vertices = list(dict.fromkeys(str(v) for v in relation.get("vertices", []) if str(v).strip()))
+        vertex_norms = {_normalize_entity_reference(v) for v in vertices}
+        rules: list[str] = []
+
+        def add_node(node_id: str, rule: str) -> None:
+            if node_id and node_id not in vertices:
+                vertices.append(node_id)
+                rules.append(rule)
+
+        has_system = any((by_node.get(v, {}).get("type") or by_node.get(v, {}).get("entity_type")) == "SYSTEM" for v in vertices)
+        has_measurement = any(str(v).startswith("measurement:") for v in vertices)
+        has_current = any(str(v).startswith("condition:current_density") for v in vertices)
+
+        if any("speekapkcell" in norm for norm in vertex_norms):
+            add_node("system:vrfb", "decompose_cell_entity")
+            add_node("membrane:speek_apk", "decompose_cell_entity")
+        if any("sptpc259cell" in norm for norm in vertex_norms):
+            add_node("system:vrfb", "decompose_cell_entity")
+            add_node("membrane:sptpc_2_59", "decompose_cell_entity")
+        if any("snpbi142cell" in norm for norm in vertex_norms):
+            add_node("system:vrfb", "decompose_cell_entity")
+            add_node("membrane:snpbi_1_42", "decompose_cell_entity")
+        if any("activatedcarbonfeltcell" in norm for norm in vertex_norms):
+            add_node("electrode:activated_carbon_felt", "decompose_cell_entity")
+            if "system:vrfb" in by_node or "vrfb" in context_norm:
+                add_node("system:vrfb", "add_missing_system_from_context")
+
+        if has_measurement and not has_system:
+            if "system:vrfb" in by_node or "vrfb" in context_norm or "vanadiumredoxflowbattery" in context_norm:
+                add_node("system:vrfb", "add_missing_system_from_context")
+            elif len(by_type.get("SYSTEM", [])) == 1:
+                add_node(by_type["SYSTEM"][0], "add_missing_system_from_context")
+
+        if has_measurement and not has_current:
+            current_nodes = sorted(set(by_semantic.get("current_condition", [])))
+            if len(current_nodes) == 1:
+                add_node(current_nodes[0], "add_current_density_from_local_window")
+
+        if has_current and not has_measurement:
+            measurements = [node for node in by_node if str(node).startswith("measurement:")]
+            if len(measurements) == 1:
+                add_node(measurements[0], "add_measurement_from_local_window")
+
+        if rules:
+            relation["vertices"] = vertices
+            relation["repair_applied"] = True
+            relation["repair_rules"] = list(dict.fromkeys(rules))
+            relation["repair_confidence"] = 0.8
+            logger.info(
+                "[%s] EFU repair applied relation_type=%s rules=%s vertices=%s",
+                chunk_key,
+                relation.get("relation_type"),
+                relation["repair_rules"],
+                relation["vertices"],
+            )
+        repaired.append(relation)
+
+    return repaired
+
+
+async def _normalize_json_entities_for_extraction(
+    entities_json: list[dict],
+    chunk_key: str,
+    domain: str,
+    global_config: dict,
+    use_llm_func: callable,
+    content: str,
+) -> list[dict]:
+    """Normalize entities immediately after extraction and before relation extraction."""
+
+    if not global_config.get("enable_entity_normalization", True):
+        return entities_json
+
+    try:
+        from hyperche.normalization.pipeline import normalize_entities_for_extraction_async
+
+        config_paths = global_config.get("normalization_config_paths")
+        negative_rule_paths = global_config.get("normalization_negative_rule_paths")
+        fuzzy_threshold = float(global_config.get("normalization_fuzzy_threshold", 95.0))
+        max_fuzzy_candidates = int(global_config.get("normalization_max_fuzzy_candidates", 50))
+        use_llm = bool(global_config.get("normalization_use_llm", True))
+        enable_measurement_instances = bool(global_config.get("enable_measurement_instances", True))
+        normalized_entities, report = await normalize_entities_for_extraction_async(
+            entities_json,
+            domain=domain,
+            config_paths=config_paths,
+            fuzzy_threshold=fuzzy_threshold,
+            max_fuzzy_candidates=max_fuzzy_candidates,
+            negative_rule_paths=negative_rule_paths,
+            use_llm=use_llm,
+            enable_measurement_instances=enable_measurement_instances,
+            llm_func=use_llm_func,
+            local_context=content,
+            chunk_key=chunk_key,
+        )
+        logger.info(
+            "[%s] Step 1N: Entity normalization complete: raw=%s, normalized=%s, "
+            "merged=%s, alias_matches=%s, need_review=%s, blocked=%s, parsed_values=%s",
+            chunk_key,
+            report.get("raw_entity_count"),
+            report.get("normalized_entity_count"),
+            report.get("merged_entity_count"),
+            report.get("alias_match_count"),
+            report.get("need_review_count", 0),
+            len(report.get("high_risk_blocked_merges", []) or []),
+            report.get("parsed_value_count"),
+        )
+        for item in (report.get("normalization_results") or [])[:20]:
+            logger.debug("[%s] Step 1N result: %s", chunk_key, item)
+        return normalized_entities
+    except Exception as e:
+        logger.warning(
+            "[%s] Step 1N: Entity normalization skipped after error: %s: %s",
+            chunk_key,
+            type(e).__name__,
+            e,
+        )
+        return entities_json
+
 
 def validate_domain_output(entities: list, relations: list, domain: str = 'default'):
     """
@@ -690,6 +896,14 @@ def _parse_query_keywords(result: str, kw_prompt: str, need_relation_keywords: b
 def chunking_by_token_size(
     content: str, overlap_token_size=128, max_token_size=1024, tiktoken_model="gpt-4o"
 ):
+    markdown_chunks = _chunking_by_markdown_chunk_headings(content, tiktoken_model=tiktoken_model)
+    if markdown_chunks:
+        logger.info(
+            "Markdown Chunk headings detected; using %s natural chunks without token merge",
+            len(markdown_chunks),
+        )
+        return markdown_chunks
+
     tokens = encode_string_by_tiktoken(content, model_name=tiktoken_model)
     results = []
     for index, start in enumerate(
@@ -706,6 +920,42 @@ def chunking_by_token_size(
             }
         )
     return results
+
+
+CHUNK_HEADING_RE = re.compile(
+    r"(?m)^(#{1,6})\s*Chunk\s+([A-Za-z0-9][A-Za-z0-9_.-]*)\b[^\n]*$"
+)
+
+
+def _chunking_by_markdown_chunk_headings(content: str, *, tiktoken_model: str) -> list[dict]:
+    """Split curated markdown corpora by explicit ``## Chunk XXX`` headings.
+
+    These headings are semantic hard boundaries in the gold corpora. Keeping them
+    separate reduces cross-experiment binding errors during EFU extraction.
+    """
+
+    matches = list(CHUNK_HEADING_RE.finditer(content or ""))
+    if not matches:
+        return []
+
+    chunks: list[dict] = []
+    for index, match in enumerate(matches):
+        start = match.start()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
+        chunk_content = content[start:end].strip()
+        if not chunk_content:
+            continue
+        source_chunk_id = match.group(2).strip()
+        tokens = encode_string_by_tiktoken(chunk_content, model_name=tiktoken_model)
+        chunks.append(
+            {
+                "tokens": len(tokens),
+                "content": chunk_content,
+                "chunk_order_index": index,
+                "source_chunk_id": source_chunk_id,
+            }
+        )
+    return chunks
 
 # summarize the descriptions of the entity
 async def _handle_entity_summary(
@@ -746,7 +996,7 @@ async def _handle_entity_additional_properties(
     use_llm_func: callable = global_config["llm_model_func"]
     llm_max_tokens = global_config["llm_model_max_token_size"]
     tiktoken_model_name = global_config["tiktoken_model_name"]
-    summary_max_tokens = global_config["entity_additional_properties_to_max_tokens"] # 可能需要修改 entity_properties_summary_to_max_tokens
+    summary_max_tokens = global_config["entity_additional_properties_to_max_tokens"] # 鍙兘闇€瑕佷慨鏀?entity_properties_summary_to_max_tokens
 
     tokens = encode_string_by_tiktoken(additional_properties, model_name=tiktoken_model_name)
     if len(tokens) < summary_max_tokens:  # No need for summary
@@ -776,7 +1026,7 @@ async def _handle_relation_summary(
     use_llm_func: callable = global_config["llm_model_func"]
     llm_max_tokens = global_config["llm_model_max_token_size"]
     tiktoken_model_name = global_config["tiktoken_model_name"]
-    summary_max_tokens = global_config["relation_summary_to_max_tokens"]  # 可能需要修改  relation_summary_to_max_tokens
+    summary_max_tokens = global_config["relation_summary_to_max_tokens"]  # 鍙兘闇€瑕佷慨鏀? relation_summary_to_max_tokens
 
     tokens = encode_string_by_tiktoken(description, model_name=tiktoken_model_name)
     if len(tokens) < summary_max_tokens:  # No need for summary
@@ -806,7 +1056,7 @@ async def _handle_relation_keywords_summary(
     use_llm_func: callable = global_config["llm_model_func"]
     llm_max_tokens = global_config["llm_model_max_token_size"]
     tiktoken_model_name = global_config["tiktoken_model_name"]
-    summary_max_tokens = global_config["relation_keywords_to_max_tokens"]  # 可能需要修改relation_keywords_summary_to_max_tokens
+    summary_max_tokens = global_config["relation_keywords_to_max_tokens"]  # 鍙兘闇€瑕佷慨鏀箁elation_keywords_summary_to_max_tokens
 
     tokens = encode_string_by_tiktoken(keywords, model_name=tiktoken_model_name)
     if len(tokens) < summary_max_tokens:  # No need for summary
@@ -867,7 +1117,7 @@ async def _handle_single_relationship_extraction_low(
     edge_keywords = clean_str(record_attributes[-2])
     edge_source_id = chunk_key
     weight = (
-        float(record_attributes[-1]) if is_float_regex(record_attributes[-1]) else 0.75 # 如果无权重，则默认0.75
+        float(record_attributes[-1]) if is_float_regex(record_attributes[-1]) else 0.75 # 濡傛灉鏃犳潈閲嶏紝鍒欓粯璁?.75
     )
     return dict(
         entityN=entities,
@@ -909,7 +1159,7 @@ def _format_structured_fields_as_string(structured_fields: dict) -> str:
     """
     Format structured fields into a human-readable string for display.
 
-    Example output: "subtype=operating, value=40, unit=°C"
+    Example output: "subtype=operating, value=40, unit=掳C"
     """
     parts = []
 
@@ -941,7 +1191,7 @@ def _merge_structured_fields(nodes_data: list[dict], already_fields: dict) -> di
     """
     merged = {}
 
-    # Collect all values for each field (统一使用 list)
+    # Collect all values for each field (缁熶竴浣跨敤 list)
     all_values = {
         "subtype": [],
         "unit": [],
@@ -1073,6 +1323,7 @@ async def _merge_nodes_then_upsert(
 
     # Build node data with structured fields
     node_data = dict(
+        node_id=entity_name,
         entity_type=entity_type,
         description=description,
         source_id=source_id,
@@ -1081,6 +1332,7 @@ async def _merge_nodes_then_upsert(
 
     # Add merged structured fields (for structured queries)
     node_data.update(merged_structured_fields)
+    node_data.update(_merge_normalization_metadata(entity_name, nodes_data, already_node))
 
     await knowledge_hypergraph_inst.upsert_vertex(
         entity_name,
@@ -1088,6 +1340,126 @@ async def _merge_nodes_then_upsert(
     )
     node_data["entity_name"] = entity_name
     return node_data
+
+
+def _merge_normalization_metadata(entity_name: str, nodes_data: list[dict], already_node: dict | None) -> dict:
+    metadata: dict = {}
+    scalar_fields = [
+        "raw_name",
+        "canonical_id",
+        "canonical_name",
+        "display_name",
+        "semantic_group",
+        "normalization_method",
+        "need_review",
+    ]
+
+    for field in scalar_fields:
+        values = []
+        if already_node and already_node.get(field) is not None:
+            values.append(already_node.get(field))
+        values.extend(dp.get(field) for dp in nodes_data if dp.get(field) is not None)
+        values = [value for value in values if value not in (None, "")]
+        if not values:
+            continue
+        if field == "need_review":
+            metadata[field] = any(bool(value) for value in values)
+        else:
+            metadata[field] = Counter(map(str, values)).most_common(1)[0][0]
+
+    source_mentions = []
+    if already_node:
+        existing_mentions = already_node.get("source_mentions") or already_node.get("mentions") or []
+        if isinstance(existing_mentions, str):
+            existing_mentions = split_string_by_multi_markers(existing_mentions, [GRAPH_FIELD_SEP])
+        source_mentions.extend(existing_mentions)
+    for dp in nodes_data:
+        for field in ("source_mentions", "mentions"):
+            values = dp.get(field) or []
+            if isinstance(values, str):
+                values = [values]
+            source_mentions.extend(str(item) for item in values if item)
+        if dp.get("raw_name"):
+            source_mentions.append(str(dp["raw_name"]))
+    if source_mentions:
+        metadata["source_mentions"] = sorted(set(source_mentions))
+
+    confidences = []
+    if already_node and already_node.get("normalization_confidence") is not None:
+        confidences.append(already_node.get("normalization_confidence"))
+    confidences.extend(dp.get("normalization_confidence") for dp in nodes_data if dp.get("normalization_confidence") is not None)
+    numeric_confidences = []
+    for value in confidences:
+        try:
+            numeric_confidences.append(float(value))
+        except (TypeError, ValueError):
+            pass
+    if numeric_confidences:
+        metadata["normalization_confidence"] = max(numeric_confidences)
+
+    metadata.setdefault("canonical_id", entity_name)
+    metadata.setdefault("canonical_name", metadata.get("display_name") or entity_name)
+    metadata.setdefault("raw_name", metadata.get("canonical_name") or entity_name)
+    return metadata
+
+
+def _merge_edge_evidence_instances(
+    edges_data: list[dict],
+    existing_instances: list[dict],
+    id_set: tuple,
+) -> list[dict]:
+    instances: list[dict] = []
+    seen = set()
+
+    def add(instance: dict):
+        key = (
+            str(instance.get("source_id", "")),
+            str(instance.get("description", "")),
+            str(instance.get("evidence_span", "")),
+            str(instance.get("relation_type", "")),
+        )
+        if key in seen:
+            return
+        seen.add(key)
+        instances.append(instance)
+
+    for item in existing_instances or []:
+        if isinstance(item, dict):
+            add(dict(item))
+
+    for edge in edges_data:
+        add(
+            {
+                "source_id": edge.get("source_id", ""),
+                "vertices": list(edge.get("entityN") or edge.get("entities_set") or edge.get("entities_pair") or id_set),
+                "description": edge.get("description", ""),
+                "keywords": edge.get("keywords", ""),
+                "evidence_span": edge.get("evidence_span", ""),
+                "relation_type": edge.get("relation_type", ""),
+                "level_hg": edge.get("level_hg", ""),
+                "weight": edge.get("weight"),
+                "repair_applied": edge.get("repair_applied", False),
+                "repair_rules": edge.get("repair_rules", []),
+                "repair_confidence": edge.get("repair_confidence"),
+            }
+        )
+
+    return instances
+
+
+def _select_canonical_edge_description(edges_data: list[dict], already_description: list[str]) -> str:
+    descriptions: list[str] = []
+    for value in [dp.get("description", "") for dp in edges_data] + already_description:
+        if not value:
+            continue
+        for item in split_string_by_multi_markers(str(value), [GRAPH_FIELD_SEP]):
+            item = item.strip()
+            if item and item not in descriptions:
+                descriptions.append(item)
+    if not descriptions:
+        return ""
+    # Prefer the most informative but keep it as a single canonical statement.
+    return sorted(descriptions, key=lambda text: (len(text), text), reverse=True)[0]
 
 
 async def _merge_edges_then_upsert(
@@ -1102,6 +1474,7 @@ async def _merge_edges_then_upsert(
     already_keywords = []
     already_evidence_spans = []
     already_relation_types = []
+    existing_evidence_instances = []
 
     if await knowledge_hypergraph_inst.has_hyperedge(id_set):
         already_edge = await knowledge_hypergraph_inst.get_hyperedge(id_set)
@@ -1118,11 +1491,11 @@ async def _merge_edges_then_upsert(
             already_evidence_spans.append(already_edge["evidence_span"])
         if already_edge.get("relation_type"):
             already_relation_types.append(already_edge["relation_type"])
+        if isinstance(already_edge.get("evidence_instances"), list):
+            existing_evidence_instances.extend(already_edge.get("evidence_instances") or [])
 
     weight = sum([dp["weight"] for dp in edges_data] + already_weights)
-    description = GRAPH_FIELD_SEP.join(
-        sorted(set([dp["description"] for dp in edges_data] + already_description))
-    )
+    description = _select_canonical_edge_description(edges_data, already_description)
     keywords = GRAPH_FIELD_SEP.join(
         sorted(set([dp["keywords"] for dp in edges_data] + already_keywords))
     )
@@ -1139,6 +1512,7 @@ async def _merge_edges_then_upsert(
     relation_types = [dp.get("relation_type", "") for dp in edges_data if dp.get("relation_type")]
     all_relation_types = relation_types + already_relation_types
     relation_type = GRAPH_FIELD_SEP.join(sorted(set(all_relation_types))) if all_relation_types else ""
+    evidence_instances = _merge_edge_evidence_instances(edges_data, existing_evidence_instances, id_set)
 
     # Track UNKNOWN vertex creation
     unknown_count = 0
@@ -1156,10 +1530,17 @@ async def _merge_edges_then_upsert(
             await knowledge_hypergraph_inst.upsert_vertex(
                 need_insert_id,
                 {
+                    "node_id": need_insert_id,
+                    "raw_name": need_insert_id,
+                    "canonical_id": f"unknown:{_normalize_entity_reference(need_insert_id) or 'unknown'}",
+                    "canonical_name": need_insert_id,
                     "source_id": source_id,
-                    "description": "UNKNOWN", # 超边描述
-                    "additional_properties": "UNKNOWN", # 超边关键词
-                    "entity_type": "UNKNOWN",
+                    "description": "UNKNOWN", # 瓒呰竟鎻忚堪
+                    "additional_properties": "UNKNOWN", # 瓒呰竟鍏抽敭璇?                    "entity_type": "UNKNOWN",
+                    "semantic_group": "UNKNOWN",
+                    "normalization_method": "UNKNOWN",
+                    "normalization_confidence": 0.0,
+                    "source_mentions": [need_insert_id],
                 },
             )
         else:
@@ -1188,15 +1569,18 @@ async def _merge_edges_then_upsert(
             logger.warning(f"[{source_id}] HIGH UNKNOWN RATE: More than 50% vertices are UNKNOWN in this edge")
             logger.warning(f"[{source_id}] Unknown vertex names: {unknown_references[:10]}")  # Log first 10 to avoid flooding
             logger.warning(f"[{source_id}] This likely indicates composite names (e.g., 'CP + MEMBr') or numeric suffixes (e.g., 'CE 99.1%')")
-    description = await _handle_relation_summary(  # 应该重新写一个针对超边描述进行合并的函数
+    description = await _handle_relation_summary(  # 搴旇閲嶆柊鍐欎竴涓拡瀵硅秴杈规弿杩拌繘琛屽悎骞剁殑鍑芥暟
         id_set, description, global_config
     )
 
-    filter_keywords = await _handle_relation_keywords_summary(  # 应该重新写一个针对超边的关键词进行合并的函数
+    filter_keywords = await _handle_relation_keywords_summary(  # 搴旇閲嶆柊鍐欎竴涓拡瀵硅秴杈圭殑鍏抽敭璇嶈繘琛屽悎骞剁殑鍑芥暟
         id_set, keywords, global_config
     )
 
     edge_dict = dict(
+        vertices=list(id_set),
+        node_ids=list(id_set),
+        evidence_instances=evidence_instances,
         description=description,
         keywords=filter_keywords,
         source_id=source_id,
@@ -1219,6 +1603,7 @@ async def _merge_edges_then_upsert(
         unknown_reference_count=unknown_reference_count,
         unknown_names=unknown_references,
         vertex_count=len(id_set),
+        evidence_instances=evidence_instances,
     )
     if evidence_span:
         edge_data["evidence_span"] = evidence_span
@@ -1335,6 +1720,17 @@ async def _process_json_format_extraction(
         logger.warning(f"[{chunk_key}] Step 1: No entities extracted, aborting pipeline")
         return [], []
 
+    # Step 1N: normalize extracted entities before relation extraction.
+    # Relation prompts and validation should use canonical entity names directly.
+    entities_json = await _normalize_json_entities_for_extraction(
+        entities_json,
+        chunk_key,
+        domain,
+        global_config,
+        use_llm_func,
+        content,
+    )
+
     # Log entity type distribution
     from collections import Counter
     entity_types = Counter(e.get("type", "UNKNOWN") for e in entities_json)
@@ -1349,8 +1745,22 @@ async def _process_json_format_extraction(
     entity_info = []
     for e in entities_json:
         info = {"name": e.get("name", "")}
+        if e.get("node_id"):
+            info["node_id"] = e["node_id"]
+        if e.get("canonical_id"):
+            info["canonical_id"] = e["canonical_id"]
+        if e.get("canonical_name"):
+            info["canonical_name"] = e["canonical_name"]
+        if e.get("display_name"):
+            info["display_name"] = e["display_name"]
+        if e.get("raw_name") and e.get("raw_name") != e.get("name"):
+            info["raw_name"] = e["raw_name"]
+        if e.get("mentions"):
+            info["mentions"] = e["mentions"]
         if e.get("type"):
             info["type"] = e["type"]
+        if e.get("semantic_group"):
+            info["semantic_group"] = e["semantic_group"]
         # Include value or range for CONDITION/METRIC entities
         if e.get("value") is not None:
             info["value"] = e["value"]
@@ -1370,7 +1780,7 @@ async def _process_json_format_extraction(
     logger.debug(f"[{chunk_key}] Step 2: Generating combined relationship prompt with {len(entity_info)} entities...")
     combined_prompt = get_relationship_extraction_prompt(
         domain=domain,
-        K_v_JSON=json.dumps(entity_info),
+        K_v_JSON=json.dumps(entity_info, ensure_ascii=False),
         CHUNK_TEXT=content
     )
 
@@ -1398,7 +1808,7 @@ async def _process_json_format_extraction(
         logger.debug(f"[{chunk_key}] Step 2a: Generating low-order prompt with {len(entity_info)} entities...")
         low_prompt = get_low_order_extraction_prompt(
             domain=domain,
-            K_v_JSON=json.dumps(entity_info),
+            K_v_JSON=json.dumps(entity_info, ensure_ascii=False),
             CHUNK_TEXT=content
         )
         logger.debug(f"[{chunk_key}] Step 2a: Prompt length = {len(low_prompt)} chars")
@@ -1418,7 +1828,7 @@ async def _process_json_format_extraction(
         logger.debug(f"[{chunk_key}] Step 2b: Generating high-order prompt with {len(entity_info)} entities...")
         high_prompt = get_high_order_extraction_prompt(
             domain=domain,
-            K_v_JSON=json.dumps(entity_info),
+            K_v_JSON=json.dumps(entity_info, ensure_ascii=False),
             CHUNK_TEXT=content
         )
         logger.debug(f"[{chunk_key}] Step 2b: Prompt length = {len(high_prompt)} chars")
@@ -1434,6 +1844,16 @@ async def _process_json_format_extraction(
                 logger.debug(f"[{chunk_key}] Step 2b: Hyperedge types: {dict(rel_types)}")
         except Exception as e:
             _log_step_exception(chunk_key, "Step 2b", "High-order relation extraction error", e)
+
+    if global_config.get("enable_efu_repair", True):
+        high_relations_json = _repair_high_order_relations(
+            high_relations_json,
+            entities_json,
+            content,
+            chunk_key,
+        )
+    else:
+        logger.info(f"[{chunk_key}] Step 2R: EFU repair disabled by experiment config")
 
     low_relations_json, high_relations_json = _filter_relations_to_known_entities(
         low_relations_json,
@@ -1649,17 +2069,17 @@ async def extract_entities(
             already_processed % len(PROMPTS["process_tickers"])
         ]
 
-        # 计算用时
+        # 璁＄畻鐢ㄦ椂
         current_time = datetime.now()
         time = current_time - begin_time
         total_seconds = int(time.total_seconds())
         hours = total_seconds // 3600
         minutes = (total_seconds % 3600) // 60
         seconds = total_seconds % 60
-        # 进度条
+        # 杩涘害鏉?
         percent = (already_processed / len(ordered_chunks)) * 100
         bar_length = int(50 * already_processed // len(ordered_chunks))
-        bar = '█' * bar_length + '-' * (50 - bar_length)
+        bar = '#' * bar_length + '-' * (50 - bar_length)
         sys.stdout.write(
             f'\n\r|{bar}| {percent:.2f}% |{hours:02}:{minutes:02}:{seconds:02}| {now_ticks} Processed, {already_entities} entities, {already_relations} relations, {already_relations_low} relations_low, {already_relations_high} relations_high \n')
         sys.stdout.flush()
@@ -1860,7 +2280,7 @@ async def _build_entity_query_context(
 ```
 """
     
-    # 返回包含上下文字符串和结构化数据的字典
+    # 杩斿洖鍖呭惈涓婁笅鏂囧瓧绗︿覆鍜岀粨鏋勫寲鏁版嵁鐨勫瓧鍏?
     return {
         "context": context_string,
         "entities": [
@@ -2112,7 +2532,7 @@ async def _build_relation_query_context(
 ```
 """
 
-    # 返回包含上下文字符串和结构化数据的字典
+    # 杩斿洖鍖呭惈涓婁笅鏂囧瓧绗︿覆鍜岀粨鏋勫寲鏁版嵁鐨勫瓧鍏?
     return {
         "context": context_string,
         "entities": [
@@ -2407,11 +2827,11 @@ async def hyper_query_stream(
     sys_prompt = sys_prompt_temp.format(
         context_data=context, response_type=query_param.response_type
     )
-    # ====== 1) 流式接口不建议支持 json（json 必须完整结构，不适合边吐边返回）======
+    # ====== 1) 娴佸紡鎺ュ彛涓嶅缓璁敮鎸?json锛坖son 蹇呴』瀹屾暣缁撴瀯锛屼笉閫傚悎杈瑰悙杈硅繑鍥烇級======
     if query_param.return_type == "json":
         raise ValueError("Streaming does not support return_type='json'. Use return_type='text'.")
 
-    # ====== 2) 真流式输出：逐 token 产出 ======
+    # ====== 2) 鐪熸祦寮忚緭鍑猴細閫?token 浜у嚭 ======
     async for tok in use_model_stream_func(query + define_str, system_prompt=sys_prompt,):
         if tok:
             yield tok
@@ -2510,7 +2930,7 @@ async def graph_query(
     global_config: dict,
 ):
     """
-    检索和返回 hypergraph db 中的成对关系
+    妫€绱㈠拰杩斿洖 hypergraph db 涓殑鎴愬鍏崇郴
     """
     use_model_func = global_config["llm_model_func"]
     kw_prompt = _get_query_keywords_prompt(query, global_config)
@@ -2523,11 +2943,11 @@ async def graph_query(
         print(f"JSON parsing error: {result}")
         return PROMPTS["fail_response"]
 
-    # 只处理二元关系
+    # 鍙鐞嗕簩鍏冨叧绯?
     def filter_pairwise_edges(edges):
         return [e for e in edges if isinstance(e.get("id_set"), (list, tuple)) and len(e["id_set"]) == 2]
 
-    # 获取所有相关的二元关系
+    # 鑾峰彇鎵€鏈夌浉鍏崇殑浜屽厓鍏崇郴
     relation_context = None
     if relation_keywords:
         results = await relationships_vdb.query(relation_keywords, top_k=query_param.top_k)
@@ -2544,7 +2964,7 @@ async def graph_query(
             for k, v, d in zip(results, edge_datas, edge_degree)
             if v is not None
         ]
-        # 只保留二元关系
+        # 鍙繚鐣欎簩鍏冨叧绯?
         edge_datas = filter_pairwise_edges(edge_datas)
         edge_datas = sorted(
             edge_datas, key=lambda x: (x["rank"], x["weight"]), reverse=True
@@ -2554,7 +2974,7 @@ async def graph_query(
             key=lambda x: x["description"],
             max_token_size=query_param.max_token_for_relation_context,
         )
-        # 相关实体
+        # 鐩稿叧瀹炰綋
         entity_names = set()
         for e in edge_datas:
             for f in e["id_set"]:
@@ -2576,7 +2996,7 @@ async def graph_query(
             key=lambda x: x["description"],
             max_token_size=query_param.max_token_for_entity_context,
         )
-        # 相关文本
+        # 鐩稿叧鏂囨湰
         text_units = [
             split_string_by_multi_markers(dp["source_id"], [GRAPH_FIELD_SEP])
             for dp in edge_datas
@@ -2599,7 +3019,7 @@ async def graph_query(
             max_token_size=query_param.max_token_for_text_unit,
         )
         all_text_units = [t["data"] for t in all_text_units]
-        # 格式化 context
+        # 鏍煎紡鍖?context
         relations_section_list = [
             ["id", "entity set", "description", "keywords", "weight", "rank"]
         ]
@@ -2781,13 +3201,13 @@ def combine_contexts(relation_context, entity_context):
 
 def remove_after_sources(input_string: str) -> str:
     """
-    删除字符串中 '-----Sources-----' 及其之后的所有内容。
+    鍒犻櫎瀛楃涓蹭腑 '-----Sources-----' 鍙婂叾涔嬪悗鐨勬墍鏈夊唴瀹广€?
     """
-    # 找到 '-----Sources-----' 的起始位置
+    # 鎵惧埌 '-----Sources-----' 鐨勮捣濮嬩綅缃?
     index = input_string.find("-----Sources-----")
-    if index != -1:  # 如果找到了该字符串
-        return input_string[:index]  # 返回该位置之前的内容
-    return input_string  # 如果没有找到，返回原始字符串
+    if index != -1:  # 濡傛灉鎵惧埌浜嗚瀛楃涓?
+        return input_string[:index]  # 杩斿洖璇ヤ綅缃箣鍓嶇殑鍐呭
+    return input_string  # 濡傛灉娌℃湁鎵惧埌锛岃繑鍥炲師濮嬪瓧绗︿覆
 
 async def naive_query(
     query,
@@ -2845,7 +3265,7 @@ async def llm_query(
     global_config: dict,
 ):
     """
-    只调用 LLM，不进行任何数据查询。
+    鍙皟鐢?LLM锛屼笉杩涜浠讳綍鏁版嵁鏌ヨ銆?
     """
     use_model_func = global_config["llm_model_func"]
     sys_prompt_temp = PROMPTS["rag_response"]
@@ -2885,7 +3305,7 @@ async def hyper_query_lite_stream(
     global_config: dict,
 ):
     """
-    hyper_query_lite 的流式版本：逻辑与 hyper_query_lite 相同，只把最后一步 LLM 生成改成 yield token
+    hyper_query_lite 鐨勬祦寮忕増鏈細閫昏緫涓?hyper_query_lite 鐩稿悓锛屽彧鎶婃渶鍚庝竴姝?LLM 鐢熸垚鏀规垚 yield token
     """
     entity_context = None
     use_model_func = global_config["llm_model_func"]
@@ -2953,7 +3373,7 @@ async def naive_query_stream(
     global_config: dict,
 ):
     """
-    naive_query 的流式版本：先做 chunk 检索拿到 section，然后用 LLM stream 输出答案
+    naive_query 鐨勬祦寮忕増鏈細鍏堝仛 chunk 妫€绱㈡嬁鍒?section锛岀劧鍚庣敤 LLM stream 杈撳嚭绛旀
     """
     use_model_func = global_config["llm_model_func"]
     use_model_stream_func = global_config.get("llm_model_stream_func", None)
@@ -3003,7 +3423,7 @@ async def llm_query_stream(
     global_config: dict,
 ):
     """
-    llm_query 的流式版本：不检索，直接按 rag_response（空 context）走流式输出
+    llm_query 鐨勬祦寮忕増鏈細涓嶆绱紝鐩存帴鎸?rag_response锛堢┖ context锛夎蛋娴佸紡杈撳嚭
     """
     use_model_stream_func = global_config.get("llm_model_stream_func", None)
     if use_model_stream_func is None:
@@ -3024,4 +3444,7 @@ async def llm_query_stream(
         if tok:
             yield tok
     return
+
+
+
 

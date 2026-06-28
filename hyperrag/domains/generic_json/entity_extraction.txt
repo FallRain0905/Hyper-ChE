@@ -1,0 +1,35 @@
+{DOMAIN_CONTEXT}
+
+Given the text chunk below, identify the important entities needed to preserve local facts and high-order relationships. Use a generic ontology only; do not apply any chemical domain ontology.
+
+Entity types:
+- ENTITY: named object, material, system, method, actor, organization, component, or specific item.
+- CONCEPT: abstract process, property, mechanism, theme, or qualitative finding.
+- CONDITION: explicit parameter or setting, optionally with value/unit.
+- METRIC: explicit result, score, measurement, performance indicator, or reported value.
+
+Rules:
+1. Preserve original names from the text. Do not translate, canonicalize, or merge aliases.
+2. Extract entities that are needed to form pairwise relations and 3+ entity hyperedges.
+3. Numeric values must be split into value/unit or value_min/value_max/unit when explicit.
+4. Avoid generic filler unless it is necessary to connect a fact.
+
+Output strict JSON array only:
+[
+  {{
+    "name": "<original name from text>",
+    "type": "ENTITY | CONCEPT | CONDITION | METRIC",
+    "subtype": "<short subtype or null>",
+    "value": <number or null>,
+    "value_min": <number or null>,
+    "value_max": <number or null>,
+    "unit": "<unit or null>",
+    "description": "<1-2 grounded sentences>",
+    "key_attribute": "<most identifying trait or null>"
+  }}
+]
+
+TEXT:
+{CHUNK_TEXT}
+
+Output ONLY the JSON array. No prose before or after.

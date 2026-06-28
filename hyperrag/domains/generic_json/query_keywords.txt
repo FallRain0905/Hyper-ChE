@@ -1,0 +1,14 @@
+{DOMAIN_CONTEXT}
+
+Extract retrieval keywords from the user query. Keep the existing JSON contract.
+
+Query:
+{QUERY}
+
+Return strict JSON only:
+{{
+  "high_level_keywords": ["<themes, mechanisms, comparison intents, broad relation concepts>"],
+  "low_level_keywords": ["<exact entity names, metrics, conditions, values, materials, methods>"],
+  "theme_keywords": ["<optional aliases of high_level_keywords>"],
+  "entity_keywords": ["<optional aliases of low_level_keywords>"]
+}}

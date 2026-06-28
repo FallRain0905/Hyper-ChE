@@ -1,0 +1,713 @@
+entities:
+  # Systems
+  - canonical_id: "system:vrfb"
+    canonical_name: "VRFB"
+    entity_type: "SYSTEM"
+    semantic_group: "flow_battery_system"
+    aliases:
+      - "vanadium redox flow battery"
+      - "vanadium redox flow batteries"
+      - "all-vanadium redox flow battery"
+      - "all vanadium flow battery"
+      - "VRFBs"
+
+  - canonical_id: "system:icrfb"
+    canonical_name: "ICRFB"
+    entity_type: "SYSTEM"
+    semantic_group: "flow_battery_system"
+    aliases:
+      - "iron-chromium redox flow battery"
+      - "iron chromium redox flow battery"
+      - "Fe-Cr redox flow battery"
+      - "Fe/Cr flow battery"
+
+  - canonical_id: "system:zinc_bromine_flow_battery"
+    canonical_name: "zinc-bromine flow battery"
+    entity_type: "SYSTEM"
+    semantic_group: "flow_battery_system"
+    aliases:
+      - "zinc bromine flow battery"
+      - "zinc-bromine battery"
+      - "Zn-Br flow battery"
+
+  - canonical_id: "system:soluble_lead_acid_flow_battery"
+    canonical_name: "soluble lead-acid flow battery"
+    entity_type: "SYSTEM"
+    semantic_group: "flow_battery_system"
+    aliases:
+      - "soluble lead flow battery"
+      - "soluble lead-acid flow cell"
+
+  - canonical_id: "system:organic_redox_flow_battery"
+    canonical_name: "organic redox flow battery"
+    entity_type: "SYSTEM"
+    semantic_group: "flow_battery_system"
+    aliases:
+      - "aqueous organic redox flow battery"
+      - "organic flow battery"
+
+  - canonical_id: "system:neutral_aqueous_organic_flow_battery"
+    canonical_name: "neutral aqueous organic flow battery"
+    entity_type: "SYSTEM"
+    semantic_group: "flow_battery_system"
+    aliases:
+      - "neutral aqueous organic redox flow battery"
+      - "neutral organic flow battery"
+
+  # Membranes
+  - canonical_id: "membrane:nafion"
+    canonical_name: "Nafion"
+    entity_type: "MEMBRANE"
+    semantic_group: "membrane_family"
+    aliases:
+      - "Nafion membrane"
+      - "Nafion series membrane"
+      - "perfluorosulfonic acid membrane"
+      - "PFSA membrane"
+
+  - canonical_id: "membrane:nafion_117"
+    canonical_name: "Nafion 117"
+    entity_type: "MEMBRANE"
+    semantic_group: "membrane_model"
+    parent_id: "membrane:nafion"
+    aliases:
+      - "N117"
+      - "Nafion117"
+      - "Nafion-117"
+
+  - canonical_id: "membrane:nafion_212"
+    canonical_name: "Nafion 212"
+    entity_type: "MEMBRANE"
+    semantic_group: "membrane_model"
+    parent_id: "membrane:nafion"
+    aliases:
+      - "N212"
+      - "Nafion212"
+      - "Nafion-212"
+
+  - canonical_id: "membrane:nafion_115"
+    canonical_name: "Nafion 115"
+    entity_type: "MEMBRANE"
+    semantic_group: "membrane_model"
+    parent_id: "membrane:nafion"
+    aliases:
+      - "N115"
+      - "Nafion115"
+      - "Nafion-115"
+
+  - canonical_id: "membrane:pbi"
+    canonical_name: "PBI"
+    entity_type: "MEMBRANE"
+    semantic_group: "membrane_family"
+    aliases:
+      - "polybenzimidazole"
+      - "PBI backbone"
+
+  - canonical_id: "membrane:snpbi_1_42"
+    canonical_name: "SNPBI-1.42"
+    entity_type: "MEMBRANE"
+    semantic_group: "membrane_model"
+    parent_id: "membrane:pbi"
+    aliases:
+      - "SNPBI 1.42"
+      - "SNPBI-1.42 membrane"
+
+  - canonical_id: "membrane:speek_apk"
+    canonical_name: "SPEEK/APK"
+    entity_type: "MEMBRANE"
+    semantic_group: "membrane_model"
+    aliases:
+      - "SPEEK-APK"
+      - "SPEEK/APK composite membrane"
+
+  - canonical_id: "membrane:sptpc_2_59"
+    canonical_name: "SPTPC-2.59"
+    entity_type: "MEMBRANE"
+    semantic_group: "membrane_model"
+    aliases:
+      - "SPTPC 2.59"
+      - "SPTPC-2.59 membrane"
+
+  - canonical_id: "membrane:anion_exchange_membrane"
+    canonical_name: "anion-exchange membrane"
+    entity_type: "MEMBRANE"
+    semantic_group: "membrane_family"
+    aliases:
+      - "anion exchange membrane"
+      - "AEM"
+
+  # Electrodes
+  - canonical_id: "electrode:graphite_felt"
+    canonical_name: "graphite felt"
+    entity_type: "ELECTRODE"
+    semantic_group: "electrode_material"
+    aliases:
+      - "graphite felt electrodes"
+      - "graphite felt electrode"
+      - "GF"
+
+  - canonical_id: "electrode:carbon_felt"
+    canonical_name: "carbon felt"
+    entity_type: "ELECTRODE"
+    semantic_group: "electrode_material"
+    aliases:
+      - "carbon felt electrode"
+      - "carbon felt electrodes"
+      - "CF"
+
+  - canonical_id: "electrode:activated_carbon_felt"
+    canonical_name: "activated carbon felt"
+    entity_type: "ELECTRODE"
+    semantic_group: "electrode_material"
+    aliases:
+      - "thermally activated carbon felt"
+      - "activated graphite felt"
+
+  - canonical_id: "electrode:c_c"
+    canonical_name: "C-C"
+    entity_type: "ELECTRODE"
+    semantic_group: "electrode_model"
+    aliases:
+      - "C C"
+      - "C C electrode"
+
+  - canonical_id: "electrode:mc_c"
+    canonical_name: "MC-C"
+    entity_type: "ELECTRODE"
+    semantic_group: "electrode_model"
+    aliases:
+      - "MC C"
+      - "MC C electrode"
+
+  - canonical_id: "electrode:bmc_c"
+    canonical_name: "BMC-C"
+    entity_type: "ELECTRODE"
+    semantic_group: "electrode_model"
+    aliases:
+      - "BMC C"
+      - "BMC C electrode"
+
+  # Species / additives / mechanisms
+  - canonical_id: "species:h2so4"
+    canonical_name: "H2SO4"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    compatible_types: ["CONDITION", "OPERATING_CONDITION"]
+    aliases:
+      - "sulfuric acid"
+      - "sulphuric acid"
+
+  - canonical_id: "species:bi3_plus"
+    canonical_name: "Bi3+"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    compatible_types: ["CONDITION", "OPERATING_CONDITION"]
+    aliases:
+      - "Bi3+ additive"
+      - "Bi-based additive"
+      - "bismuth additive"
+      - "bismuth-assisted additive"
+
+  - canonical_id: "degradation:her"
+    canonical_name: "hydrogen evolution reaction"
+    entity_type: "DEGRADATION"
+    semantic_group: "degradation_mechanism"
+    aliases:
+      - "HER"
+      - "hydrogen evolution"
+
+  - canonical_id: "active_species:cr_ii"
+    canonical_name: "Cr(II)"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    aliases:
+      - "Cr2+"
+      - "Cr(II)"
+      - "Cr²⁺"
+
+  - canonical_id: "active_species:cr_iii"
+    canonical_name: "Cr(III)"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    aliases:
+      - "Cr3+"
+      - "Cr(III)"
+      - "Cr³⁺"
+
+  - canonical_id: "active_species:cr_iii_cr_ii"
+    canonical_name: "Cr(III)/Cr(II)"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    aliases:
+      - "Cr(III)/Cr(II)"
+      - "Cr(II)/Cr(III)"
+      - "Cr3+/Cr2+"
+      - "Cr2+/Cr3+"
+
+  - canonical_id: "active_species:v_ii"
+    canonical_name: "V(II)"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    aliases:
+      - "V2+"
+      - "V(II)"
+      - "V²⁺"
+
+  - canonical_id: "active_species:v_iii"
+    canonical_name: "V(III)"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    aliases:
+      - "V3+"
+      - "V(III)"
+      - "V³⁺"
+
+  - canonical_id: "active_species:v_iv"
+    canonical_name: "V(IV)"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    aliases:
+      - "VO^2+"
+      - "VO²⁺"
+      - "vanadyl ion"
+
+  - canonical_id: "active_species:v_v"
+    canonical_name: "V(V)"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    aliases:
+      - "VO2+"
+      - "VO2(V)"
+      - "VO₂⁺"
+
+  - canonical_id: "active_species:v_ii_v_iii"
+    canonical_name: "V(II)/V(III)"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    aliases:
+      - "V(II)/V(III)"
+      - "V2+/V3+"
+
+  - canonical_id: "active_species:v_iv_v_v"
+    canonical_name: "V(IV)/V(V)"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    aliases:
+      - "V(IV)/V(V)"
+      - "VO2+/VO^2+"
+
+  - canonical_id: "active_species:oh_radical"
+    canonical_name: "·OH"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "radical_species"
+    aliases:
+      - "•OH"
+      - "OH radical"
+      - "hydroxyl radical"
+      - "hydroxyl radicals"
+
+  - canonical_id: "active_species:o2_radical"
+    canonical_name: "O2·-"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "radical_species"
+    aliases:
+      - "O2 radical anion"
+      - "superoxide radical"
+
+  - canonical_id: "active_species:pb2_plus"
+    canonical_name: "Pb2+"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    aliases:
+      - "Pb(II)"
+      - "lead ion"
+      - "lead ions"
+
+  - canonical_id: "active_species:br2"
+    canonical_name: "Br2"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    aliases:
+      - "bromine"
+
+  - canonical_id: "active_species:tempo"
+    canonical_name: "TEMPO"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    aliases:
+      - "TEMPO radical"
+
+  - canonical_id: "active_species:viologen"
+    canonical_name: "viologen"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    aliases:
+      - "viologen derivative"
+
+  - canonical_id: "active_species:quinone"
+    canonical_name: "quinone"
+    entity_type: "ACTIVE_SPECIES"
+    semantic_group: "species_or_additive"
+    aliases:
+      - "quinone-based active species"
+      - "quinone active species"
+
+  # Metrics
+  - canonical_id: "metric:ce"
+    canonical_name: "coulombic efficiency"
+    entity_type: "METRIC"
+    compatible_types: ["PERFORMANCE_METRIC"]
+    semantic_group: "efficiency_metric"
+    aliases:
+      - "CE"
+      - "coulombic efficiency (%)"
+
+  - canonical_id: "metric:ve"
+    canonical_name: "voltage efficiency"
+    entity_type: "METRIC"
+    compatible_types: ["PERFORMANCE_METRIC"]
+    semantic_group: "efficiency_metric"
+    aliases:
+      - "VE"
+      - "voltaic efficiency"
+      - "voltage efficiency (%)"
+
+  - canonical_id: "metric:ee"
+    canonical_name: "energy efficiency"
+    entity_type: "METRIC"
+    compatible_types: ["PERFORMANCE_METRIC"]
+    semantic_group: "efficiency_metric"
+    aliases:
+      - "EE"
+      - "energy efficiency (%)"
+
+  - canonical_id: "metric:energy_density"
+    canonical_name: "energy density"
+    entity_type: "METRIC"
+    semantic_group: "energy_metric"
+    aliases:
+      - "energy density"
+
+  - canonical_id: "metric:ion_exchange_capacity"
+    canonical_name: "ion exchange capacity"
+    entity_type: "METRIC"
+    semantic_group: "ion_exchange_metric"
+    aliases:
+      - "IEC"
+      - "IEC value"
+      - "ion-exchange capacity"
+
+  - canonical_id: "metric:area_resistance"
+    canonical_name: "area resistance"
+    entity_type: "METRIC"
+    semantic_group: "resistance_metric"
+    aliases:
+      - "area-specific resistance"
+      - "membrane area resistance"
+
+  - canonical_id: "metric:ohmic_resistance"
+    canonical_name: "ohmic resistance"
+    entity_type: "METRIC"
+    semantic_group: "resistance_metric"
+    aliases:
+      - "ohmic loss"
+
+  - canonical_id: "metric:charge_transfer_resistance"
+    canonical_name: "charge-transfer resistance"
+    entity_type: "METRIC"
+    semantic_group: "resistance_metric"
+    aliases:
+      - "charge transfer resistance"
+      - "Rct"
+
+  - canonical_id: "metric:peak_separation"
+    canonical_name: "peak separation"
+    entity_type: "METRIC"
+    semantic_group: "electrochemical_evidence_metric"
+    compatible_types: ["MECHANISM_EVIDENCE"]
+    aliases:
+      - "CV peak separation"
+      - "smaller CV peak separation"
+      - "peak-to-peak separation"
+
+  - canonical_id: "metric:membrane_resistance"
+    canonical_name: "membrane resistance"
+    entity_type: "METRIC"
+    semantic_group: "resistance_metric"
+    aliases:
+      - "separator resistance"
+
+  - canonical_id: "metric:surface_roughness"
+    canonical_name: "surface roughness"
+    entity_type: "METRIC"
+    semantic_group: "morphology_metric"
+    aliases:
+      - "roughness"
+
+  - canonical_id: "metric:contact_angle"
+    canonical_name: "contact angle"
+    entity_type: "METRIC"
+    semantic_group: "morphology_metric"
+    aliases: []
+
+  - canonical_id: "metric:wettability"
+    canonical_name: "wettability"
+    entity_type: "METRIC"
+    semantic_group: "morphology_metric"
+    aliases:
+      - "surface wettability"
+
+  - canonical_id: "evidence:smaller_cv_peak_separation"
+    canonical_name: "smaller CV peak separation"
+    entity_type: "MECHANISM_EVIDENCE"
+    semantic_group: "electrochemical_evidence"
+    compatible_types: ["METRIC"]
+    aliases:
+      - "smaller CV peak separation"
+      - "reduced CV peak separation"
+
+  - canonical_id: "degradation:electrode_polarization"
+    canonical_name: "electrode polarization"
+    entity_type: "DEGRADATION"
+    semantic_group: "degradation_mechanism"
+    aliases:
+      - "electrode polarization"
+      - "severe electrode polarization"
+
+  - canonical_id: "degradation:local_polarization"
+    canonical_name: "local polarization"
+    entity_type: "DEGRADATION"
+    semantic_group: "degradation_mechanism"
+    aliases:
+      - "localpolarization"
+      - "local polarization"
+
+  - canonical_id: "degradation:uneven_pb_deposition"
+    canonical_name: "uneven Pb deposition"
+    entity_type: "DEGRADATION"
+    semantic_group: "degradation_mechanism"
+    aliases:
+      - "unevenpbdeposition"
+      - "uneven Pb deposition"
+      - "uneven lead deposition"
+
+  - canonical_id: "metric:polarization_voltage"
+    canonical_name: "polarization voltage"
+    entity_type: "METRIC"
+    semantic_group: "polarization_metric"
+    aliases:
+      - "polarization voltage difference"
+      - "polarization delta"
+      - "voltage loss"
+      - "voltage drop"
+      - "ohmic voltage drop"
+
+  - canonical_id: "metric:voltage_loss"
+    canonical_name: "voltage loss"
+    entity_type: "METRIC"
+    semantic_group: "polarization_metric"
+    aliases:
+      - "voltage-loss"
+
+  - canonical_id: "metric:capacity_retention"
+    canonical_name: "capacity retention"
+    entity_type: "METRIC"
+    semantic_group: "capacity_metric"
+    aliases:
+      - "capacity retention (%)"
+
+  - canonical_id: "metric:pumping_loss"
+    canonical_name: "pumping loss"
+    entity_type: "METRIC"
+    semantic_group: "hydraulic_metric"
+    aliases:
+      - "pump loss"
+
+  - canonical_id: "metric:mass_transfer"
+    canonical_name: "mass transfer"
+    entity_type: "METRIC"
+    semantic_group: "transport_metric"
+    compatible_types: ["DEGRADATION"]
+    aliases:
+      - "electrolyte mass transfer"
+
+  - canonical_id: "degradation:vanadium_crossover"
+    canonical_name: "vanadium crossover"
+    entity_type: "DEGRADATION"
+    compatible_types: ["METRIC"]
+    semantic_group: "degradation_mechanism"
+    aliases:
+      - "vanadium ion crossover"
+      - "vanadium species crossover"
+
+  - canonical_id: "degradation:capacity_fading"
+    canonical_name: "capacity fading"
+    entity_type: "DEGRADATION"
+    semantic_group: "degradation_mechanism"
+    aliases:
+      - "capacity decay"
+      - "capacity fade"
+
+  - canonical_id: "degradation:dendrite_growth"
+    canonical_name: "dendrite growth"
+    entity_type: "DEGRADATION"
+    semantic_group: "degradation_mechanism"
+    aliases:
+      - "zinc dendrite growth"
+      - "dendrite formation"
+
+  - canonical_id: "degradation:electrolyte_imbalance"
+    canonical_name: "electrolyte imbalance"
+    entity_type: "DEGRADATION"
+    semantic_group: "degradation_mechanism"
+    aliases:
+      - "electrolyte imbalance"
+
+  - canonical_id: "degradation:mass_transfer_limitation"
+    canonical_name: "mass-transfer limitation"
+    entity_type: "DEGRADATION"
+    semantic_group: "degradation_mechanism"
+    aliases:
+      - "mass transfer limitation"
+      - "mass-transfer polarization"
+
+  - canonical_id: "degradation:concentration_polarization"
+    canonical_name: "concentration polarization"
+    entity_type: "DEGRADATION"
+    semantic_group: "degradation_mechanism"
+    aliases:
+      - "concentration overpotential"
+
+  # Conditions
+  - canonical_id: "condition:current_density"
+    canonical_name: "current density"
+    entity_type: "CONDITION"
+    compatible_types: ["OPERATING_CONDITION"]
+    semantic_group: "current_condition"
+    aliases:
+      - "applied current density"
+
+  - canonical_id: "condition:vanadium_concentration"
+    canonical_name: "vanadium concentration"
+    entity_type: "CONDITION"
+    compatible_types: ["OPERATING_CONDITION", "ACTIVE_SPECIES"]
+    semantic_group: "concentration_condition"
+    aliases:
+      - "vanadium electrolyte concentration"
+      - "vanadium ions concentration"
+
+  - canonical_id: "condition:acid_concentration"
+    canonical_name: "acid concentration"
+    entity_type: "CONDITION"
+    compatible_types: ["OPERATING_CONDITION"]
+    semantic_group: "concentration_condition"
+    aliases:
+      - "H2SO4 concentration"
+      - "sulfuric acid concentration"
+
+  - canonical_id: "condition:electrolyte_concentration"
+    canonical_name: "electrolyte concentration"
+    entity_type: "CONDITION"
+    compatible_types: ["OPERATING_CONDITION"]
+    semantic_group: "concentration_condition"
+    aliases: []
+
+  - canonical_id: "condition:bi3_concentration"
+    canonical_name: "Bi3+ concentration"
+    entity_type: "CONDITION"
+    compatible_types: ["OPERATING_CONDITION", "ACTIVE_SPECIES"]
+    semantic_group: "concentration_condition"
+    aliases:
+      - "Bi3+ additive concentration"
+      - "bismuth additive concentration"
+
+  - canonical_id: "condition:temperature"
+    canonical_name: "temperature"
+    entity_type: "CONDITION"
+    compatible_types: ["OPERATING_CONDITION"]
+    semantic_group: "temperature_condition"
+    aliases:
+      - "operating temperature"
+
+  - canonical_id: "condition:cycle_number"
+    canonical_name: "cycle number"
+    entity_type: "CONDITION"
+    compatible_types: ["OPERATING_CONDITION"]
+    semantic_group: "cycle_condition"
+    aliases:
+      - "cycles"
+      - "cycle"
+
+  - canonical_id: "condition:flow_rate"
+    canonical_name: "flow rate"
+    entity_type: "CONDITION"
+    compatible_types: ["OPERATING_CONDITION"]
+    semantic_group: "flow_condition"
+    aliases:
+      - "electrolyte flow rate"
+
+  - canonical_id: "condition:ph"
+    canonical_name: "pH"
+    entity_type: "CONDITION"
+    compatible_types: ["OPERATING_CONDITION"]
+    semantic_group: "ph_condition"
+    aliases:
+      - "pH value"
+
+  # PFAS / catalyst entries retained for case2 compatibility
+  - canonical_id: "pfas:pfoa"
+    canonical_name: "PFOA"
+    entity_type: "PFAS_TARGET"
+    aliases:
+      - "perfluorooctanoic acid"
+      - "perfluorooctanoate"
+      - "C8"
+      - "C8-PFCA"
+
+  - canonical_id: "pfas:pfos"
+    canonical_name: "PFOS"
+    entity_type: "PFAS_TARGET"
+    aliases:
+      - "perfluorooctanesulfonic acid"
+      - "perfluorooctanesulfonate"
+      - "perfluorooctane sulfonate"
+      - "C8S"
+
+  - canonical_id: "pfas:pfba"
+    canonical_name: "PFBA"
+    entity_type: "PFAS_TARGET"
+    aliases:
+      - "perfluorobutanoic acid"
+      - "perfluorobutanoate"
+
+  - canonical_id: "pfas:pfbs"
+    canonical_name: "PFBS"
+    entity_type: "PFAS_TARGET"
+    aliases:
+      - "perfluorobutanesulfonic acid"
+      - "perfluorobutanesulfonate"
+      - "perfluorobutane sulfonate"
+
+  - canonical_id: "pfas:genx"
+    canonical_name: "GenX"
+    entity_type: "PFAS_TARGET"
+    aliases:
+      - "HFPO-DA"
+      - "hexafluoropropylene oxide dimer acid"
+
+  - canonical_id: "catalyst:batio3"
+    canonical_name: "BaTiO3"
+    entity_type: "CATALYST_MATERIAL"
+    aliases:
+      - "BaTiO3"
+      - "BaTiO₃"
+      - "BTO"
+      - "barium titanate"
+
+  - canonical_id: "catalyst:pt_bto_bo"
+    canonical_name: "Pt/BTO/BO"
+    entity_type: "CATALYST_MATERIAL"
+    parent_id: "catalyst:batio3"
+    aliases:
+      - "Pt-BTO-BO"
+      - "Pt/BaTiO3/BO"
