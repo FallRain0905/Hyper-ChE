@@ -73,7 +73,7 @@ const RetrievalHyperGraph = ({
     try {
       const zoom = graph.getZoom()
       if (!(zoom > 0)) return
-      graph.updateNodeData(graph.getNodeData().map(node => ({ id: node.id, style: { labelFontSize: Math.min(44, 13 / zoom) } })))
+      graph.updateNodeData(graph.getNodeData().map(node => ({ id: node.id, style: { labelFontSize: Math.min(180, 13 / zoom) } })))
       graph.draw().catch(() => undefined)
     } catch { /* The viewport can be absent during initialization or disposal. */ }
   }, [])
