@@ -23,23 +23,15 @@ class GlobalUser {
   }
 
   async getUserDetail() {
-    // const res = await getCurrentUserInfo()
-    // this.userInfo = res?.data
-    // new WebSee(res?.data?.username)
-    this.userInfo = {
-      roles: [
-        {
-          id: 5,
-          name: '超级管理员',
-          description: '拥有所有查看和操作功能',
-          adminCount: 0,
-          status: 1,
-          sort: 5
+    // Identity now comes from the authenticated session; the legacy hard-coded
+    // admin stub and its remote avatar URL have been removed.
+    const user = authStore.user
+    this.userInfo = user
+      ? {
+          username: user.display_name || user.email,
+          roles: [{ id: user.role === 'admin' ? 5 : 1, name: user.role === 'admin' ? '管理员' : '用户', description: '', adminCount: 0, status: 1, sort: 1 }],
         }
-      ],
-      icon: 'http://jinpika-1308276765.cos.ap-shanghai.myqcloud.com/bootdemo-file/20221220/src=http___desk-fd.zol-img.com.cn_t_s960x600c5_g2_M00_00_0B_ChMlWl6yKqyILFoCACn-5rom2uIAAO4DgEODxAAKf7-298.jpg&refer=http___desk-fd.zol-img.com.png',
-      username: 'admin'
-    }
+      : {}
   }
 
   setUserInfo(user: Partial<User.UserEntity>) {
@@ -48,27 +40,22 @@ class GlobalUser {
 
   // 设置当前选中的数据库
   setSelectedDatabase(database: string) {
-    console.log('[GlobalUser] setSelectedDatabase 被调用:', database, '当前 lastSetDbValue:', this.lastSetDbValue);
     // 防止重复设置相同值
     if (this.lastSetDbValue === database) {
-      console.log('[GlobalUser] 跳过重复设置');
       return;
     }
     this.lastSetDbValue = database;
     this.selectedDatabase = database
     // 保存到localStorage
     localStorage.setItem(this.selectedDatabaseKey(), database)
-    console.log('[GlobalUser] selectedDatabase 已更新为:', database);
   }
 
   // 设置可用数据库列表
   setAvailableDatabases(databases: Array<{ name: string; description: string }>) {
-    console.log('[GlobalUser] setAvailableDatabases 被调用，数据库数量:', databases.length);
     this.availableDatabases = databases
 
     // 检查当前选择的数据库是否还在列表中
     if (this.selectedDatabase && !databases.find(db => db.name === this.selectedDatabase)) {
-      console.log('[GlobalUser] 当前选择的数据库不在列表中，清除选择');
       this.selectedDatabase = '';
       this.lastSetDbValue = '';
       localStorage.removeItem(this.selectedDatabaseKey());
@@ -81,12 +68,10 @@ class GlobalUser {
   // 从localStorage恢复选中的数据库（仅恢复名称，不触发加载）
   restoreSelectedDatabase() {
     const saved = localStorage.getItem(this.selectedDatabaseKey())
-    console.log('[GlobalUser] restoreSelectedDatabase 被调用, saved:', saved, '当前 selectedDatabase:', this.selectedDatabase);
     if (saved && !this.selectedDatabase) {
       // 只在没有选中数据库时才恢复
       this.selectedDatabase = saved
       this.lastSetDbValue = saved;
-      console.log('[GlobalUser] 已从 localStorage 恢复数据库:', saved);
       // 不再自动设置可视化状态，等待用户手动触发
     }
   }
@@ -124,7 +109,6 @@ class GlobalUser {
         return databases
       }
     } catch (error) {
-      console.error('加载数据库列表失败:', error)
     } finally {
       this.isLoadingDatabases = false;
     }

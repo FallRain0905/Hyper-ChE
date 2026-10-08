@@ -1,0 +1,13 @@
+﻿caches:
+  text_segments: web-ui/backend/hyperrag_cache/real_flow_20_v1/hyper_final
+  original_hypergraph: web-ui/backend/hyperrag_cache/real_flow_20_v1/hyper_base
+  chem_prompt_graph: web-ui/backend/hyperrag_cache/real_flow_20_v1/hyper_chem_prompt
+  chem_prompt_hypergraph: web-ui/backend/hyperrag_cache/real_flow_20_v1/hyper_chem_prompt
+  chem_norm_hypergraph: web-ui/backend/hyperrag_cache/real_flow_20_v1/hyper_final
+
+views:
+  text_segments: text
+  original_hypergraph: hyper
+  chem_prompt_graph: graph
+  chem_prompt_hypergraph: hyper
+  chem_norm_hypergraph: hyper

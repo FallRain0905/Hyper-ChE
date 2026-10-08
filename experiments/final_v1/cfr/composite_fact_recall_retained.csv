@@ -1,0 +1,6 @@
+system,facts,supported_facts,Composite Fact Recall@5,macro_query_CFR@5,method
+chem_prompt_graph,150,50,0.333333,0.321296,accepted_atomic_gold_exact_chunk_binding
+chem_prompt_hypergraph,150,24,0.16,0.201058,accepted_atomic_gold_exact_chunk_binding
+normalized_final,150,64,0.426667,0.432407,accepted_atomic_gold_exact_chunk_binding
+normalized_final_no_rerank,150,64,0.426667,0.432407,accepted_atomic_gold_exact_chunk_binding
+original_hypergraph,150,14,0.093333,0.196296,accepted_atomic_gold_exact_chunk_binding

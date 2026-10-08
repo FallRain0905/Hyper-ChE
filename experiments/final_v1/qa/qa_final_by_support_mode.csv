@@ -1,0 +1,5 @@
+﻿group,support_mode,questions,Good Rate,Satisfactory-or-Better Rate,Macro KPC,Micro KPC,Hallucination Rate,False Abstention Rate,False Answer Rate,Unanswerable Abstention Accuracy,Citation Reference Validity,Citation Presence Rate,Citation Support Score (LLM)
+normalized_final,adjacent_chunks,7,0.2857,0.7143,0.6357,0.6207,0.1429,0.1429,0.0,0.0,1.0,0.8571,0.6429
+normalized_final,cross_section,17,0.1765,0.5882,0.4804,0.4776,0.1765,0.1176,0.0,0.0,1.0,0.8824,0.5157
+normalized_final,none,5,0.2,0.2,0.2,0.2,0.0,0.0,0.0,1.0,,0.0,0.16
+normalized_final,single_chunk,11,0.3636,0.3636,0.447,0.4595,0.3636,0.2727,0.0,0.0,1.0,0.7273,0.4118

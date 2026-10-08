@@ -602,6 +602,25 @@ def get_relationship_extraction_prompt(domain='default', **kwargs):
     except FileNotFoundError:
         return None
 
+def get_one_pass_extraction_prompt(domain='default', **kwargs):
+    """
+    Get a one-pass entity + low/high relationship extraction prompt.
+
+    Returns None when a domain has no one-pass template so callers can fall
+    back to the existing entity-then-relationship JSON flow.
+    """
+    if domain == 'default' or not DOMAIN_SUPPORT_AVAILABLE:
+        return None
+
+    try:
+        template = domain_manager.get_prompt_template('one_pass_extraction', domain)
+        domain_context = get_domain_context(domain)
+
+        kwargs['DOMAIN_CONTEXT'] = domain_context
+        return template.format(**kwargs)
+    except FileNotFoundError:
+        return None
+
 def get_query_keywords_prompt(domain='default', **kwargs):
     """
     Get query keywords extraction prompt for a specific domain

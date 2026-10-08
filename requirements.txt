@@ -9,3 +9,5 @@ tiktoken
 xxhash
 hypergraph-db
 rapidfuzz
+
+PyYAML>=6.0

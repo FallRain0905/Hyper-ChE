@@ -61,7 +61,7 @@ const RetrievalHyperGraph = ({
       }
     })
 
-    // 处理主题数据 (Cog-RAG特有)
+    // 处理主题数据（主题节点来自主题超图索引）
     themes.forEach(theme => {
       const themeName = String(theme.theme_name || `Theme_${Math.random()}`)
       vertices[themeName] = {

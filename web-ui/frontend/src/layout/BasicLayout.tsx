@@ -19,9 +19,12 @@ function LayoutContent() {
   const { collapsed } = useSidebar()
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="relative flex min-h-screen overflow-hidden bg-[#f7f8fa]">
+      <div className="hyperche-grid pointer-events-none fixed inset-0 opacity-30" />
+      <div className="hyperche-drift pointer-events-none fixed -right-32 top-16 h-80 w-80 rounded-full bg-blue-200/25 blur-3xl" />
+      <div className="hyperche-drift-reverse pointer-events-none fixed bottom-0 left-1/3 h-72 w-72 rounded-full bg-violet-200/20 blur-3xl" />
       <Sidebar />
-      <div className={`flex-1 transition-all duration-200 ${collapsed ? 'lg:ml-16' : 'lg:ml-60'}`}>
+      <div className={`relative z-10 min-w-0 flex-1 transition-all duration-300 ${collapsed ? 'lg:ml-16' : 'lg:ml-60'}`}>
         <Outlet />
       </div>
     </div>

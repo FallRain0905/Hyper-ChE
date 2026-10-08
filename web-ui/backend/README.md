@@ -1,10 +1,11 @@
-## 开发
+# HyperChE backend
 
-fastapi dev main.py
+Install both Python requirement files from the repository root. From this
+directory launch `python -m uvicorn main:app --host 127.0.0.1 --port 8000`.
 
-Server started at http://127.0.0.1:8000
+Set HYPERCHE_ADMIN_EMAIL and HYPERCHE_ADMIN_PASSWORD to create the administrator.
+Model credentials are configured through provider channels or private local
+settings. No administrator account is automatically created without those fields.
 
-Documentation at http://127.0.0.1:8000/docs
-
-source .venv/bin/activate
-nohup fastapi run main.py > server.log 2>&1 &
+See the root README and deploy/README.md for application keys, persistent storage
+and Docker setup. Knowledge-base caches and settings.json are not published.

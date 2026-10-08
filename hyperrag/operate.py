@@ -14,6 +14,7 @@ from .utils import (
     logger,
     clean_str,
     compute_mdhash_id,
+    relationship_vector_id,
     decode_tokens_by_tiktoken,
     encode_string_by_tiktoken,
     is_float_regex,
@@ -78,6 +79,213 @@ def _format_llm_exception(error: Exception) -> str:
 def _log_step_exception(chunk_key: str, step: str, label: str, error: Exception) -> None:
     detail = _format_llm_exception(error)
     logger.error(f"[{chunk_key}] {step} FAILED - {label}: {detail}")
+
+
+async def _await_with_llm_heartbeat(
+    awaitable,
+    *,
+    chunk_key: str,
+    step: str,
+    label: str,
+    interval: float = 60.0,
+):
+    """Await a long LLM request while emitting periodic progress logs.
+
+    Provider calls for long chemistry chunks can legitimately take many minutes.
+    Without this heartbeat, the log stays silent between "Calling LLM" and
+    "LLM returned", which makes a healthy but slow request look stuck.
+    """
+    task = asyncio.create_task(awaitable)
+    start = time.perf_counter()
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=interval)
+            if task in done:
+                return await task
+            logger.info(
+                f"[{chunk_key}] {step}: still waiting for {label} "
+                f"after {time.perf_counter() - start:.2f}s"
+            )
+    except Exception:
+        if not task.done():
+            task.cancel()
+        raise
+
+
+def _get_max_entities_per_chunk(global_config: dict) -> int:
+    try:
+        return int(global_config.get("max_entities_per_chunk") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _limit_json_entities_for_chunk(
+    entities_json: list[dict],
+    chunk_key: str,
+    global_config: dict,
+    *,
+    stage: str,
+) -> list[dict]:
+    max_entities = _get_max_entities_per_chunk(global_config)
+    if max_entities <= 0 or len(entities_json) <= max_entities:
+        return entities_json
+
+    kept = entities_json[:max_entities]
+    dropped = entities_json[max_entities:]
+    logger.warning(
+        f"[{chunk_key}] {stage}: entity count capped at {max_entities}; "
+        f"dropped {len(dropped)} of {len(entities_json)} entities. "
+        f"dropped_examples={[e.get('name') or e.get('node_id') or e.get('instance_id') for e in dropped[:8]]}"
+    )
+    return kept
+
+
+def _limit_default_extraction_for_chunk(
+    maybe_nodes: dict,
+    maybe_edges: dict,
+    maybe_edges_low: dict,
+    maybe_edges_high: dict,
+    chunk_key: str,
+    global_config: dict,
+) -> tuple[dict, dict, dict, dict]:
+    max_entities = _get_max_entities_per_chunk(global_config)
+    if max_entities <= 0 or len(maybe_nodes) <= max_entities:
+        return maybe_nodes, maybe_edges, maybe_edges_low, maybe_edges_high
+
+    kept_names = set(list(maybe_nodes.keys())[:max_entities])
+    dropped_names = [name for name in maybe_nodes.keys() if name not in kept_names]
+
+    def _filter_edges(edges: dict) -> dict:
+        filtered = {}
+        dropped_edge_count = 0
+        for key, value in edges.items():
+            names = set(key if isinstance(key, (tuple, list, set)) else [key])
+            if names.issubset(kept_names):
+                filtered[key] = value
+            else:
+                dropped_edge_count += len(value) if isinstance(value, list) else 1
+        return filtered, dropped_edge_count
+
+    filtered_edges, dropped_edges = _filter_edges(maybe_edges)
+    filtered_low, dropped_low = _filter_edges(maybe_edges_low)
+    filtered_high, dropped_high = _filter_edges(maybe_edges_high)
+    filtered_nodes = {name: maybe_nodes[name] for name in maybe_nodes.keys() if name in kept_names}
+
+    logger.warning(
+        f"[{chunk_key}] Original prompt extraction capped at {max_entities} entities; "
+        f"dropped_entities={len(dropped_names)}, dropped_edges={dropped_edges}, "
+        f"dropped_low={dropped_low}, dropped_high={dropped_high}, "
+        f"dropped_entity_examples={dropped_names[:8]}"
+    )
+    return filtered_nodes, filtered_edges, filtered_low, filtered_high
+
+
+def _as_text_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _unique_text(values) -> list[str]:
+    seen = set()
+    result = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
+def _compact_text(value: str, limit: int = 1200) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "..."
+
+
+def _chunk_metadata(chunk_key: str, chunk_dp: dict | None = None) -> dict:
+    chunk_dp = chunk_dp or {}
+    return {
+        "source_id": chunk_key,
+        "source_doc_id": chunk_dp.get("source_doc_id") or chunk_dp.get("doc_id") or chunk_dp.get("full_doc_id") or "",
+        "source_chunk_id": chunk_dp.get("source_chunk_id") or chunk_dp.get("chunk_id") or chunk_key,
+        "chunk_id": chunk_dp.get("chunk_id") or chunk_key,
+        "source_file": chunk_dp.get("source_file", ""),
+        "text_hash": chunk_dp.get("text_hash", ""),
+    }
+
+
+def _attach_chunk_metadata(item: dict, metadata: dict) -> dict:
+    for field in ("source_doc_id", "source_chunk_id", "chunk_id", "source_file", "text_hash"):
+        if metadata.get(field) and not item.get(field):
+            item[field] = metadata[field]
+    return item
+
+
+def _split_evidence_sentences(content: str) -> list[str]:
+    content = str(content or "")
+    if not content.strip():
+        return []
+    parts = re.split(r"(?<=[。！？!?;；])\s+|(?<=[.!?])\s+(?=[A-Z0-9])|\n+", content)
+    sentences = [_compact_text(part, 600) for part in parts if part and part.strip()]
+    if not sentences and content.strip():
+        sentences = [_compact_text(content, 600)]
+    return sentences
+
+
+def _terms_from_relation(relation: dict) -> list[str]:
+    terms = []
+    for key in ("source", "target", "relation_type", "keywords", "description", "evidence_span"):
+        terms.extend(_as_text_list(relation.get(key)))
+    terms.extend(_as_text_list(relation.get("vertices")))
+    terms.extend(_as_text_list(relation.get("entityN")))
+    terms.extend(_as_text_list(relation.get("entities_pair")))
+    terms.extend(_as_text_list(relation.get("entities_set")))
+    terms.extend(re.findall(r"\b\d+(?:\.\d+)?\s*(?:%|mA\s*/?\s*cm[-−]?\s*2|mA\s*cm[-−]?\s*2|mol\s*/?\s*L|mmol\s*/?\s*g|ohm\s*cm2|cycles?|°C|V)\b", " ".join(map(str, terms)), flags=re.I))
+    cleaned = []
+    for term in terms:
+        term = re.sub(r"\s+", " ", str(term or "")).strip()
+        if len(term) >= 2:
+            cleaned.append(term)
+    return _unique_text(cleaned)
+
+
+def _repair_relation_source_span(relation: dict, content: str) -> str:
+    existing = relation.get("source_span") or relation.get("evidence_span")
+    if existing:
+        return _compact_text(existing, 1200)
+
+    sentences = _split_evidence_sentences(content)
+    if not sentences:
+        return _compact_text(content, 600)
+
+    terms = _terms_from_relation(relation)
+    if not terms:
+        return _compact_text(sentences[0], 600)
+
+    term_lowers = [term.lower() for term in terms]
+    scored = []
+    for index, sentence in enumerate(sentences):
+        lower = sentence.lower()
+        score = 0.0
+        for term, term_lower in zip(terms, term_lowers):
+            if term_lower and term_lower in lower:
+                score += 3.0 if len(term_lower) > 4 else 1.0
+        score += len(set(re.findall(r"\d+(?:\.\d+)?", lower)) & set(re.findall(r"\d+(?:\.\d+)?", " ".join(term_lowers)))) * 1.5
+        if score:
+            scored.append((score, index, sentence))
+
+    if not scored:
+        return _compact_text(content, 600)
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    chosen = sorted({index for _, index, _ in scored[:2]})
+    return _compact_text(" ".join(sentences[index] for index in chosen), 1200)
     logger.debug(
         f"[{chunk_key}] {step} FAILED traceback:\n"
         f"{''.join(traceback.format_exception(type(error), error, error.__traceback__))}"
@@ -358,6 +566,115 @@ def parse_json_combined_relationships(json_str: str, chunk_key: str = "") -> tup
     )
     return low_relations, high_relations
 
+def _repair_invalid_json_escapes(json_text: str) -> tuple[str, int]:
+    """Escape JSON-invalid backslashes commonly emitted in chemistry/LaTeX text.
+
+    Valid JSON escapes (including ``\\uXXXX``) are preserved. Sequences such as
+    ``\\mathrm``, ``\\mu``, ``\\ce`` and ``\\Delta`` are converted to literal
+    backslashes so the model response can be parsed without another LLM call.
+    """
+    return re.subn(
+        r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})',
+        r'\\\\',
+        json_text,
+    )
+
+
+
+def parse_json_one_pass_extraction(json_str: str, chunk_key: str = "") -> tuple[list, list, list]:
+    """
+    Parse one-pass JSON extraction output.
+
+    Expected format:
+    {
+      "entities": [...],
+      "low_order_relations": [...],
+      "high_order_hyperedges": [...]
+    }
+    """
+    logger.debug(f"[{chunk_key}] parse_json_one_pass_extraction: Raw response (first 500 chars): {json_str[:500]}")
+
+    json_str = re.sub(r'```json\s*', '', json_str)
+    json_str = re.sub(r'```\s*', '', json_str)
+    json_str = json_str.strip()
+
+    json_match = re.search(r'\{.*\}', json_str, re.DOTALL)
+    if not json_match:
+        logger.error(f"[{chunk_key}] parse_json_one_pass_extraction: No JSON object found (first 1000 chars): {json_str[:1000]}")
+        return [], [], []
+
+    extracted_json = json_match.group()
+    try:
+        data = json.loads(extracted_json)
+    except json.JSONDecodeError as e:
+        logger.warning(f"[{chunk_key}] parse_json_one_pass_extraction: JSON decode error at position {e.pos}: {e.msg}")
+        try:
+            fixed_json = re.sub(r',\s*([}\]])', r'\1', extracted_json)
+            fixed_json, repaired_escape_count = _repair_invalid_json_escapes(fixed_json)
+            fixed_json = re.sub(r'\s+', ' ', fixed_json)
+            data = json.loads(fixed_json)
+            logger.info(
+                f"[{chunk_key}] parse_json_one_pass_extraction: Successfully parsed after fixing "
+                f"(invalid_escapes_repaired={repaired_escape_count})"
+            )
+        except Exception as e2:
+            logger.warning(f"[{chunk_key}] parse_json_one_pass_extraction: Fix attempt failed: {e2}")
+            return [], [], []
+
+    if not isinstance(data, dict):
+        logger.warning(f"[{chunk_key}] parse_json_one_pass_extraction: Expected object, got {type(data)}")
+        return [], [], []
+
+    entities = data.get("entities", [])
+    low_relations = data.get("low_order_relations", [])
+    high_relations = data.get("high_order_hyperedges", [])
+
+    if not isinstance(entities, list):
+        logger.warning(f"[{chunk_key}] parse_json_one_pass_extraction: entities is not a list")
+        entities = []
+    if not isinstance(low_relations, list):
+        logger.warning(f"[{chunk_key}] parse_json_one_pass_extraction: low_order_relations is not a list")
+        low_relations = []
+    if not isinstance(high_relations, list):
+        logger.warning(f"[{chunk_key}] parse_json_one_pass_extraction: high_order_hyperedges is not a list")
+        high_relations = []
+
+    logger.info(
+        f"[{chunk_key}] parse_json_one_pass_extraction: Parsed "
+        f"{len(entities)} entities, {len(low_relations)} low-order relations, "
+        f"{len(high_relations)} high-order hyperedges"
+    )
+    return entities, low_relations, high_relations
+
+
+def _is_valid_empty_one_pass_extraction(json_str: str) -> bool:
+    """Return True only for a well-formed one-pass response with three empty lists."""
+    cleaned = re.sub(r'```json\s*', '', json_str or "")
+    cleaned = re.sub(r'```\s*', '', cleaned).strip()
+    json_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+    if not json_match:
+        return False
+    try:
+        data = json.loads(json_match.group())
+    except json.JSONDecodeError:
+        try:
+            fixed_json = re.sub(r',\s*([}\]])', r'\1', json_match.group())
+            data = json.loads(fixed_json)
+        except Exception:
+            return False
+    if not isinstance(data, dict):
+        return False
+    required_fields = (
+        "entities",
+        "low_order_relations",
+        "high_order_hyperedges",
+    )
+    return all(
+        field in data and isinstance(data[field], list) and len(data[field]) == 0
+        for field in required_fields
+    )
+
+
 def convert_json_entity_to_standard_format(entity: dict, chunk_key: str = "") -> dict:
     """
     Convert JSON entity format to standard Hyper-RAG entity format
@@ -405,6 +722,11 @@ def convert_json_entity_to_standard_format(entity: dict, chunk_key: str = "") ->
         "need_review",
         "source_mentions",
         "attributes",
+        "source_doc_id",
+        "source_chunk_id",
+        "chunk_id",
+        "source_file",
+        "text_hash",
     ):
         if entity.get(field) is not None:
             result[field] = entity[field]
@@ -432,6 +754,13 @@ def convert_json_relation_to_standard_format(relation: dict, chunk_key: str = ""
             result["relation_type"] = relation["relation_type"]
         if relation.get("evidence_span"):
             result["evidence_span"] = relation["evidence_span"]
+        if relation.get("source_span"):
+            result["source_span"] = relation["source_span"]
+        if relation.get("evidence_instances"):
+            result["evidence_instances"] = relation["evidence_instances"]
+        for field in ("source_doc_id", "source_chunk_id", "chunk_id", "source_file", "text_hash"):
+            if relation.get(field) is not None:
+                result[field] = relation[field]
         for field in ("repair_applied", "repair_rules", "repair_confidence"):
             if relation.get(field) is not None:
                 result[field] = relation[field]
@@ -454,6 +783,13 @@ def convert_json_relation_to_standard_format(relation: dict, chunk_key: str = ""
             result["relation_type"] = relation["relation_type"]
         if relation.get("evidence_span"):
             result["evidence_span"] = relation["evidence_span"]
+        if relation.get("source_span"):
+            result["source_span"] = relation["source_span"]
+        if relation.get("evidence_instances"):
+            result["evidence_instances"] = relation["evidence_instances"]
+        for field in ("source_doc_id", "source_chunk_id", "chunk_id", "source_file", "text_hash"):
+            if relation.get(field) is not None:
+                result[field] = relation[field]
         for field in ("repair_applied", "repair_rules", "repair_confidence"):
             if relation.get(field) is not None:
                 result[field] = relation[field]
@@ -923,15 +1259,16 @@ def chunking_by_token_size(
 
 
 CHUNK_HEADING_RE = re.compile(
-    r"(?m)^(#{1,6})\s*Chunk\s+([A-Za-z0-9][A-Za-z0-9_.-]*)\b[^\n]*$"
+    r"(?m)^(#{1,6})\s*(?:Chunk\s+([A-Za-z0-9][A-Za-z0-9_.-]*)\b|DOC\s*([A-Za-z0-9][A-Za-z0-9_.-]*)\s*:)[^\n]*$"
 )
 
 
 def _chunking_by_markdown_chunk_headings(content: str, *, tiktoken_model: str) -> list[dict]:
-    """Split curated markdown corpora by explicit ``## Chunk XXX`` headings.
+    """Split curated markdown corpora by explicit semantic headings.
 
-    These headings are semantic hard boundaries in the gold corpora. Keeping them
-    separate reduces cross-experiment binding errors during EFU extraction.
+    ``## Chunk XXX`` headings and benchmark ``# DOCxx:`` headings are hard
+    boundaries in curated corpora. Keeping them separate reduces cross-experiment
+    binding errors during EFU extraction.
     """
 
     matches = list(CHUNK_HEADING_RE.finditer(content or ""))
@@ -945,7 +1282,7 @@ def _chunking_by_markdown_chunk_headings(content: str, *, tiktoken_model: str) -
         chunk_content = content[start:end].strip()
         if not chunk_content:
             continue
-        source_chunk_id = match.group(2).strip()
+        source_chunk_id = match.group(2).strip() if match.group(2) else f"DOC{match.group(3).strip()}"
         tokens = encode_string_by_tiktoken(chunk_content, model_name=tiktoken_model)
         chunks.append(
             {
@@ -1273,16 +1610,24 @@ async def _merge_nodes_then_upsert(
 ):
     already_entity_types = []
     already_source_ids = []
+    already_source_doc_ids = []
+    already_source_chunk_ids = []
+    already_source_files = []
     already_description = []
     already_structured_fields = {}
 
     already_node = await knowledge_hypergraph_inst.get_vertex(entity_name)
     if already_node is not None:
-        already_entity_types.append(already_node["entity_type"])
+        if already_node.get("entity_type"):
+            already_entity_types.append(already_node["entity_type"])
         already_source_ids.extend(
-            split_string_by_multi_markers(already_node["source_id"], [GRAPH_FIELD_SEP])
+            split_string_by_multi_markers(already_node.get("source_id", ""), [GRAPH_FIELD_SEP])
         )
-        already_description.append(already_node["description"])
+        already_source_doc_ids.extend(_as_text_list(already_node.get("source_doc_ids") or already_node.get("source_doc_id")))
+        already_source_chunk_ids.extend(_as_text_list(already_node.get("source_chunk_ids") or already_node.get("source_chunk_id")))
+        already_source_files.extend(_as_text_list(already_node.get("source_files") or already_node.get("source_file")))
+        if already_node.get("description"):
+            already_description.append(already_node["description"])
 
         # Extract structured fields from existing node if available
         for field in ["subtype", "value", "value_min", "value_max", "unit", "key_attribute"]:
@@ -1310,6 +1655,9 @@ async def _merge_nodes_then_upsert(
     source_id = GRAPH_FIELD_SEP.join(
         set([dp["source_id"] for dp in nodes_data] + already_source_ids)
     )
+    source_doc_ids = sorted(set(_unique_text([dp.get("source_doc_id") for dp in nodes_data] + already_source_doc_ids)))
+    source_chunk_ids = sorted(set(_unique_text([dp.get("source_chunk_id") for dp in nodes_data] + already_source_chunk_ids)))
+    source_files = sorted(set(_unique_text([dp.get("source_file") for dp in nodes_data] + already_source_files)))
 
     # Merge structured fields with smart strategy
     merged_structured_fields = _merge_structured_fields(nodes_data, already_structured_fields)
@@ -1329,6 +1677,15 @@ async def _merge_nodes_then_upsert(
         source_id=source_id,
         additional_properties=additional_properties,  # For display and backward compatibility
     )
+    if source_doc_ids:
+        node_data["source_doc_id"] = source_doc_ids[0] if len(source_doc_ids) == 1 else GRAPH_FIELD_SEP.join(source_doc_ids)
+        node_data["source_doc_ids"] = source_doc_ids
+    if source_chunk_ids:
+        node_data["source_chunk_id"] = source_chunk_ids[0] if len(source_chunk_ids) == 1 else GRAPH_FIELD_SEP.join(source_chunk_ids)
+        node_data["source_chunk_ids"] = source_chunk_ids
+    if source_files:
+        node_data["source_file"] = source_files[0] if len(source_files) == 1 else GRAPH_FIELD_SEP.join(source_files)
+        node_data["source_files"] = source_files
 
     # Add merged structured fields (for structured queries)
     node_data.update(merged_structured_fields)
@@ -1415,7 +1772,7 @@ def _merge_edge_evidence_instances(
         key = (
             str(instance.get("source_id", "")),
             str(instance.get("description", "")),
-            str(instance.get("evidence_span", "")),
+            str(instance.get("source_span") or instance.get("evidence_span", "")),
             str(instance.get("relation_type", "")),
         )
         if key in seen:
@@ -1428,13 +1785,19 @@ def _merge_edge_evidence_instances(
             add(dict(item))
 
     for edge in edges_data:
+        source_span = edge.get("source_span") or edge.get("evidence_span", "")
         add(
             {
                 "source_id": edge.get("source_id", ""),
+                "source_doc_id": edge.get("source_doc_id", ""),
+                "source_chunk_id": edge.get("source_chunk_id", ""),
+                "source_file": edge.get("source_file", ""),
                 "vertices": list(edge.get("entityN") or edge.get("entities_set") or edge.get("entities_pair") or id_set),
                 "description": edge.get("description", ""),
                 "keywords": edge.get("keywords", ""),
-                "evidence_span": edge.get("evidence_span", ""),
+                "source_span": source_span,
+                "sentence": source_span,
+                "evidence_span": source_span,
                 "relation_type": edge.get("relation_type", ""),
                 "level_hg": edge.get("level_hg", ""),
                 "weight": edge.get("weight"),
@@ -1470,6 +1833,9 @@ async def _merge_edges_then_upsert(
 ):
     already_weights = []
     already_source_ids = []
+    already_source_doc_ids = []
+    already_source_chunk_ids = []
+    already_source_files = []
     already_description = []
     already_keywords = []
     already_evidence_spans = []
@@ -1482,11 +1848,18 @@ async def _merge_edges_then_upsert(
         already_source_ids.extend(
             split_string_by_multi_markers(already_edge["source_id"], [GRAPH_FIELD_SEP])
         )
+        already_source_doc_ids.extend(_as_text_list(already_edge.get("source_doc_ids") or already_edge.get("source_doc_id")))
+        already_source_chunk_ids.extend(_as_text_list(already_edge.get("source_chunk_ids") or already_edge.get("source_chunk_id")))
+        already_source_files.extend(_as_text_list(already_edge.get("source_files") or already_edge.get("source_file")))
         already_description.append(already_edge["description"])
         already_keywords.extend(
             split_string_by_multi_markers(already_edge["keywords"], [GRAPH_FIELD_SEP])
         )
         # Load existing evidence_span and relation_type
+        if already_edge.get("source_spans"):
+            already_evidence_spans.extend(_as_text_list(already_edge.get("source_spans")))
+        if already_edge.get("source_span"):
+            already_evidence_spans.append(already_edge["source_span"])
         if already_edge.get("evidence_span"):
             already_evidence_spans.append(already_edge["evidence_span"])
         if already_edge.get("relation_type"):
@@ -1502,17 +1875,29 @@ async def _merge_edges_then_upsert(
     source_id = GRAPH_FIELD_SEP.join(
         set([dp["source_id"] for dp in edges_data] + already_source_ids)
     )
+    source_doc_ids = sorted(set(_unique_text([dp.get("source_doc_id") for dp in edges_data] + already_source_doc_ids)))
+    source_chunk_ids = sorted(set(_unique_text([dp.get("source_chunk_id") for dp in edges_data] + already_source_chunk_ids)))
+    source_files = sorted(set(_unique_text([dp.get("source_file") for dp in edges_data] + already_source_files)))
 
-    # Merge evidence_spans (preserve for traceability)
-    evidence_spans = [dp.get("evidence_span", "") for dp in edges_data if dp.get("evidence_span")]
-    all_evidence_spans = evidence_spans + already_evidence_spans
-    evidence_span = GRAPH_FIELD_SEP.join(sorted(set(all_evidence_spans))) if all_evidence_spans else ""
+    # Preserve the best representative span at the edge level and keep all spans
+    # losslessly under evidence_instances/source_spans.
+    evidence_spans = [
+        dp.get("source_span") or dp.get("evidence_span", "")
+        for dp in edges_data
+        if dp.get("source_span") or dp.get("evidence_span")
+    ]
+    all_evidence_spans = _unique_text(evidence_spans + already_evidence_spans)
+    evidence_span = all_evidence_spans[0] if all_evidence_spans else ""
 
     # Merge relation_types (may have multiple types for same entity set)
     relation_types = [dp.get("relation_type", "") for dp in edges_data if dp.get("relation_type")]
     all_relation_types = relation_types + already_relation_types
     relation_type = GRAPH_FIELD_SEP.join(sorted(set(all_relation_types))) if all_relation_types else ""
     evidence_instances = _merge_edge_evidence_instances(edges_data, existing_evidence_instances, id_set)
+    efu_id = compute_mdhash_id(
+        "|".join(sorted(map(str, id_set))) + "|" + str(relation_type),
+        prefix="efu-",
+    )
 
     # Track UNKNOWN vertex creation
     unknown_count = 0
@@ -1578,6 +1963,7 @@ async def _merge_edges_then_upsert(
     )
 
     edge_dict = dict(
+        efu_id=efu_id,
         vertices=list(id_set),
         node_ids=list(id_set),
         evidence_instances=evidence_instances,
@@ -1586,16 +1972,31 @@ async def _merge_edges_then_upsert(
         source_id=source_id,
         weight=weight
     )
+    if source_doc_ids:
+        edge_dict["source_doc_id"] = source_doc_ids[0] if len(source_doc_ids) == 1 else GRAPH_FIELD_SEP.join(source_doc_ids)
+        edge_dict["source_doc_ids"] = source_doc_ids
+    if source_chunk_ids:
+        edge_dict["source_chunk_id"] = source_chunk_ids[0] if len(source_chunk_ids) == 1 else GRAPH_FIELD_SEP.join(source_chunk_ids)
+        edge_dict["source_chunk_ids"] = source_chunk_ids
+    if source_files:
+        edge_dict["source_file"] = source_files[0] if len(source_files) == 1 else GRAPH_FIELD_SEP.join(source_files)
+        edge_dict["source_files"] = source_files
+    if all_evidence_spans:
+        edge_dict["source_spans"] = all_evidence_spans
     # Add evidence_span and relation_type if present
     if evidence_span:
         edge_dict["evidence_span"] = evidence_span
+        edge_dict["source_span"] = evidence_span
     if relation_type:
         edge_dict["relation_type"] = relation_type
 
     await knowledge_hypergraph_inst.upsert_hyperedge(id_set, edge_dict)
 
     edge_data = dict(
+        efu_id=efu_id,
         id_set=id_set,
+        vertices=list(id_set),
+        node_ids=list(id_set),
         description=description,
         keywords=filter_keywords,
         source_id=source_id,
@@ -1605,8 +2006,20 @@ async def _merge_edges_then_upsert(
         vertex_count=len(id_set),
         evidence_instances=evidence_instances,
     )
+    if source_doc_ids:
+        edge_data["source_doc_id"] = source_doc_ids[0] if len(source_doc_ids) == 1 else GRAPH_FIELD_SEP.join(source_doc_ids)
+        edge_data["source_doc_ids"] = source_doc_ids
+    if source_chunk_ids:
+        edge_data["source_chunk_id"] = source_chunk_ids[0] if len(source_chunk_ids) == 1 else GRAPH_FIELD_SEP.join(source_chunk_ids)
+        edge_data["source_chunk_ids"] = source_chunk_ids
+    if source_files:
+        edge_data["source_file"] = source_files[0] if len(source_files) == 1 else GRAPH_FIELD_SEP.join(source_files)
+        edge_data["source_files"] = source_files
+    if all_evidence_spans:
+        edge_data["source_spans"] = all_evidence_spans
     if evidence_span:
         edge_data["evidence_span"] = evidence_span
+        edge_data["source_span"] = evidence_span
     if relation_type:
         edge_data["relation_type"] = relation_type
 
@@ -1667,12 +2080,100 @@ def _log_unknown_summary(relationships_data: list[dict]):
     logger.warning("UNKNOWN SUMMARY unknown_by_relation_type=%s", dict(unknown_by_relation_type))
 
 
+def _format_value_unit(dp: dict) -> str:
+    parts = []
+    if dp.get("value") is not None:
+        parts.append(f"value={dp.get('value')}")
+    if dp.get("value_min") is not None or dp.get("value_max") is not None:
+        parts.append(f"value_range={dp.get('value_min')} to {dp.get('value_max')}")
+    if dp.get("unit"):
+        parts.append(f"unit={dp.get('unit')}")
+    return "; ".join(parts)
+
+
+def _join_field(label: str, values) -> str:
+    items = _unique_text(_as_text_list(values))
+    return f"{label}: {', '.join(items)}" if items else ""
+
+
+def _build_entity_embedding_text(dp: dict, *, view: str) -> str:
+    value_unit = _format_value_unit(dp)
+    if view == "surface":
+        fields = [
+            _join_field("Raw name", dp.get("raw_name") or dp.get("entity_name")),
+            _join_field("Display name", dp.get("display_name") or dp.get("canonical_name")),
+            _join_field("Surface mentions", dp.get("source_mentions") or dp.get("mentions")),
+            _join_field("Entity type", dp.get("entity_type")),
+            _join_field("Source documents", dp.get("source_doc_ids") or dp.get("source_doc_id")),
+            _join_field("Source chunks", dp.get("source_chunk_ids") or dp.get("source_chunk_id")),
+            _join_field("Description", dp.get("description")),
+            _join_field("Value", value_unit),
+        ]
+    else:
+        fields = [
+            _join_field("Canonical ID", dp.get("canonical_id") or dp.get("entity_name")),
+            _join_field("Canonical name", dp.get("canonical_name") or dp.get("entity_name")),
+            _join_field("Entity type", dp.get("entity_type")),
+            _join_field("Semantic group", dp.get("semantic_group")),
+            _join_field("Description", dp.get("description")),
+            _join_field("Value", value_unit),
+        ]
+    return "\n".join(field for field in fields if field)
+
+
+def _collect_vertices_from_evidence(instances: list[dict]) -> list[str]:
+    vertices = []
+    for instance in instances or []:
+        vertices.extend(_as_text_list(instance.get("vertices")))
+    return _unique_text(vertices)
+
+
+def _build_relationship_embedding_text(dp: dict, *, view: str) -> str:
+    evidence_instances = dp.get("evidence_instances") or []
+    source_spans = []
+    raw_vertices = []
+    for instance in evidence_instances:
+        if not isinstance(instance, dict):
+            continue
+        source_spans.extend(_as_text_list(instance.get("source_span") or instance.get("evidence_span") or instance.get("sentence")))
+        raw_vertices.extend(_as_text_list(instance.get("vertices")))
+
+    if view == "surface":
+        fields = [
+            _join_field("Relation type", dp.get("relation_type")),
+            _join_field("Raw vertices", raw_vertices or dp.get("id_set")),
+            _join_field("Surface source span", source_spans or dp.get("source_span") or dp.get("evidence_span")),
+            _join_field("Source documents", dp.get("source_doc_ids") or dp.get("source_doc_id")),
+            _join_field("Source chunks", dp.get("source_chunk_ids") or dp.get("source_chunk_id")),
+            _join_field("Surface description", dp.get("description")),
+            _join_field("Keywords", dp.get("keywords")),
+        ]
+    else:
+        fields = [
+            _join_field("EFU ID", dp.get("efu_id")),
+            _join_field("Relation type", dp.get("relation_type")),
+            _join_field("Canonical vertices", dp.get("node_ids") or dp.get("vertices") or dp.get("id_set")),
+            _join_field("Normalized description", dp.get("description")),
+            _join_field("Keywords", dp.get("keywords")),
+        ]
+    return "\n".join(field for field in fields if field)
+
+
+def _build_dual_embedding_text(canonical_text: str, surface_text: str) -> str:
+    if not surface_text:
+        return canonical_text
+    if not canonical_text:
+        return surface_text
+    return f"[Canonical]\n{canonical_text}\n\n[Surface]\n{surface_text}"
+
+
 async def _process_json_format_extraction(
     content: str,
     chunk_key: str,
     use_llm_func: callable,
     global_config: dict,
-    domain: str = 'default'
+    domain: str = 'default',
+    chunk_meta: dict | None = None,
 ) -> tuple[list, list]:
     """
     Process JSON format extraction for domain-specific prompts
@@ -1691,34 +2192,158 @@ async def _process_json_format_extraction(
         get_entity_extraction_prompt,
         get_high_order_extraction_prompt,
         get_low_order_extraction_prompt,
+        get_one_pass_extraction_prompt,
         get_relationship_extraction_prompt,
     )
 
     chunk_extract_start = time.perf_counter()
+    llm_call_count = 0
     logger.info(f"[{chunk_key}] Starting JSON format extraction for domain: {domain}")
+    source_metadata = _chunk_metadata(chunk_key, chunk_meta)
 
-    # Step 1: Extract entities using domain-specific prompt
-    logger.debug(f"[{chunk_key}] Step 1: Generating entity extraction prompt...")
-    entity_prompt = get_entity_extraction_prompt(
-        domain=domain,
-        CHUNK_TEXT=content
-    )
-    logger.debug(f"[{chunk_key}] Step 1: Prompt length = {len(entity_prompt)} chars")
+    async def counted_llm_func(*args, **kwargs):
+        nonlocal llm_call_count
+        llm_call_count += 1
+        return await use_llm_func(*args, **kwargs)
 
-    try:
-        logger.info(f"[{chunk_key}] Step 1: Calling LLM for entity extraction...")
-        step_start = time.perf_counter()
-        entity_result = await use_llm_func(entity_prompt)
-        logger.info(f"[{chunk_key}] Step 1: LLM returned {len(entity_result)} chars in {time.perf_counter() - step_start:.2f}s")
-        entities_json = parse_json_entities(entity_result, chunk_key)
-        logger.info(f"[{chunk_key}] Step 1: Parsed {len(entities_json)} entities from JSON")
-    except Exception as e:
-        _log_step_exception(chunk_key, "Step 1", "Entity extraction error", e)
-        return [], []
+    entities_json = []
+    one_pass_low_relations_json = []
+    one_pass_high_relations_json = []
+    one_pass_used = False
+
+    if bool(global_config.get("enable_one_pass_extraction", True)):
+        one_pass_prompt = get_one_pass_extraction_prompt(domain=domain, CHUNK_TEXT=content)
+        if one_pass_prompt is not None:
+            logger.debug(f"[{chunk_key}] Step 1P: One-pass prompt length = {len(one_pass_prompt)} chars")
+            try:
+                logger.info(f"[{chunk_key}] Step 1P: Calling LLM for one-pass entity + relation extraction...")
+                step_start = time.perf_counter()
+                one_pass_result = await _await_with_llm_heartbeat(
+                    counted_llm_func(one_pass_prompt),
+                    chunk_key=chunk_key,
+                    step="Step 1P",
+                    label="one-pass entity + relation extraction",
+                )
+                logger.info(
+                    f"[{chunk_key}] Step 1P: LLM returned {len(one_pass_result)} chars "
+                    f"in {time.perf_counter() - step_start:.2f}s"
+                )
+                entities_json, one_pass_low_relations_json, one_pass_high_relations_json = parse_json_one_pass_extraction(
+                    one_pass_result, chunk_key
+                )
+                if entities_json:
+                    one_pass_used = True
+                    logger.info(
+                        f"[{chunk_key}] Step 1P: One-pass parsed entities={len(entities_json)}, "
+                        f"low={len(one_pass_low_relations_json)}, high={len(one_pass_high_relations_json)}"
+                    )
+                elif _is_valid_empty_one_pass_extraction(one_pass_result):
+                    one_pass_used = True
+                    logger.info(
+                        f"[{chunk_key}] Step 1P: Provider returned a valid empty extraction; "
+                        "accepting this chunk without entities or relations"
+                    )
+                    logger.info(
+                        f"[{chunk_key}] LLM call summary: calls={llm_call_count}, "
+                        f"elapsed={time.perf_counter() - chunk_extract_start:.2f}s, "
+                        "status=valid_empty"
+                    )
+                    return [], []
+                else:
+                    logger.warning(
+                        f"[{chunk_key}] Step 1P: One-pass returned no entities; "
+                        "refreshing once from the provider and replacing the cached response"
+                    )
+                    refresh_start = time.perf_counter()
+                    refreshed_result = await _await_with_llm_heartbeat(
+                        counted_llm_func(one_pass_prompt, force_cache_refresh=True),
+                        chunk_key=chunk_key,
+                        step="Step 1P-R",
+                        label="one-pass cache refresh",
+                    )
+                    logger.info(
+                        f"[{chunk_key}] Step 1P-R: LLM returned {len(refreshed_result)} chars "
+                        f"in {time.perf_counter() - refresh_start:.2f}s"
+                    )
+                    entities_json, one_pass_low_relations_json, one_pass_high_relations_json = parse_json_one_pass_extraction(
+                        refreshed_result, chunk_key
+                    )
+                    if entities_json:
+                        one_pass_used = True
+                        logger.info(
+                            f"[{chunk_key}] Step 1P-R: Cache refresh recovered entities={len(entities_json)}, "
+                            f"low={len(one_pass_low_relations_json)}, high={len(one_pass_high_relations_json)}"
+                        )
+                    elif _is_valid_empty_one_pass_extraction(refreshed_result):
+                        logger.info(
+                            f"[{chunk_key}] Step 1P-R: Provider confirmed a valid empty extraction; "
+                            "accepting this chunk without entities or relations"
+                        )
+                        logger.info(
+                            f"[{chunk_key}] LLM call summary: calls={llm_call_count}, elapsed={time.perf_counter() - chunk_extract_start:.2f}s, status=valid_empty"
+                        )
+                        return [], []
+                    elif bool(global_config.get("enable_one_pass_fallback", False)):
+                        logger.warning(f"[{chunk_key}] Step 1P: One-pass returned no entities; falling back to two-step JSON extraction")
+                    else:
+                        logger.warning(
+                            f"[{chunk_key}] Step 1P-R: Refreshed response was malformed or unusable; "
+                            "recording a retryable document error without stopping the build pass"
+                        )
+                        raise RuntimeError(
+                            f"[{chunk_key}] one-pass extraction returned malformed or unusable output"
+                        )
+            except Exception as e:
+                _log_step_exception(chunk_key, "Step 1P", "One-pass extraction error", e)
+                if bool(global_config.get("enable_one_pass_fallback", False)):
+                    logger.info(f"[{chunk_key}] Step 1P: Falling back to two-step JSON extraction")
+                else:
+                    logger.info(
+                        f"[{chunk_key}] LLM call summary: calls={llm_call_count}, elapsed={time.perf_counter() - chunk_extract_start:.2f}s, status=one_pass_failed"
+                    )
+                    raise RuntimeError(f"[{chunk_key}] one-pass extraction failed") from e
+
+    if not one_pass_used:
+        # Step 1: Extract entities using domain-specific prompt
+        logger.debug(f"[{chunk_key}] Step 1: Generating entity extraction prompt...")
+        entity_prompt = get_entity_extraction_prompt(
+            domain=domain,
+            CHUNK_TEXT=content
+        )
+        logger.debug(f"[{chunk_key}] Step 1: Prompt length = {len(entity_prompt)} chars")
+
+        try:
+            logger.info(f"[{chunk_key}] Step 1: Calling LLM for entity extraction...")
+            step_start = time.perf_counter()
+            entity_result = await _await_with_llm_heartbeat(
+                counted_llm_func(entity_prompt),
+                chunk_key=chunk_key,
+                step="Step 1",
+                label="entity extraction",
+            )
+            logger.info(f"[{chunk_key}] Step 1: LLM returned {len(entity_result)} chars in {time.perf_counter() - step_start:.2f}s")
+            entities_json = parse_json_entities(entity_result, chunk_key)
+            logger.info(f"[{chunk_key}] Step 1: Parsed {len(entities_json)} entities from JSON")
+        except Exception as e:
+            _log_step_exception(chunk_key, "Step 1", "Entity extraction error", e)
+            logger.info(
+                f"[{chunk_key}] LLM call summary: calls={llm_call_count}, elapsed={time.perf_counter() - chunk_extract_start:.2f}s, status=failed_step1"
+            )
+            raise RuntimeError(f"[{chunk_key}] entity extraction failed") from e
 
     if not entities_json:
         logger.warning(f"[{chunk_key}] Step 1: No entities extracted, aborting pipeline")
-        return [], []
+        logger.info(
+            f"[{chunk_key}] LLM call summary: calls={llm_call_count}, elapsed={time.perf_counter() - chunk_extract_start:.2f}s, status=no_entities"
+        )
+        raise RuntimeError(f"[{chunk_key}] no entities extracted")
+
+    entities_json = _limit_json_entities_for_chunk(
+        entities_json,
+        chunk_key,
+        global_config,
+        stage="Step 1L pre-normalization entity limit",
+    )
 
     # Step 1N: normalize extracted entities before relation extraction.
     # Relation prompts and validation should use canonical entity names directly.
@@ -1727,8 +2352,14 @@ async def _process_json_format_extraction(
         chunk_key,
         domain,
         global_config,
-        use_llm_func,
+        counted_llm_func,
         content,
+    )
+    entities_json = _limit_json_entities_for_chunk(
+        entities_json,
+        chunk_key,
+        global_config,
+        stage="Step 1L post-normalization entity limit",
     )
 
     # Log entity type distribution
@@ -1737,6 +2368,8 @@ async def _process_json_format_extraction(
     logger.info(f"[{chunk_key}] Step 1: Entity types: {dict(entity_types)}")
 
     # Convert to standard format
+    for entity_json in entities_json:
+        _attach_chunk_metadata(entity_json, source_metadata)
     entities = [convert_json_entity_to_standard_format(entity, chunk_key) for entity in entities_json]
     logger.debug(f"[{chunk_key}] Step 1: Converted {len(entities)} entities to standard format")
 
@@ -1777,73 +2410,101 @@ async def _process_json_format_extraction(
     low_relations_json = []
     high_relations_json = []
 
-    logger.debug(f"[{chunk_key}] Step 2: Generating combined relationship prompt with {len(entity_info)} entities...")
-    combined_prompt = get_relationship_extraction_prompt(
-        domain=domain,
-        K_v_JSON=json.dumps(entity_info, ensure_ascii=False),
-        CHUNK_TEXT=content
-    )
-
-    if combined_prompt is not None:
-        logger.debug(f"[{chunk_key}] Step 2: Combined prompt length = {len(combined_prompt)} chars")
-        try:
-            logger.info(f"[{chunk_key}] Step 2: Calling LLM for combined low/high relationship extraction...")
-            step_start = time.perf_counter()
-            combined_result = await use_llm_func(combined_prompt)
-            logger.info(f"[{chunk_key}] Step 2: LLM returned {len(combined_result)} chars in {time.perf_counter() - step_start:.2f}s")
-            low_relations_json, high_relations_json = parse_json_combined_relationships(
-                combined_result, chunk_key
-            )
-            if low_relations_json:
-                rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in low_relations_json)
-                logger.debug(f"[{chunk_key}] Step 2: Low-order relation types: {dict(rel_types)}")
-            if high_relations_json:
-                rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in high_relations_json)
-                logger.debug(f"[{chunk_key}] Step 2: High-order hyperedge types: {dict(rel_types)}")
-        except Exception as e:
-            _log_step_exception(chunk_key, "Step 2", "Combined relationship extraction error", e)
+    if one_pass_used:
+        low_relations_json = one_pass_low_relations_json
+        high_relations_json = one_pass_high_relations_json
+        logger.info(
+            f"[{chunk_key}] Step 2: Skipped relationship LLM call; using one-pass relations "
+            f"(low={len(low_relations_json)}, high={len(high_relations_json)})"
+        )
     else:
-        logger.info(f"[{chunk_key}] Step 2: Combined relationship template not found; using legacy low/high extraction")
-
-        logger.debug(f"[{chunk_key}] Step 2a: Generating low-order prompt with {len(entity_info)} entities...")
-        low_prompt = get_low_order_extraction_prompt(
+        logger.debug(f"[{chunk_key}] Step 2: Generating combined relationship prompt with {len(entity_info)} entities...")
+        combined_prompt = get_relationship_extraction_prompt(
             domain=domain,
             K_v_JSON=json.dumps(entity_info, ensure_ascii=False),
             CHUNK_TEXT=content
         )
-        logger.debug(f"[{chunk_key}] Step 2a: Prompt length = {len(low_prompt)} chars")
 
-        try:
-            logger.info(f"[{chunk_key}] Step 2a: Calling LLM for low-order relations...")
-            low_result = await use_llm_func(low_prompt)
-            logger.info(f"[{chunk_key}] Step 2a: LLM returned {len(low_result)} chars")
-            low_relations_json = parse_json_relations(low_result, chunk_key)
-            logger.info(f"[{chunk_key}] Step 2a: Parsed {len(low_relations_json)} low-order relations")
-            if low_relations_json:
-                rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in low_relations_json)
-                logger.debug(f"[{chunk_key}] Step 2a: Relation types: {dict(rel_types)}")
-        except Exception as e:
-            _log_step_exception(chunk_key, "Step 2a", "Low-order relation extraction error", e)
+        if combined_prompt is not None:
+            logger.debug(f"[{chunk_key}] Step 2: Combined prompt length = {len(combined_prompt)} chars")
+            try:
+                logger.info(f"[{chunk_key}] Step 2: Calling LLM for combined low/high relationship extraction...")
+                step_start = time.perf_counter()
+                combined_result = await _await_with_llm_heartbeat(
+                    counted_llm_func(combined_prompt),
+                    chunk_key=chunk_key,
+                    step="Step 2",
+                    label="combined low/high relationship extraction",
+                )
+                logger.info(f"[{chunk_key}] Step 2: LLM returned {len(combined_result)} chars in {time.perf_counter() - step_start:.2f}s")
+                low_relations_json, high_relations_json = parse_json_combined_relationships(
+                    combined_result, chunk_key
+                )
+                if low_relations_json:
+                    rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in low_relations_json)
+                    logger.debug(f"[{chunk_key}] Step 2: Low-order relation types: {dict(rel_types)}")
+                if high_relations_json:
+                    rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in high_relations_json)
+                    logger.debug(f"[{chunk_key}] Step 2: High-order hyperedge types: {dict(rel_types)}")
+            except Exception as e:
+                _log_step_exception(chunk_key, "Step 2", "Combined relationship extraction error", e)
+                raise RuntimeError(f"[{chunk_key}] combined relationship extraction failed") from e
+        else:
+            logger.info(f"[{chunk_key}] Step 2: Combined relationship template not found; using legacy low/high extraction")
 
-        logger.debug(f"[{chunk_key}] Step 2b: Generating high-order prompt with {len(entity_info)} entities...")
-        high_prompt = get_high_order_extraction_prompt(
-            domain=domain,
-            K_v_JSON=json.dumps(entity_info, ensure_ascii=False),
-            CHUNK_TEXT=content
-        )
-        logger.debug(f"[{chunk_key}] Step 2b: Prompt length = {len(high_prompt)} chars")
+            logger.debug(f"[{chunk_key}] Step 2a: Generating low-order prompt with {len(entity_info)} entities...")
+            low_prompt = get_low_order_extraction_prompt(
+                domain=domain,
+                K_v_JSON=json.dumps(entity_info, ensure_ascii=False),
+                CHUNK_TEXT=content
+            )
+            logger.debug(f"[{chunk_key}] Step 2a: Prompt length = {len(low_prompt)} chars")
 
-        try:
-            logger.info(f"[{chunk_key}] Step 2b: Calling LLM for high-order relations (hyperedges)...")
-            high_result = await use_llm_func(high_prompt)
-            logger.info(f"[{chunk_key}] Step 2b: LLM returned {len(high_result)} chars")
-            high_relations_json = parse_json_hyperedges(high_result, chunk_key)
-            logger.info(f"[{chunk_key}] Step 2b: Parsed {len(high_relations_json)} high-order relations (hyperedges)")
-            if high_relations_json:
-                rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in high_relations_json)
-                logger.debug(f"[{chunk_key}] Step 2b: Hyperedge types: {dict(rel_types)}")
-        except Exception as e:
-            _log_step_exception(chunk_key, "Step 2b", "High-order relation extraction error", e)
+            try:
+                logger.info(f"[{chunk_key}] Step 2a: Calling LLM for low-order relations...")
+                low_step_start = time.perf_counter()
+                low_result = await _await_with_llm_heartbeat(
+                    counted_llm_func(low_prompt),
+                    chunk_key=chunk_key,
+                    step="Step 2a",
+                    label="low-order relation extraction",
+                )
+                logger.info(f"[{chunk_key}] Step 2a: LLM returned {len(low_result)} chars in {time.perf_counter() - low_step_start:.2f}s")
+                low_relations_json = parse_json_relations(low_result, chunk_key)
+                logger.info(f"[{chunk_key}] Step 2a: Parsed {len(low_relations_json)} low-order relations")
+                if low_relations_json:
+                    rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in low_relations_json)
+                    logger.debug(f"[{chunk_key}] Step 2a: Relation types: {dict(rel_types)}")
+            except Exception as e:
+                _log_step_exception(chunk_key, "Step 2a", "Low-order relation extraction error", e)
+                raise RuntimeError(f"[{chunk_key}] low-order relation extraction failed") from e
+
+            logger.debug(f"[{chunk_key}] Step 2b: Generating high-order prompt with {len(entity_info)} entities...")
+            high_prompt = get_high_order_extraction_prompt(
+                domain=domain,
+                K_v_JSON=json.dumps(entity_info, ensure_ascii=False),
+                CHUNK_TEXT=content
+            )
+            logger.debug(f"[{chunk_key}] Step 2b: Prompt length = {len(high_prompt)} chars")
+
+            try:
+                logger.info(f"[{chunk_key}] Step 2b: Calling LLM for high-order relations (hyperedges)...")
+                high_step_start = time.perf_counter()
+                high_result = await _await_with_llm_heartbeat(
+                    counted_llm_func(high_prompt),
+                    chunk_key=chunk_key,
+                    step="Step 2b",
+                    label="high-order relation extraction",
+                )
+                logger.info(f"[{chunk_key}] Step 2b: LLM returned {len(high_result)} chars in {time.perf_counter() - high_step_start:.2f}s")
+                high_relations_json = parse_json_hyperedges(high_result, chunk_key)
+                logger.info(f"[{chunk_key}] Step 2b: Parsed {len(high_relations_json)} high-order relations (hyperedges)")
+                if high_relations_json:
+                    rel_types = Counter(r.get("relation_type", "UNKNOWN") for r in high_relations_json)
+                    logger.debug(f"[{chunk_key}] Step 2b: Hyperedge types: {dict(rel_types)}")
+            except Exception as e:
+                _log_step_exception(chunk_key, "Step 2b", "High-order relation extraction error", e)
+                raise RuntimeError(f"[{chunk_key}] high-order relation extraction failed") from e
 
     if global_config.get("enable_efu_repair", True):
         high_relations_json = _repair_high_order_relations(
@@ -1865,11 +2526,19 @@ async def _process_json_format_extraction(
     # Convert all relations to standard format after entity-reference validation.
     relations = []
     for relation_json in low_relations_json:
+        _attach_chunk_metadata(relation_json, source_metadata)
+        source_span = _repair_relation_source_span(relation_json, content)
+        relation_json.setdefault("source_span", source_span)
+        relation_json.setdefault("evidence_span", source_span)
         standard_relation = convert_json_relation_to_standard_format(relation_json, chunk_key)
         if standard_relation:
             relations.append(standard_relation)
 
     for relation_json in high_relations_json:
+        _attach_chunk_metadata(relation_json, source_metadata)
+        source_span = _repair_relation_source_span(relation_json, content)
+        relation_json.setdefault("source_span", source_span)
+        relation_json.setdefault("evidence_span", source_span)
         standard_relation = convert_json_relation_to_standard_format(relation_json, chunk_key)
         if standard_relation:
             relations.append(standard_relation)
@@ -1877,6 +2546,9 @@ async def _process_json_format_extraction(
     logger.info(f"[{chunk_key}] Pipeline complete in {time.perf_counter() - chunk_extract_start:.2f}s: "
                 f"{len(entities)} entities, {len(relations)} relations "
                 f"(low={len(low_relations_json)}, high={len(high_relations_json)})")
+    logger.info(
+        f"[{chunk_key}] LLM call summary: calls={llm_call_count}, elapsed={time.perf_counter() - chunk_extract_start:.2f}s, status=done, entities={len(entities)}, relations={len(relations)}"
+    )
 
     # Validate output if domain support is available (non-blocking)
     try:
@@ -1897,6 +2569,8 @@ async def extract_entities(
     entity_vdb: BaseVectorStorage,
     relationships_vdb: BaseVectorStorage,
     global_config: dict,
+    entity_surface_vdb: BaseVectorStorage | None = None,
+    relationships_surface_vdb: BaseVectorStorage | None = None,
 ) -> BaseHypergraphStorage | None:
     use_llm_func: callable = global_config["llm_model_func"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
@@ -1937,7 +2611,7 @@ async def extract_entities(
     already_relations_low = 0
     already_relations_high = 0
 
-    async def _process_single_content(chunk_key_dp: tuple[str, TextChunkSchema]):
+    async def _process_single_content_impl(chunk_key_dp: tuple[str, TextChunkSchema]):
         nonlocal already_processed, already_entities, already_relations, already_relations_low, already_relations_high
         chunk_key = chunk_key_dp[0]
         chunk_dp = chunk_key_dp[1]
@@ -1949,14 +2623,14 @@ async def extract_entities(
         if is_json_output:
             try:
                 entities, relations = await _process_json_format_extraction(
-                    content, chunk_key, use_llm_func, global_config, current_domain
+                    content, chunk_key, use_llm_func, global_config, current_domain, chunk_dp
                 )
                 logger.debug(f"[{chunk_key}] JSON extraction returned: {len(entities)} entities, {len(relations)} relations")
             except Exception as e:
                 logger.error(f"[{chunk_key}] JSON extraction FAILED with exception: {type(e).__name__}: {e}")
                 import traceback
                 logger.debug(f"[{chunk_key}] Traceback: {traceback.format_exc()}")
-                return None, None, None, None
+                raise
 
             # Initialize containers for this chunk
             chunk_maybe_nodes = defaultdict(list)
@@ -1990,15 +2664,26 @@ async def extract_entities(
             return chunk_maybe_nodes, chunk_maybe_edges, chunk_maybe_edges_low, chunk_maybe_edges_high
 
         # Original delimiter-based processing for default domain
+        chunk_extract_start = time.perf_counter()
+        llm_call_count = 0
+
+        async def counted_llm_func(*args, **kwargs):
+            nonlocal llm_call_count
+            llm_call_count += 1
+            return await use_llm_func(*args, **kwargs)
+
         hint_prompt = entity_extract_prompt.format(**context_base, input_text=content)
 
-        final_result = await use_llm_func(hint_prompt)
+        final_result = await counted_llm_func(hint_prompt)
         if final_result is None:
+            logger.info(
+                f"[{chunk_key}] LLM call summary: calls={llm_call_count}, gleaning_max={entity_extract_max_gleaning}, elapsed={time.perf_counter() - chunk_extract_start:.2f}s, status=no_initial_result"
+            )
             return None,None,None,None
 
         history = pack_user_ass_to_openai_messages(hint_prompt, final_result)
         for now_glean_index in range(entity_extract_max_gleaning):
-            glean_result = await use_llm_func(continue_prompt, history_messages=history)
+            glean_result = await counted_llm_func(continue_prompt, history_messages=history)
             if glean_result is None:
                 break
 
@@ -2007,7 +2692,7 @@ async def extract_entities(
             if now_glean_index == entity_extract_max_gleaning - 1:
                 break
 
-            if_loop_result: str = await use_llm_func(
+            if_loop_result: str = await counted_llm_func(
                 if_loop_prompt, history_messages=history
             )
             if_loop_result = if_loop_result.strip().strip('"').strip("'").lower()
@@ -2023,6 +2708,7 @@ async def extract_entities(
         maybe_edges = defaultdict(list)
         maybe_edges_low = defaultdict(list)
         maybe_edges_high = defaultdict(list)
+        source_metadata = _chunk_metadata(chunk_key, chunk_dp)
         for record in records:
             record = re.search(r"\((.*)\)", record)
             if record is None:
@@ -2035,6 +2721,7 @@ async def extract_entities(
                 record_attributes, chunk_key
             )
             if if_entities is not None:
+                _attach_chunk_metadata(if_entities, source_metadata)
                 maybe_nodes[if_entities["entity_name"]].append(if_entities)
                 continue
 
@@ -2042,6 +2729,10 @@ async def extract_entities(
                 record_attributes, chunk_key
             )
             if if_relation is not None:
+                _attach_chunk_metadata(if_relation, source_metadata)
+                source_span = _repair_relation_source_span(if_relation, content)
+                if_relation.setdefault("source_span", source_span)
+                if_relation.setdefault("evidence_span", source_span)
                 maybe_edges[tuple((if_relation["entityN"]))].append(
                     if_relation
                 )
@@ -2053,6 +2744,10 @@ async def extract_entities(
                 record_attributes, chunk_key
             )
             if if_relation is not None:
+                _attach_chunk_metadata(if_relation, source_metadata)
+                source_span = _repair_relation_source_span(if_relation, content)
+                if_relation.setdefault("source_span", source_span)
+                if_relation.setdefault("evidence_span", source_span)
                 maybe_edges[tuple((if_relation["entityN"]))].append(
                     if_relation
                 )
@@ -2061,6 +2756,14 @@ async def extract_entities(
                 )
 
         already_processed += 1
+        maybe_nodes, maybe_edges, maybe_edges_low, maybe_edges_high = _limit_default_extraction_for_chunk(
+            maybe_nodes,
+            maybe_edges,
+            maybe_edges_low,
+            maybe_edges_high,
+            chunk_key,
+            global_config,
+        )
         already_entities += len(maybe_nodes)
         already_relations += len(maybe_edges)
         already_relations_low += len(maybe_edges_low)
@@ -2071,8 +2774,8 @@ async def extract_entities(
 
         # 璁＄畻鐢ㄦ椂
         current_time = datetime.now()
-        time = current_time - begin_time
-        total_seconds = int(time.total_seconds())
+        elapsed_delta = current_time - begin_time
+        total_seconds = int(elapsed_delta.total_seconds())
         hours = total_seconds // 3600
         minutes = (total_seconds % 3600) // 60
         seconds = total_seconds % 60
@@ -2080,19 +2783,99 @@ async def extract_entities(
         percent = (already_processed / len(ordered_chunks)) * 100
         bar_length = int(50 * already_processed // len(ordered_chunks))
         bar = '#' * bar_length + '-' * (50 - bar_length)
-        sys.stdout.write(
-            f'\n\r|{bar}| {percent:.2f}% |{hours:02}:{minutes:02}:{seconds:02}| {now_ticks} Processed, {already_entities} entities, {already_relations} relations, {already_relations_low} relations_low, {already_relations_high} relations_high \n')
+        progress_line = (
+            f'\n\r|{bar}| {percent:.2f}% |{hours:02}:{minutes:02}:{seconds:02}| '
+            f'{now_ticks} Processed, {already_entities} entities, {already_relations} relations, '
+            f'{already_relations_low} relations_low, {already_relations_high} relations_high \n'
+        )
+        try:
+            sys.stdout.write(progress_line)
+        except UnicodeEncodeError:
+            encoding = sys.stdout.encoding or "utf-8"
+            sys.stdout.write(progress_line.encode(encoding, errors="replace").decode(encoding, errors="replace"))
         sys.stdout.flush()
+        logger.info(
+            f"[{chunk_key}] LLM call summary: calls={llm_call_count}, gleaning_max={entity_extract_max_gleaning}, elapsed={time.perf_counter() - chunk_extract_start:.2f}s, status=done, entities={len(maybe_nodes)}, relations={len(maybe_edges)}"
+        )
         return dict(maybe_nodes), dict(maybe_edges), dict(maybe_edges_low), dict(maybe_edges_high)
+
+    chunk_progress_lock = asyncio.Lock()
+    chunk_progress = Counter(started=0, completed=0, failed=0, cancelled=0)
+    active_chunk_keys: set[str] = set()
+
+    async def _update_chunk_progress(event: str, chunk_key: str) -> str:
+        async with chunk_progress_lock:
+            if event == "START":
+                chunk_progress["started"] += 1
+                active_chunk_keys.add(chunk_key)
+            elif event == "DONE":
+                chunk_progress["completed"] += 1
+                active_chunk_keys.discard(chunk_key)
+            elif event == "FAILED":
+                chunk_progress["failed"] += 1
+                active_chunk_keys.discard(chunk_key)
+            elif event == "CANCELLED":
+                chunk_progress["cancelled"] += 1
+                active_chunk_keys.discard(chunk_key)
+            return (
+                f"started={chunk_progress['started']}/{len(ordered_chunks)} "
+                f"completed={chunk_progress['completed']}/{len(ordered_chunks)} "
+                f"failed={chunk_progress['failed']} cancelled={chunk_progress['cancelled']} "
+                f"active={len(active_chunk_keys)}"
+            )
+
+    async def _process_single_content(chunk_key_dp: tuple[str, TextChunkSchema]):
+        chunk_key, chunk_dp = chunk_key_dp
+        content = chunk_dp.get("content", "")
+        chunk_start = time.perf_counter()
+        progress = await _update_chunk_progress("START", chunk_key)
+        logger.info(
+            f"[ChunkProgress] START chunk={chunk_key} {progress} content_chars={len(content)}"
+        )
+        try:
+            result = await _process_single_content_impl(chunk_key_dp)
+        except asyncio.CancelledError:
+            progress = await _update_chunk_progress("CANCELLED", chunk_key)
+            logger.warning(
+                f"[ChunkProgress] CANCELLED chunk={chunk_key} "
+                f"elapsed={time.perf_counter() - chunk_start:.2f}s {progress}"
+            )
+            raise
+        except Exception as exc:
+            progress = await _update_chunk_progress("FAILED", chunk_key)
+            logger.error(
+                f"[ChunkProgress] FAILED chunk={chunk_key} "
+                f"elapsed={time.perf_counter() - chunk_start:.2f}s {progress} "
+                f"error={type(exc).__name__}: {exc}"
+            )
+            raise
+
+        progress = await _update_chunk_progress("DONE", chunk_key)
+        entity_count = len(result[0]) if result and result[0] is not None else 0
+        relation_count = len(result[1]) if result and result[1] is not None else 0
+        progress_event = "EMPTY" if entity_count == 0 and relation_count == 0 else "DONE"
+        logger.info(
+            f"[ChunkProgress] {progress_event} chunk={chunk_key} "
+            f"elapsed={time.perf_counter() - chunk_start:.2f}s {progress} "
+            f"entities={entity_count} relations={relation_count}"
+        )
+        return result
 
     # ----------------------------------------------------------------------------
     # use_llm_func is wrapped in ascynio.Semaphore, limiting max_async callings
     begin_time = datetime.now()
     extract_start = time.perf_counter()
     logger.info(f"Starting parallel processing of {len(ordered_chunks)} chunks...")
+    logger.info(
+        "Chunk extraction runtime config: "
+        f"one_pass={bool(global_config.get('enable_one_pass_extraction', True))}, "
+        f"one_pass_fallback={bool(global_config.get('enable_one_pass_fallback', False))}, "
+        f"llm_model_max_async={global_config.get('llm_model_max_async', 'unknown')}, "
+        f"chunk_count={len(ordered_chunks)}"
+    )
     results = await asyncio.gather(
         *[_process_single_content(c) for c in ordered_chunks],
-        return_exceptions=True
+        return_exceptions=True,
     )
     logger.info(f"Chunk LLM extraction wall time: {time.perf_counter() - extract_start:.2f}s")
 
@@ -2109,6 +2892,10 @@ async def extract_entities(
             logger.debug(f"Chunk {i+1}/{len(results)} ({chunk_key}) SUCCESS")
 
     logger.info(f"Chunk processing complete: {success_count} succeeded, {failure_count} failed")
+    if failure_count:
+        raise RuntimeError(
+            f"{failure_count}/{len(results)} chunk extractions failed after all concurrent tasks settled"
+        )
 
     # print()  # clear the progress bar
     maybe_nodes = defaultdict(list)
@@ -2153,39 +2940,91 @@ async def extract_entities(
     )
     _log_unknown_summary(all_relationships_data)
     logger.info(f"Hypergraph merge/upsert wall time: {time.perf_counter() - merge_start:.2f}s")
-    if not len(all_entities_data):
-        logger.warning("Didn't extract any entities, maybe your LLM is not working")
-        return None
-    if not len(all_relationships_data):
-        logger.warning(
-            "Didn't extract any relationships, maybe your LLM is not working"
+    if not len(all_entities_data) and not len(all_relationships_data):
+        logger.info(
+            "No entities or relationships were extracted from this document; "
+            "treating it as a valid empty extraction so document/chunk storage can be finalized"
         )
-        return None
+        return knowledge_hypergraph_inst
+    if not len(all_entities_data):
+        logger.warning("No entities were extracted; preserving any valid relationship data")
+    if not len(all_relationships_data):
+        logger.info("No relationships were extracted; preserving extracted entities")
 
-    if entity_vdb is not None:
+    if entity_vdb is not None and all_entities_data:
         entity_vdb_start = time.perf_counter()
-        data_for_vdb = {
-            compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
-                "content": dp["entity_name"] + dp["description"],
+        index_profile = str(global_config.get("index_profile", "dual_concat"))
+        data_for_vdb = {}
+        data_for_surface_vdb = {}
+        for dp in all_entities_data:
+            canonical_text = _build_entity_embedding_text(dp, view="canonical")
+            surface_text = _build_entity_embedding_text(dp, view="surface")
+            if index_profile == "canonical_only" or index_profile == "dual_separate":
+                content = canonical_text
+                index_view = "canonical"
+            else:
+                content = _build_dual_embedding_text(canonical_text, surface_text)
+                index_view = "dual_concat"
+            data_for_vdb[compute_mdhash_id(dp["entity_name"], prefix="ent-")] = {
+                "content": content,
                 "entity_name": dp["entity_name"],
+                "canonical_id": dp.get("canonical_id", dp["entity_name"]),
+                "canonical_name": dp.get("canonical_name", dp["entity_name"]),
+                "raw_name": dp.get("raw_name", dp["entity_name"]),
+                "entity_type": dp.get("entity_type", ""),
+                "semantic_group": dp.get("semantic_group", ""),
+                "index_view": index_view,
             }
-            for dp in all_entities_data
-        }
+            if index_profile == "dual_separate":
+                data_for_surface_vdb[compute_mdhash_id(dp["entity_name"] + "|surface", prefix="ent-surface-")] = {
+                    "content": surface_text or canonical_text,
+                    "entity_name": dp["entity_name"],
+                    "canonical_id": dp.get("canonical_id", dp["entity_name"]),
+                    "canonical_name": dp.get("canonical_name", dp["entity_name"]),
+                    "raw_name": dp.get("raw_name", dp["entity_name"]),
+                    "entity_type": dp.get("entity_type", ""),
+                    "semantic_group": dp.get("semantic_group", ""),
+                    "index_view": "surface",
+                }
         await entity_vdb.upsert(data_for_vdb)
+        if entity_surface_vdb is not None and data_for_surface_vdb:
+            await entity_surface_vdb.upsert(data_for_surface_vdb)
         logger.info(f"Entity vector upsert wall time: {time.perf_counter() - entity_vdb_start:.2f}s")
 
-    if relationships_vdb is not None:
+    if relationships_vdb is not None and all_relationships_data:
         relationship_vdb_start = time.perf_counter()
-        data_for_vdb = {
-            compute_mdhash_id(str(sorted(dp["id_set"])), prefix="rel-"): {
+        index_profile = str(global_config.get("index_profile", "dual_concat"))
+        data_for_vdb = {}
+        data_for_surface_vdb = {}
+        for dp in all_relationships_data:
+            canonical_text = _build_relationship_embedding_text(dp, view="canonical")
+            surface_text = _build_relationship_embedding_text(dp, view="surface")
+            if index_profile == "canonical_only" or index_profile == "dual_separate":
+                content = canonical_text
+                index_view = "canonical"
+            else:
+                content = _build_dual_embedding_text(canonical_text, surface_text)
+                index_view = "dual_concat"
+            data_for_vdb[relationship_vector_id(dp["id_set"])] = {
                 "id_set": dp["id_set"],
-                "content": dp["keywords"]
-                           + str(dp["id_set"])
-                           + dp["description"],
+                "relation_type": dp.get("relation_type", ""),
+                "source_doc_id": dp.get("source_doc_id", ""),
+                "source_chunk_id": dp.get("source_chunk_id", ""),
+                "index_view": index_view,
+                "content": content,
             }
-            for dp in all_relationships_data
-        }
+            if index_profile == "dual_separate":
+                data_for_surface_vdb[relationship_vector_id(dp["id_set"], surface=True)] = {
+                    "id_set": dp["id_set"],
+                    "relation_type": dp.get("relation_type", ""),
+                    "source_doc_id": dp.get("source_doc_id", ""),
+                    "source_chunk_id": dp.get("source_chunk_id", ""),
+                    "index_view": "surface",
+                    "content": surface_text or canonical_text,
+                }
         await relationships_vdb.upsert(data_for_vdb)
+        if relationships_surface_vdb is not None and data_for_surface_vdb:
+            await relationships_surface_vdb.upsert(data_for_surface_vdb)
         logger.info(f"Relationship vector upsert wall time: {time.perf_counter() - relationship_vdb_start:.2f}s")
 
     return knowledge_hypergraph_inst
@@ -2691,12 +3530,33 @@ async def hyper_query(
         combine the information from the local_query and global_query,
         so that we can have the final retrieval information.
     """
+    entity_context = entity_context or {
+        "context": None,
+        "entities": [],
+        "hyperedges": [],
+        "text_units": [],
+    }
+    relation_context = relation_context or {
+        "context": None,
+        "entities": [],
+        "hyperedges": [],
+        "text_units": [],
+    }
     context = combine_contexts(relation_context.get("context"), entity_context.get("context"))
 
     contextJson = {
+        # Retrieval-only metadata. Exposing the parsed keywords makes formal
+        # evaluation auditable without changing either upstream branch.
+        "entity_keywords": entity_keywords,
+        "relation_keywords": relation_keywords,
         "entities": deduplicate_by_key(entity_context.get("entities", []) + relation_context.get("entities", []), "entity_name"),
         "hyperedges": deduplicate_by_key(entity_context.get("hyperedges", []) + relation_context.get("hyperedges", []), "entity_set"),
-        "text_units": deduplicate_by_key(entity_context.get("text_units", []) + relation_context.get("text_units", []), "content")
+        "text_units": deduplicate_by_key(entity_context.get("text_units", []) + relation_context.get("text_units", []), "content"),
+        # Preserve the original merged field above, while exposing the two
+        # upstream retrieval branches for read-only evaluation adapters. This
+        # does not change either branch's ranking or the legacy merge order.
+        "entity_text_units": entity_context.get("text_units", []),
+        "relation_text_units": relation_context.get("text_units", []),
     }
 
     if query_param.only_need_context:
@@ -2798,12 +3658,26 @@ async def hyper_query_stream(
         combine the information from the local_query and global_query,
         so that we can have the final retrieval information.
     """
+    entity_context = entity_context or {
+        "context": None,
+        "entities": [],
+        "hyperedges": [],
+        "text_units": [],
+    }
+    relation_context = relation_context or {
+        "context": None,
+        "entities": [],
+        "hyperedges": [],
+        "text_units": [],
+    }
     context = combine_contexts(relation_context.get("context"), entity_context.get("context"))
 
     contextJson = {
         "entities": deduplicate_by_key(entity_context.get("entities", []) + relation_context.get("entities", []), "entity_name"),
         "hyperedges": deduplicate_by_key(entity_context.get("hyperedges", []) + relation_context.get("hyperedges", []), "entity_set"),
-        "text_units": deduplicate_by_key(entity_context.get("text_units", []) + relation_context.get("text_units", []), "content")
+        "text_units": deduplicate_by_key(entity_context.get("text_units", []) + relation_context.get("text_units", []), "content"),
+        "entity_text_units": entity_context.get("text_units", []),
+        "relation_text_units": relation_context.get("text_units", []),
     }
 
     if query_param.only_need_context:
@@ -3099,6 +3973,9 @@ async def graph_query(
             ]
         }
         if query_param.only_need_context:
+            if query_param.return_type == "json":
+                contextJson["response"] = context_string or ""
+                return contextJson
             return context_string
         if context_string is None:
             return PROMPTS["fail_response"]
@@ -3444,7 +4321,3 @@ async def llm_query_stream(
         if tok:
             yield tok
     return
-
-
-
-

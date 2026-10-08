@@ -5,4 +5,4 @@ original Hyper-RAG pipeline. These modules avoid mutating the core extraction
 flow unless callers explicitly invoke them.
 """
 
-__all__ = ["normalization"]
+__all__ = ["normalization", "prompts", "retrieval"]

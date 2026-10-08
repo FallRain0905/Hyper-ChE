@@ -16,6 +16,7 @@ export interface QuotaInfo {
   trial_embedding_calls_used: number
   trial_embedding_calls_limit: number
   monthly_reset_at?: string
+  daily_reset_at?: string
 }
 
 class AuthStore {
@@ -30,6 +31,10 @@ class AuthStore {
 
   get isAuthenticated() {
     return !!this.user
+  }
+
+  get isAdmin() {
+    return this.user?.role === 'admin'
   }
 
   private formatError(data: any, fallback: string) {

@@ -1,0 +1,12 @@
+﻿group,question_type,questions,Good Rate,Satisfactory-or-Better Rate,Macro KPC,Micro KPC,Hallucination Rate,False Abstention Rate,False Answer Rate,Unanswerable Abstention Accuracy,Citation Reference Validity,Citation Presence Rate,Citation Support Score (LLM)
+normalized_final,balance_of_plant_durability,1,1.0,1.0,1.0,1.0,0.0,0.0,0.0,1.0,,0.0,0.8
+normalized_final,comparison,7,0.1429,0.8571,0.6786,0.6786,0.1429,0.0,0.0,0.0,1.0,1.0,0.7143
+normalized_final,condition_multi_metric,8,0.625,0.625,0.65,0.625,0.25,0.125,0.0,0.0,1.0,0.875,0.6188
+normalized_final,cross_section_synthesis,6,0.0,0.3333,0.3472,0.3333,0.3333,0.1667,0.0,0.0,1.0,0.8333,0.3411
+normalized_final,direct_measurement,4,0.25,0.25,0.25,0.2308,0.25,0.5,0.0,0.0,1.0,0.5,0.25
+normalized_final,gas_safety_control,1,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,,0.0,0.0
+normalized_final,mechanism_chain,9,0.2222,0.5556,0.5,0.5,0.2222,0.1111,0.0,0.0,1.0,0.8889,0.5333
+normalized_final,operando_control,1,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,,0.0,0.0
+normalized_final,performance_comparison,1,0.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,,0.0,0.0
+normalized_final,qualification_standard,1,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,,0.0,0.0
+normalized_final,thermal_management,1,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,,0.0,0.0

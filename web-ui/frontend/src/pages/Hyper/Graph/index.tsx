@@ -142,7 +142,6 @@ const GraphPage = () => {
     if (storeGlobalUser.hasUserInitiatedVisualization && dbName) {
       // 验证数据库是否还在可用列表中
       if (!storeGlobalUser.validateDatabaseExists(dbName)) {
-        console.log('[Graph] 数据库已被删除，重置状态');
         storeGlobalUser.resetVisualizationState();
         setKeys(undefined);
         setKey(undefined);
@@ -160,8 +159,6 @@ const GraphPage = () => {
       message.warning('请先选择一个数据库');
       return;
     }
-
-    console.log('[Graph] 用户手动开始可视化，数据库:', dbName);
 
     // 验证数据库是否在可用列表中
     if (!storeGlobalUser.validateDatabaseExists(dbName)) {

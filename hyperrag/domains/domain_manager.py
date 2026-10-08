@@ -21,6 +21,45 @@ class DomainManager:
         self.domains_dir = current_dir
         self.current_domain = 'default'
         self.domain_configs: Dict[str, Dict] = {}
+        # Additional roots searched after the built-in domains directory.
+        # Used by the web platform to load prompt packs rendered from the
+        # database without writing into the shipped package directory.
+        self.extra_dirs: List[Path] = []
+
+    def add_search_root(self, path) -> Path:
+        """Register an extra directory to search for domain folders.
+
+        Built-in domains keep priority: roots are consulted only after
+        ``self.domains_dir``. Registering the same path twice is a no-op.
+        """
+        resolved = Path(path).resolve()
+        if resolved not in self.extra_dirs:
+            self.extra_dirs.append(resolved)
+        return resolved
+
+    def remove_search_root(self, path) -> None:
+        """Unregister a directory added via :meth:`add_search_root`."""
+        resolved = Path(path).resolve()
+        self.extra_dirs = [item for item in self.extra_dirs if item != resolved]
+
+    def invalidate(self, domain_name: str) -> None:
+        """Drop a cached domain config so the next load re-reads from disk."""
+        self.domain_configs.pop(domain_name, None)
+
+    def _resolve_domain_dir(self, domain_name: str) -> Path:
+        """Return the directory holding ``domain_name``, or the built-in path.
+
+        The built-in ``domains/`` directory wins when a name exists in both
+        places, so a rendered pack can never shadow a shipped domain.
+        """
+        builtin = self.domains_dir / domain_name
+        if builtin.exists():
+            return builtin
+        for root in self.extra_dirs:
+            candidate = root / domain_name
+            if candidate.exists():
+                return candidate
+        return builtin
 
     def load_domain_config(self, domain_name: str) -> Dict:
         """
@@ -35,7 +74,7 @@ class DomainManager:
         if domain_name in self.domain_configs:
             return self.domain_configs[domain_name]
 
-        config_path = self.domains_dir / domain_name / 'config.json'
+        config_path = self._resolve_domain_dir(domain_name) / 'config.json'
 
         if not config_path.exists():
             raise FileNotFoundError(f"Domain config not found: {config_path}")
@@ -152,7 +191,7 @@ class DomainManager:
         Returns:
             提示词模板字符串
         """
-        template_path = self.domains_dir / domain / f'{prompt_name}.txt'
+        template_path = self._resolve_domain_dir(domain) / f'{prompt_name}.txt'
 
         if not template_path.exists():
             raise FileNotFoundError(f"Prompt template not found: {template_path}")
@@ -215,11 +254,14 @@ class DomainManager:
         Returns:
             可用领域名称列表
         """
-        domains = []
+        domains = set()
 
-        for item in self.domains_dir.iterdir():
-            if item.is_dir() and (item / 'config.json').exists():
-                domains.append(item.name)
+        for root in [self.domains_dir, *self.extra_dirs]:
+            if not root.exists():
+                continue
+            for item in root.iterdir():
+                if item.is_dir() and (item / 'config.json').exists():
+                    domains.add(item.name)
 
         return sorted(domains)
 

@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import react from '@vitejs/plugin-react-swc'
 import eslintPlugin from 'vite-plugin-eslint'
 import { viteMockServe } from 'vite-plugin-mock'
 
@@ -20,9 +20,8 @@ export default defineConfig(({ mode }) => ({
     })
   ],
   resolve: {
-    extensions: ['.mjs', '.js', '.jsx', '.ts', '.tsx', '.json', '.sass', '.scss'], // 忽略输入的扩展名
+    extensions: ['.mjs', '.js', '.jsx', '.ts', '.tsx', '.json', '.sass', '.scss'], // å¿½ç•¥è¾“å…¥çš„æ‰©å±•å
     alias: [
-      { find: /^~/, replacement: '' },
       { find: '@', replacement: path.resolve(__dirname, 'src') },
       { find: '~', replacement: path.resolve(__dirname, './node_modules') },
       {
@@ -44,7 +43,7 @@ export default defineConfig(({ mode }) => ({
   css: {
     preprocessorOptions: {
       less: {
-        // 支持内联 JavaScript
+        // æ”¯æŒå†…è” JavaScript
         javascriptEnabled: true
       }
     }
@@ -53,7 +52,7 @@ export default defineConfig(({ mode }) => ({
     proxy: proxy[mode]
   },
   build: {
-    // 打包出map文件
+    // æ‰“åŒ…å‡ºmapæ–‡ä»¶
     sourcemap: false
   }
 }))

@@ -78,10 +78,10 @@ const WhyHypergraph = () => (
           hypergraph="超图把电池体系、膜、电极、电流密度、电解液和 CE/VE/EE 放在同一条 OPERATION_PERFORMANCE 超边中召回。"
         />
         <ExampleCard
-          title="例 2：PFAS 降解需要同时追踪材料、条件和证据"
-          question="哪些催化体系支持直接电子转移导致 C-F 键断裂，而不是只依赖 ROS 路径？"
-          graph="普通图能找到材料和活性物种的局部关系，但容易把 EPR、捕获剂实验、LC-MS 中间体和氟离子释放分散开。"
-          hypergraph="超图把 PFAS 目标物、催化材料、过程策略、活性物种、机理证据和脱氟指标组织为 MECHANISM_PATHWAY 超边。"
+          title="例 2：膜性能需要同时权衡传导、交叉渗透与稳定性"
+          question="为什么某些高质子电导率膜并没有带来更高的液流电池 CE 和 EE？"
+          graph="普通图能连接膜材料与单个性能指标，但容易把电导率、钒离子交叉渗透、溶胀率、电流密度和循环衰减拆散。"
+          hypergraph="超图把膜材料、电解液、运行电流密度、电导率、交叉渗透、尺寸稳定性和 CE/VE/EE 组织为同一条性能权衡超边。"
         />
         <ExampleCard
           title="例 3：配方检索本质上是条件组合检索"

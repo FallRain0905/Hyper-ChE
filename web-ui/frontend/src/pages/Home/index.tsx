@@ -106,7 +106,6 @@ const HyperRAGHome = () => {
     const [availableModes, setAvailableModes] = useState(['naive', 'graph', 'hyper'])
 
     // 新增：RAG系统状态管理
-    const [currentRAGSystem, setCurrentRAGSystem] = useState('hyperrag')
     const [systemsStatus, setSystemsStatus] = useState(null)
 
     // 新增对比模式相关状态
@@ -127,39 +126,28 @@ const HyperRAGHome = () => {
         { value: 'naive', label: 'RAG', icon: BookOpen, color: 'bg-blue-500', system: 'hyperrag' },
         { value: 'graph', label: 'Graph-RAG', icon: Bot, color: 'bg-orange-500', system: 'hyperrag' },
         { value: 'hyper', label: 'Hyper-RAG', icon: Zap, color: 'bg-purple-500', system: 'hyperrag' },
-        { value: 'hyper-lite', label: 'Hyper-RAG-Lite', icon: Layers, color: 'bg-green-500', system: 'hyperrag' },
-        // Cog-RAG 模式
-        { value: 'cog', label: 'Cog-RAG', icon: GitCompare, color: 'bg-indigo-600', system: 'cograg' },
-        { value: 'cog-hybrid', label: 'Cog-Hybrid', icon: GitCompare, color: 'bg-indigo-500', system: 'cograg' },
-        { value: 'cog-entity', label: 'Cog-Entity', icon: Bot, color: 'bg-cyan-600', system: 'cograg' },
-        { value: 'cog-theme', label: 'Cog-Theme', icon: BookOpen, color: 'bg-teal-600', system: 'cograg' }
+        { value: 'hyper-lite', label: 'Hyper-RAG-Lite', icon: Layers, color: 'bg-green-500', system: 'hyperrag' }
     ]
 
     // 从localStorage加载Mode配置
     const loadModeSettings = () => {
         try {
             const modeSettings = localStorage.getItem('hyperrag_mode_settings')
-            console.log('📥 加载模式设置:', modeSettings) // 调试日志
 
             if (modeSettings) {
                 const parsed = JSON.parse(modeSettings)
-                console.log('📊 解析后的设置:', parsed) // 调试日志
 
                 if (parsed.availableModes && Array.isArray(parsed.availableModes) && parsed.availableModes.length > 0) {
-                    console.log('✅ 设置可用模式:', parsed.availableModes) // 调试日志
                     setAvailableModes(parsed.availableModes)
                     // 如果当前选择的mode不在可用列表中，选择第一个可用的mode
                     if (!parsed.availableModes.includes(queryMode)) {
                         setQueryMode(parsed.availableModes[0])
-                        console.log('🔄 切换到第一个可用模式:', parsed.availableModes[0]) // 调试日志
                     }
                 } else {
-                    console.log('⚠️ 可用模式为空，使用默认配置') // 调试日志
                     // 如果没有配置或配置为空，使用默认配置
                     setAvailableModes(['naive', 'graph', 'hyper'])
                 }
             } else {
-                console.log('❌ 没有找到模式设置，使用默认配置') // 调试日志
                 // 出错时使用默认配置
                 setAvailableModes(['naive', 'graph', 'hyper'])
             }
@@ -179,11 +167,6 @@ const HyperRAGHome = () => {
 
     // 获取当前启用的模式列表
     const enabledModes = allModes.filter(mode => availableModes.includes(mode.value))
-    console.log('🎯 过滤启用的模式:', {
-      allModes: allModes.map(m => m.value),
-      availableModes: availableModes,
-      enabledModes: enabledModes.map(m => m.value)
-    }) // 调试日志
 
     // 获取模式标签的函数
     const getModeLabel = (roleValue) => {
@@ -356,10 +339,9 @@ return 'You'
 
         const data = await response.json()
 
-        // 确保响应包含Cog-RAG相关字段
         return {
             ...data,
-            themes: data.themes || [],  // Cog-RAG的主题信息
+            themes: data.themes || [],
             rag_system: data.rag_system || 'hyperrag',  // 使用的RAG系统
         }
     }
@@ -375,12 +357,6 @@ return
 
         // Add user message
         addMessage(userMessage, 'user')
-
-        // 自动根据查询模式切换系统
-        const targetSystem = queryMode.startsWith('cog') ? 'cograg' : 'hyperrag'
-        if (currentRAGSystem !== targetSystem) {
-            setCurrentRAGSystem(targetSystem)
-        }
 
         if (isCompareMode) {
             // 对比模式：同时查询两个模式
@@ -446,18 +422,10 @@ return
                         'hyper-lite': 'Hyper-RAG-Lite',
                         'graph': 'Graph-RAG',
                         'naive': 'RAG',
-                        'llm': 'LLM',
-                        // Cog-RAG 模式
-                        'cog': 'Cog-RAG',
-                        'cog-hybrid': 'Cog-Hybrid',
-                        'cog-entity': 'Cog-Entity',
-                        'cog-theme': 'Cog-Theme'
+                        'llm': 'LLM'
                     }
                     const modeName = modeNames[queryMode] || queryMode
-
-                    // 获取系统信息
-                    const modeInfo = allModes.find(m => m.value === queryMode)
-                    const systemName = modeInfo?.system === 'cograg' ? 'Cog-RAG' : 'HyperRAG'
+                    const systemName = 'HyperRAG'
 
                     let responseContent = data.response || 'No response content'
                     responseContent += `\n\n---\n*${systemName} - ${modeName}*`
@@ -466,8 +434,8 @@ return
                         entities: data.entities || [],
                         hyperedges: data.hyperedges || [],
                         text_units: data.text_units || [],
-                        themes: data.themes || [],  // 添加Cog-RAG的主题信息
-                        rag_system: data.rag_system || 'hyperrag'  // 添加系统标识
+                        themes: data.themes || [],
+                        rag_system: data.rag_system || 'hyperrag'
                     })
                 } else {
                     throw new Error(data.message || 'Query failed')
@@ -539,13 +507,13 @@ return
     }, [availableModes, compareMode1, compareMode2])
 
     return (
-        <div className="flex h-screen bg-gray-50">
+        <div className="relative flex h-screen bg-transparent p-3 sm:p-4">
             {/* Sidebar */}
-            <div className="w-52 bg-gray-100 border-r border-gray-200 flex flex-col">
+            <div className="hyperche-card mr-3 flex w-56 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white/80 shadow-sm backdrop-blur-xl">
 
                 {/* Mode Selector */}
-                <div className="flex items-center space-x-1 p-3 text-base">
-                    <div className="flex flex-col bg-gray-100 rounded-lg p-1 w-full space-y-1">
+                <div className="flex items-center space-x-1 p-4 text-base">
+                    <div className="flex w-full flex-col space-y-1 rounded-2xl bg-slate-50 p-2">
                         <div className="flex items-center space-x-2 mb-3">
                             <Settings className="w-5 h-5 shrink-0 text-gray-500" />
                             <span className="font-medium text-gray-700 flex-1">Mode: </span>
@@ -563,7 +531,6 @@ return
                                 </label>
                             </div>
                         </div>
-
 
                         {isCompareMode ? (
                             /* 对比模式：显示两个模式选择器 */
@@ -637,20 +604,14 @@ return
                 <div className="mx-3 mt-4 p-3 bg-white rounded-lg border border-gray-200">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2">
-                            {currentRAGSystem === 'cograg' ? (
-                                <GitCompare className="w-4 h-4 text-purple-500" />
-                            ) : (
-                                <Zap className="w-4 h-4 text-blue-500" />
-                            )}
+                            <Zap className="w-4 h-4 text-blue-500" />
                             <span className="text-sm font-medium text-gray-700">
-                                当前使用：{currentRAGSystem === 'cograg' ? 'Cog-RAG' : 'HyperRAG'} 系统
+                                当前使用：HyperRAG 系统
                             </span>
                         </div>
-                        {systemsStatus && (
-                            <Tag color={currentRAGSystem === 'cograg' ? 'purple' : 'blue'} className="text-xs">
-                                {currentRAGSystem === 'cograg'
-                                    ? `${systemsStatus.cograg.instances} 实例`
-                                    : `${systemsStatus.hyperrag.instances} 实例`}
+                        {systemsStatus?.hyperrag && (
+                            <Tag color="blue" className="text-xs">
+                                {systemsStatus.hyperrag.instances} 实例
                             </Tag>
                         )}
                     </div>
@@ -721,9 +682,9 @@ return
             </div>
 
             {/* Main Content */}
-            <div className="flex-1 flex flex-col">
+            <div className="min-w-0 flex-1 flex flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white/75 shadow-sm backdrop-blur-xl">
                 {/* Top Bar */}
-                <div className="bg-white border-b border-gray-200 p-4">
+                <div className="border-b border-slate-200/80 bg-white/75 p-4 backdrop-blur-xl">
                     <div className="flex items-center justify-between w-full">
                         <div className="flex items-center space-x-4">
                             <Database className="w-5 h-5 text-gray-500" />
@@ -743,22 +704,21 @@ return
                 {/* Chat Area */}
                 <div className="flex-1 flex flex-col">
                     {/* Messages */}
-                    <ScrollArea className="p-4 pb-0 h-[calc(100vh-210px)] bg-white">
+                    <ScrollArea className="h-[calc(100vh-225px)] bg-transparent p-4 pb-0 sm:p-6">
                         {activeConversation?.messages.length === 0 ? (
-                            <div className="flex-1 flex items-center justify-center mt-20">
-                                <div className="text-center">
-                                    <Bot className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                            <div className="flex flex-1 items-center justify-center pt-20">
+                                <div className="text-center hyperche-reveal">
+                                    <div className="hyperche-pulse mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-[2rem] border border-blue-100 bg-blue-50 text-blue-600"><Bot className="h-9 w-9" /></div>
                                     <h3 className="text-lg font-medium text-gray-900 mb-2">
-                                        Welcome to Hyper-RAG
+                                        开始使用 HyperChE
                                     </h3>
                                     <p className="text-gray-500 max-w-md">
-                                        Ask me anything about your knowledge base. I&apos;ll help you find the
-                                        information you need using advanced RAG technology.
+                                        选择检索模式与知识库，输入你的科研问题开始检索。
                                     </p>
                                 </div>
                             </div>
                         ) : (
-                            <div className="space-y-6 mx-auto">
+                            <div className="mx-auto max-w-5xl space-y-6">
                                 {activeConversation?.messages.map((message) => (
                                     <div key={message.id + message.content} className="flex space-x-4">
                                         <Avatar>
@@ -783,9 +743,6 @@ return
                                                     {message.isCompare ? '对比分析' : getModeLabel(message.role)}
                                                 </span>
                                                 {/* 系统标识标签 */}
-                                                {message.rag_system === 'cograg' && (
-                                                    <Tag color="purple" className="ml-2">Cog-RAG</Tag>
-                                                )}
                                                 {message.rag_system === 'hyperrag' && (
                                                     <Tag color="blue" className="ml-2">HyperRAG</Tag>
                                                 )}
@@ -990,7 +947,7 @@ return
                     </ScrollArea>
 
                     {/* Input Area */}
-                    <div className="border-t border-gray-200 bg-white p-2">
+                    <div className="border-t border-slate-200/80 bg-white/75 p-3 backdrop-blur-xl">
                         <div className="max-w-4xl mx-auto">
                             <div className="flex space-x-4 items-center">
                                 <Textarea

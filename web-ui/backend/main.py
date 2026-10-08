@@ -52,7 +52,13 @@ def safe_print(*args, **kwargs):
 def redact_text_for_log(text: str) -> str:
     """Mask common API key/token patterns in free-form log strings."""
     try:
-        text = re.sub(r"sk-[A-Za-z0-9_\-]{8,}", "sk-[REDACTED]", text)
+        # Bearer tokens (Authorization: Bearer <token>) - the token sits after
+        # the scheme, so mask the whole credential rather than just the header name.
+        text = re.sub(r"(?i)\b(bearer)\s+[A-Za-z0-9._\-]{6,}", r"\1 [REDACTED]", text)
+        # Provider key prefixes with either - or _ separator
+        # (sk-, sk-proj-, rk-, gsk-, gsk_, hf_, xai- ...).
+        text = re.sub(r"\b(sk|rk|gsk|xai)[-_][A-Za-z0-9_\-]{6,}", r"\1-[REDACTED]", text)
+        text = re.sub(r"\bhf_[A-Za-z0-9]{6,}", "hf_[REDACTED]", text)
         text = re.sub(
             r"(?i)(api[_-]?key|apikey|embeddingApiKey|authorization|token|secret)(\s*[:=]\s*)(['\"]?)[^,'\"\s}]+",
             r"\1\2\3[REDACTED]",
@@ -83,6 +89,8 @@ class SafeLogFilter(logging.Filter):
 def extract_user_friendly_error(error_message: str) -> str:
     """Extract a concise user-facing error message from provider errors."""
     error_lower = str(error_message or "").lower()
+    if "notfounderror" in error_lower or "not found" in error_lower or "404" in error_lower:
+        return "API endpoint not found. Check the provider base URL and model name. For OpenAI-compatible services, configure the API base (for example, .../v1), not /embedding or /embeddings."
     if "insufficient" in error_lower or "balance" in error_lower:
         return "API account balance is insufficient. Please recharge or switch to another available key."
     if "permissiondenied" in error_lower or "permission denied" in error_lower or "403" in error_lower:
@@ -212,9 +220,23 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSock
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from auth import AUTH_COOKIE_NAME, auth_store, create_token
+import providers
 from db import get_hypergraph, getFrequentVertices, get_vertices, get_hyperedges, get_vertice, get_vertice_neighbor, get_hyperedge_neighbor_server, add_vertex, add_hyperedge, delete_vertex, delete_hyperedge, update_vertex, update_hyperedge, get_hyperedge_detail, db_manager, get_theme_hypergraph, get_theme_vertices, get_theme_hyperedges, get_theme_vertex_neighbor
 from file_manager import file_manager
 from kb_manager import KnowledgeBaseManager
+from public_demo import (
+    DEFAULT_PUBLIC_DEMO_DATABASE,
+    inspect_public_demo_cache,
+    public_demo_metadata,
+)
+from mineru import (
+    download_mineru_markdown,
+    get_mineru_batch_status,
+    load_mineru_config,
+    public_mineru_config,
+    submit_mineru_batch,
+    validate_upload,
+)
 import json
 import os
 import gc
@@ -290,11 +312,39 @@ LLM_PROVIDER_POOL_STATE = {
     "providers": {},
 }
 
-def get_runtime_settings_context() -> dict:
-    """Docstring."""
+DEFAULT_USER_RUNTIME_SETTINGS = {
+    "hyperrag_domain": "default",
+    "prompt_pack_id": None,
+    "prompt_version_id": None,
+    "experimentMode": "hyper_final",
+    "promptProfile": "chemistry",
+    "indexProfile": "dual_concat",
+    "enableEntityNormalization": True,
+    "enableMeasurementInstances": True,
+    "enableEfuRepair": True,
+    "enableHybridRerank": True,
+}
+
+def get_user_runtime_settings(user_id: str | None = None) -> dict:
+    effective_user_id = user_id or CURRENT_USER_ID.get()
+    if not effective_user_id:
+        return DEFAULT_USER_RUNTIME_SETTINGS.copy()
+    return auth_store.get_user_runtime_settings(effective_user_id)
+
+def load_effective_settings() -> dict:
+    settings: dict = {}
     try:
         with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
             settings = json.load(f)
+    except Exception:
+        settings = {}
+    settings.update(get_user_runtime_settings())
+    return settings
+
+def get_runtime_settings_context() -> dict:
+    """Return the effective global API and per-user HyperRAG configuration."""
+    try:
+        settings = load_effective_settings()
         return {
             "model": settings.get("modelName"),
             "base_url": settings.get("baseUrl"),
@@ -302,12 +352,13 @@ def get_runtime_settings_context() -> dict:
             "embedding_base_url": settings.get("embeddingBaseUrl"),
             "embedding_dim": settings.get("embeddingDim"),
             "hyperrag_domain": settings.get("hyperrag_domain", "default"),
-            "experiment_mode": settings.get("experimentMode", settings.get("experiment_mode", "hyper_final")),
-            "prompt_profile": settings.get("promptProfile", settings.get("prompt_profile", "chemistry")),
-            "enable_entity_normalization": settings.get("enableEntityNormalization", settings.get("enable_entity_normalization", True)),
-            "enable_measurement_instances": settings.get("enableMeasurementInstances", settings.get("enable_measurement_instances", True)),
-            "enable_efu_repair": settings.get("enableEfuRepair", settings.get("enable_efu_repair", True)),
-            "enable_hybrid_rerank": settings.get("enableHybridRerank", settings.get("enable_hybrid_rerank", True)),
+            "experiment_mode": settings.get("experimentMode", "hyper_final"),
+            "prompt_profile": settings.get("promptProfile", "chemistry"),
+            "index_profile": settings.get("indexProfile", "dual_concat"),
+            "enable_entity_normalization": settings.get("enableEntityNormalization", True),
+            "enable_measurement_instances": settings.get("enableMeasurementInstances", True),
+            "enable_efu_repair": settings.get("enableEfuRepair", True),
+            "enable_hybrid_rerank": settings.get("enableHybridRerank", True),
         }
     except Exception as e:
         return {"settings_error": safe_str(e)}
@@ -317,6 +368,28 @@ def split_api_keys(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in re.split(r"[\n,;]+", value) if item.strip()]
+
+
+def normalize_openai_base_url_setting(value: str | None, resource: str) -> str:
+    """Store an API base URL rather than an SDK-managed resource endpoint.
+
+    The OpenAI SDK appends ``/chat/completions`` and ``/embeddings`` itself.
+    Accepting a full endpoint in the settings UI without normalizing it would
+    otherwise produce paths such as ``/v1/embedding/embeddings`` and a 404.
+    """
+    if not value:
+        return ""
+
+    normalized = safe_str(value).strip().rstrip("/")
+    suffixes = {
+        "chat": ("/chat/completions", "/completions"),
+        "embedding": ("/embeddings", "/embedding"),
+    }
+    for suffix in suffixes.get(resource, ()):
+        if normalized.lower().endswith(suffix):
+            normalized = normalized[: -len(suffix)].rstrip("/")
+            break
+    return normalized
 
 def mask_api_keys_for_settings(value: str | None) -> str:
     """Return one masked line per configured key so the settings UI preserves key count."""
@@ -734,6 +807,7 @@ class QuotaConfigRequest(BaseModel):
     trial_docs_limit: int = 3
     trial_llm_calls_limit: int = 50
     trial_embedding_calls_limit: int = 200
+    reset_usage: bool = False
 
 
 class UserApiKeyRequest(BaseModel):
@@ -976,6 +1050,39 @@ async def quota_me(user: dict = Depends(require_current_user)):
     return {"success": True, "quota": auth_store.get_quota(user["id"])}
 
 
+@app.get("/admin/overview")
+async def get_admin_overview(user: dict = Depends(require_admin_user)):
+    users_data = auth_store.list_users()
+    return {
+        "success": True,
+        "overview": {
+            "users_total": len(users_data),
+            "regular_users": sum(1 for item in users_data if item.get("role") != "admin"),
+            "admins": sum(1 for item in users_data if item.get("role") == "admin"),
+            "quota_config": auth_store.get_quota_limits(),
+        },
+    }
+
+
+@app.get("/admin/users")
+async def get_admin_users(user: dict = Depends(require_admin_user)):
+    return {"success": True, "users": auth_store.list_users()}
+
+
+@app.post("/admin/users/{user_id}/quota/reset")
+async def reset_admin_user_quota(user_id: str, user: dict = Depends(require_admin_user)):
+    try:
+        return {"success": True, "quota": auth_store.reset_user_quota(user_id)}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=safe_str(e))
+
+
+@app.post("/admin/quotas/reset")
+async def reset_all_admin_user_quotas(user: dict = Depends(require_admin_user)):
+    count = auth_store.reset_all_user_quotas()
+    return {"success": True, "reset_users": count}
+
+
 @app.get("/admin/quota-config")
 async def get_admin_quota_config(user: dict = Depends(require_admin_user)):
     return {"success": True, "quota_config": auth_store.get_quota_limits()}
@@ -988,7 +1095,8 @@ async def save_admin_quota_config(payload: QuotaConfigRequest, user: dict = Depe
         payload.trial_llm_calls_limit,
         payload.trial_embedding_calls_limit,
     )
-    return {"success": True, "quota_config": limits}
+    reset_users = auth_store.reset_all_user_quotas() if payload.reset_usage else 0
+    return {"success": True, "quota_config": limits, "reset_users": reset_users}
 
 
 @app.get("/user-api-keys")
@@ -1412,6 +1520,7 @@ class SettingsModel(BaseModel):
     llmGlobalMaxAsync: int = 16
     llmPerKeyMaxAsync: int = 4
     llmMaxRetries: int = 1
+    llmKeyCooldownSeconds: int = 60
     llmProviderStrategy: str = "priority_round_robin"
     llmProviders: List[LLMProviderModel] = Field(default_factory=list)
     # HyperRAG 闂傚倷娴囬褍顫濋敃鍌︾稏濠㈣埖鍔曠粻浼存煙闂傚鍔嶉柛銈嗗姈閵囧嫰寮介顫捕闂佹椿鍘介〃濠囧蓟濞戙垹鐒洪柛鎰剁細缁ㄧ敻姊虹紒妯烩拻闁告鍥ㄥ€剁€规洖娲犻崑鎾舵喆閸曨剛顦ュ┑鐐跺皺婵炩偓鐎规洘鍨块獮姗€骞栭鐔溠囨煙閸忚偐鏆橀柛銊ョ秺椤㈡挸鈽夐姀鈾€鎷洪梺鍛婄☉閿曘儳鈧灚鐟╅弻娑樷槈閸楃偞鐏撻梺?
@@ -1422,7 +1531,31 @@ class SettingsModel(BaseModel):
     # Cog-RAG闂傚倸鍊搁崐鐑芥嚄閸洖纾块柣銏㈩焾閻ょ偓绻濋棃娑卞剬闁逞屽墾缁犳挸鐣锋總绋课ㄩ柕澹懎骞€闂佽崵鍠愮划宀€鎹㈠鈧悰顔跨疀閺囨浜鹃柨婵嗛閺嬫稓绱掗埀顒勫醇閵忊€虫瀾闂婎偄娲︾粙鎴﹀礄?
     enableCogRAG: bool = True  # 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁嶉崟顐ｇ€抽悗骞垮劚椤︻垰效?缂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洘鍔欓幃婊堟嚍閵夈儲鐣遍梻浣稿閸嬪懎煤閺嶎厼鍑犲ù锝呯畭娴滄粓鏌曟径妯虹仯妞ゆ柨妾?RAG闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鍨鹃幇浣圭稁婵犵數濮甸懝鍓х玻濡ゅ懏鐓涢柛銉ｅ劚閻忊晝绱掗埀?
     # Hyper-RAG 婵犵數濮烽。钘壩ｉ崨鏉戠；闁告侗鍙庨悢鍡樹繆椤栨瑧绉挎繛鎴烆焸閺冨牆宸濇い鏃堟？缁ㄥ灚绻濋悽闈涗粶婵☆偅鐟╅獮鎰節濮橆厼浜楅梺閫炲苯澧撮柟顔筋殜閻涱噣宕归鐓庮潛婵犵數鍋涢惇浼村礉閹存繍鍤?
-    hyperrag_domain: str = "default"  # "default", "flow_battery", or custom domains
+    mineruApiBaseUrl: str = "https://mineru.net/api/v4"
+    mineruApiToken: str = ""
+    mineruModelVersion: str = "pipeline"
+    mineruLanguage: str = "ch"
+    mineruEnableOcr: bool = True
+    mineruEnableFormula: bool = True
+    mineruEnableTable: bool = True
+    mineruExtraFormats: List[str] = Field(default_factory=lambda: ["docx", "html"])
+    mineruPollIntervalSeconds: int = 3
+    mineruMaxPollAttempts: int = 100
+    mineruMaxFileMb: int = 200
+    mineruMaxResultMb: int = 300
+
+class UserRuntimeSettingsModel(BaseModel):
+    hyperrag_domain: str = "default"
+    # Optional binding to a published prompt pack for build/query provenance.
+    prompt_pack_id: Optional[str] = None
+    prompt_version_id: Optional[str] = None
+    experimentMode: str = "hyper_final"
+    promptProfile: str = "chemistry"
+    indexProfile: str = "dual_concat"
+    enableEntityNormalization: bool = True
+    enableMeasurementInstances: bool = True
+    enableEfuRepair: bool = True
+    enableHybridRerank: bool = True
 
 class APITestModel(BaseModel):
     apiKey: str
@@ -1457,11 +1590,17 @@ async def get_settings(user: dict = Depends(require_current_user)):
                     "message": "Operation completed"
                 }
             # 婵犵數濮烽弫鎼佸磻閻愬搫鍨傞柛顐ｆ礀缁犱即鏌涘┑鍕姢闁活厽鎸搁—鍐偓锝庝簻椤掋垻鈧娲橀悡锟犲蓟閻斿憡缍囬柛鎾楀懏娈搁梻浣虹帛閸旀洟鏁冮鍫濊摕闁挎繂顦粻娑欍亜閹烘垵鈧綊骞夐悡搴樻斀闁绘劕寮堕崳娲煟閳哄﹤鐏︾€殿喖顭烽幃銏ゆ偂鎼达綆鍚嬫俊鐐€栭弻銊╁触鐎ｎ喗鍊甸柣鎴烆焽缁犻箖鏌ㄥ┑鍡樺櫤闁瑰吋鍔欓弻銊╁即閵娿倝鍋楅梺缁樹緱閸犳绮欐径鎰闁?Key
-            settings_safe = settings.copy()
+            default_settings = SettingsModel().dict()
+            settings_safe = {
+                **default_settings,
+                **{key: value for key, value in settings.items() if key in default_settings},
+            }
             if 'apiKey' in settings_safe:
-                settings_safe['apiKey'] = '***' if settings_safe['apiKey'] else ''
+                settings_safe['apiKey'] = mask_api_keys_for_settings(settings_safe.get('apiKey'))
             if 'embeddingApiKey' in settings_safe:
                 settings_safe['embeddingApiKey'] = mask_api_keys_for_settings(settings_safe.get('embeddingApiKey'))
+            if 'mineruApiToken' in settings_safe:
+                settings_safe['mineruApiToken'] = '***' if settings_safe.get('mineruApiToken') else ''
             if isinstance(settings_safe.get('llmProviders'), list):
                 safe_providers = []
                 for provider in settings_safe.get('llmProviders', []):
@@ -1478,30 +1617,14 @@ async def get_settings(user: dict = Depends(require_current_user)):
             if user.get("role") != "admin":
                 settings_safe["apiKey"] = ""
                 settings_safe["embeddingApiKey"] = ""
+                settings_safe["mineruApiToken"] = ""
                 settings_safe["llmProviders"] = []
             return settings_safe
         else:
             # 闂傚倸鍊风粈渚€骞栭位鍥敃閿曗偓閻ょ偓绻濇繝鍌滃闁藉啰鍠栭弻鏇熺箾閸喖澹勫┑鐐叉▕娴滄粓宕橀埀顒€顪冮妶搴″箺闁搞劏鍩栫粋鎺懳熺悰鈩冩杸闂佸疇妫勫Λ妤呮倶閵夛妇绠惧璺侯儐缁€瀣殽閻愯尙绠抽柍褜鍓ㄧ紞鍡涘窗閺嶎偆鐭嗛柛顐犲灪閸犳劙鐓崶銊р槈闁?
-            return {
-                "apiKey": "",
-                "modelProvider": "openai",
-                "modelName": "gpt-4o-mini",
-                "baseUrl": "https://api.openai.com/v1",
-                "selectedDatabase": "",
-                "maxTokens": 2000,
-                "temperature": 0.7,
-                "llmTimeout": 600,
-                "llmModelMaxAsync": 16,
-                "llmGlobalMaxAsync": 16,
-                "llmPerKeyMaxAsync": 4,
-                "llmMaxRetries": 1,
-                "llmProviderStrategy": "priority_round_robin",
-                "llmProviders": [],
-                "embeddingModel": "text-embedding-3-small",
-                "embeddingDim": 1536,
-                "embeddingBaseUrl": "",
-                "embeddingApiKey": ""
-            }
+            settings_safe = SettingsModel().dict()
+            settings_safe["is_admin"] = user.get("role") == "admin"
+            return settings_safe
     except Exception as e:
         return {"success": False, "message": safe_str(e)}
 
@@ -1527,16 +1650,10 @@ async def save_settings(settings: SettingsModel, user: dict = Depends(require_ad
         )
 
         # 婵犵數濮烽弫鍛婃叏閻戝鈧倹绂掔€ｎ亞鍔﹀銈嗗坊閸嬫捇鏌涢悢閿嬪仴闁糕斁鍋撳銈嗗坊閸嬫挾绱撳鍜冭含妤犵偛鍟灒闁煎鍊楅悾钘夘渻閵堝簼绨芥い顐㈢翱ey闂?**闂傚倸鍊搁崐鐑芥倿閿旈敮鍋撶粭娑樻噽閻瑩鏌熸潏楣冩闁搞倖鍔栭妵鍕冀椤愵澀绮堕梺鎼炲妼閸婂綊濡甸崟顖氬唨闁靛ě浣插亾閹烘鐓冮柣鐔稿鏍＄紓浣虹帛缁诲牆螞閸愩劉妲堟繛鍡樺姈閸婄兘姊绘担椋庝覆閻庨潧鐭傚畷鎶芥晲婢跺﹨鎽曞┑鐐村灦椤倿鎮㈤崗鐓庝簵闁瑰吋鐣崹濠氬焵椤掍礁鍔ら柍瑙勫灴閹晠顢曢～顓烆棜婵犵數鍋為幐濠氬春閸愵喖纾婚柟鍓х帛閻撴瑦銇勯弽銊ㄥ闁哄棴绲块埀顒冾潐濞叉ê鐣濋幖浣哥畺闁绘劖浜介埀顒€鍊搁娆忣潖閺呭﹤鈹戦悩鍨毄闁稿鍋ゅ畷褰掑醇閺囩偟顔囬梺鍛婄缚閸庢娊鎯岄幘鍓佹／闁诡垎灞藉壄婵?
-        if settings_dict.get('apiKey') == '***':
-            # 闂傚倸鍊峰ù鍥х暦閸偅鍙忛柡澶嬪殮濞差亜鐓涢柛婊€鐒﹂弲顏堟偡濠婂嫬鐏村┑锛勬暬楠炲洭寮剁捄銊モ偓鐐差渻閵堝棗绗傜紒鈧担鍦浄闁靛繈鍊栭埛鎴犵磽娴ｇ櫢渚涙繛鍫熸閺岋絽螖閳ь剟鏁冮敂鎯у灊濠电姵鑹剧粻铏繆閵堝嫮顦﹀ù鐙€鍨辩换娑欐綇閸撗勫仹濡炪値鍘奸悧鎾诲春濞戙垹绫嶉柛顐ゅ枔閸樹粙姊洪棃娑氬闁瑰啿绻樿棢闁绘劗鏁哥壕濂告倵閿濆簼鎲炬俊鍙夋倐閺屽秶绱掑Ο璇茬３濡ょ姷鍋涢悧蹇撯槈閻㈢纾介柣娑氱y
-            if os.path.exists(SETTINGS_FILE):
-                with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                    existing_settings = json.load(f)
-                # 婵犵數濮烽弫鎼佸磿閹寸姴绶ら柦妯侯棦濞差亝鏅滈柣鎰靛墮鎼村﹪姊洪崨濠傚Е濞存粍鐗犲畷鎴﹀箻鐠囨彃鐎銈嗗姧缂嶅棗螞閸愵喗鍊甸悷娆忓绾炬悂鏌涢妸銈囩煓妤犵偛鍟存慨鈧柕鍫濇噹缁愭稒绻濋悽闈浶㈤悗姘煎櫍瀵娊濮€閵堝棌鎷绘繛杈剧到濠€鍗烇耿娴犲鐓曢柡鍌濇硶閻掑摜鈧娲栧﹢杈╁垝濮橆剦娼伴柕鏇炲潖y
-                settings_dict['apiKey'] = existing_settings.get('apiKey', '')
-            else:
-                # 婵犵數濮烽弫鍛婃叏閻戝鈧倹绂掔€ｎ亞鍔﹀銈嗗坊閸嬫捇鏌涢悢閿嬪仴闁糕斁鍋撳銈嗗坊閸嬫挾绱撳鍜冭含妤犵偛鍟灒閻犲洩灏欑粣鐐寸節閻㈤潧浠ч柛瀣崌閹繝濮€閵堝棌鎷洪梺鍝勫€堕崕鎻掆枍閸涘瓨鐓曢柣鏇氱閻忥絿绱掗纰辩吋妤犵偞甯掕灃濞达絽鎼獮妤佺節閻㈤潧孝闁挎洏鍊濋獮濠冩償閵婏絺鍋撻崒鐐茬闁兼祴鏅濋惁鍫ユ⒑闁偛鑻晶顖炴煙瀹勭増鍤囬柟顔界矊铻ｅ〒姘煎灙閸嬫挸鈽夐姀鈾€鎷洪梺鍛婄☉閿曘儳鈧灚鐟╅弻娑樷槈閸楃偞鐏撻梺閫炲苯澧婚柛娆忓暙椤繐煤椤忓嫪绱堕梺鍛婃处閸嬧偓闁稿鎸剧划娆徫涢崹顐ｃ仢闁轰焦鍔欏畷銊╊敂閸涱垪鍋撴繝姘拺闂傚牊绋撶粻鐐烘煕婵犲啰澧电€殿喗鐓￠、妤呭礋椤掆偓閳ь剙鐖奸弻锝夊箛椤栨氨鍘銈冨劚椤︾敻寮婚敐鍫㈢杸闁哄洨鍋為悘鍫ユ⒑鐠団€虫灕妞ゎ偄顦甸獮蹇涘川椤栨粎鐓撻柣鐘充航閸斿酣鍩ｉ妶澶嬧拺闁煎鍊曟牎闂佸憡姊归〃濠傜暦娴兼潙绠婚悹鍝勬惈閻忓﹤鈹戦绛嬬劸婵炲绋掔€靛ジ鎮╃紒妯煎幈闂佸搫娲㈤崝宀勭嵁濡ゅ懏鐓欓柤鑹版硾閸氬湱绱掓潏銊﹀鞍闁瑰嘲鎳愰幏鐘诲焺閸愭儳鎮堢紓鍌氬€搁崐鎼佸磹閻熼偊娼╅柕濞炬櫅缁?
-                settings_dict['apiKey'] = ''
+        settings_dict['apiKey'] = resolve_masked_api_key_text(
+            settings_dict.get('apiKey'),
+            existing_settings.get('apiKey', ''),
+        )
 
         # embeddingApiKey supports multiple keys separated by newline/comma/semicolon.
         # Preserve masked rows returned by GET /settings while allowing users to add/remove keys.
@@ -1544,7 +1661,19 @@ async def save_settings(settings: SettingsModel, user: dict = Depends(require_ad
             settings_dict.get('embeddingApiKey'),
             existing_settings.get('embeddingApiKey', ''),
         )
+        if settings_dict.get('mineruApiToken') == '***':
+            settings_dict['mineruApiToken'] = existing_settings.get('mineruApiToken', '')
 
+        # Persist canonical OpenAI-compatible API base URLs. The SDK appends
+        # resource paths, so saving /embedding or /chat/completions causes 404s.
+        settings_dict['baseUrl'] = normalize_openai_base_url_setting(
+            settings_dict.get('baseUrl'),
+            'chat',
+        )
+        settings_dict['embeddingBaseUrl'] = normalize_openai_base_url_setting(
+            settings_dict.get('embeddingBaseUrl') or settings_dict.get('baseUrl'),
+            'embedding',
+        )
         # 缂傚倸鍊搁崐鐑芥嚄閸洘鎯為幖娣妼閸屻劑鏌涢幘妤€鎳嶇粭澶岀磽娴ｇ绾х紒妤侇暥edding闂傚倸鍊搁崐鐑芥嚄閸洖纾块柣銏㈩焾閻ょ偓绻濋棃娑卞剬闁逞屽墾缁犳挸鐣锋總绋课ㄩ柕澹懎骞€闂佽崵鍠愮划宀€鎹㈠鈧畷娲焵椤掍降浜滈柟鍝勭Х閸忓矂鏌嶉娑欑闁靛洤瀚版俊鎼佸Ψ閿旂粯锛嗛梻浣筋嚃閸犳稑鈻斿☉顫稏婵犻潧娲︾紞鍥煃閸濆嫸宸ラ柡鍜佸墴濮?
         if 'embeddingBaseUrl' not in settings_dict:
             settings_dict['embeddingBaseUrl'] = ''
@@ -1555,6 +1684,10 @@ async def save_settings(settings: SettingsModel, user: dict = Depends(require_ad
             for provider_index, provider in enumerate(settings_dict.get('llmProviders', [])):
                 if not isinstance(provider, dict):
                     continue
+                provider['baseUrl'] = normalize_openai_base_url_setting(
+                    provider.get('baseUrl') or settings_dict.get('baseUrl'),
+                    'chat',
+                )
                 existing_provider = None
                 for old_provider in existing_providers:
                     if not isinstance(old_provider, dict):
@@ -1602,6 +1735,79 @@ async def save_settings(settings: SettingsModel, user: dict = Depends(require_ad
     except Exception as e:
         main_logger.error("Log message")
         return {"success": False, "message": safe_str(e)}
+
+@app.get("/user-runtime-settings")
+async def read_user_runtime_settings(user: dict = Depends(require_current_user)):
+    return {"success": True, "settings": get_user_runtime_settings(user["id"])}
+
+
+@app.post("/user-runtime-settings")
+async def save_user_runtime_settings(
+    payload: UserRuntimeSettingsModel,
+    user: dict = Depends(require_current_user),
+):
+    saved = auth_store.set_user_runtime_settings(user["id"], payload.dict())
+    return {"success": True, "settings": saved}
+
+
+def _require_mineru_batch_owner(batch_id: str, user: dict) -> None:
+    if user.get("role") == "admin":
+        return
+    owner = auth_store.get_config(f"mineru_batch_owner:{batch_id}")
+    if not owner or owner != user.get("id"):
+        raise HTTPException(status_code=403, detail="无权访问该转换任务")
+
+
+@app.get("/document-convert/mineru/config")
+async def get_document_convert_config(user: dict = Depends(require_current_user)):
+    return {"success": True, **public_mineru_config(load_mineru_config(SETTINGS_FILE))}
+
+
+@app.post("/document-convert/mineru")
+async def create_document_convert_task(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_current_user),
+):
+    config = load_mineru_config(SETTINGS_FILE)
+    try:
+        content = await file.read()
+        filename = validate_upload(file.filename or "document.pdf", len(content), config)
+        consume_document_quota_if_needed(user, 1)
+        task = await submit_mineru_batch(filename, content, config)
+        auth_store.set_config(f"mineru_batch_owner:{task['batch_id']}", user["id"])
+        auth_store.set_config(f"mineru_batch_filename:{task['batch_id']}", filename)
+        return {"success": True, **task, "poll_interval_seconds": config["poll_interval_seconds"]}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=safe_str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=safe_str(e)) from e
+    finally:
+        await file.close()
+
+
+@app.get("/document-convert/mineru/{batch_id}")
+async def get_document_convert_status(batch_id: str, user: dict = Depends(require_current_user)):
+    _require_mineru_batch_owner(batch_id, user)
+    try:
+        status = await get_mineru_batch_status(batch_id, load_mineru_config(SETTINGS_FILE))
+        status["filename"] = auth_store.get_config(f"mineru_batch_filename:{batch_id}", "")
+        return {"success": True, **status}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=safe_str(e)) from e
+
+
+@app.get("/document-convert/mineru/{batch_id}/result")
+async def get_document_convert_result(batch_id: str, user: dict = Depends(require_current_user)):
+    _require_mineru_batch_owner(batch_id, user)
+    try:
+        result = await download_mineru_markdown(batch_id, load_mineru_config(SETTINGS_FILE))
+        result["filename"] = auth_store.get_config(f"mineru_batch_filename:{batch_id}", "")
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=safe_str(e)) from e
+
 
 @app.get("/llm-provider-pool/status")
 async def get_llm_provider_pool_status(user: dict = Depends(require_admin_user)):
@@ -1807,6 +2013,506 @@ async def test_api_connection(api_test: APITestModel, user: dict = Depends(requi
     except Exception as e:
         return {"success": True, "message": "Operation completed"}
 
+
+# ---------------------------------------------------------------------------
+# Unified provider / model channel registry
+# ---------------------------------------------------------------------------
+
+class ChannelModelRequest(BaseModel):
+    id: Optional[str] = None
+    role: str = "answer"
+    model_name: str = ""
+    embedding_dim: Optional[int] = None
+    context_window: Optional[int] = None
+    max_concurrency: int = 4
+    per_key_max_concurrency: Optional[int] = None
+    timeout_seconds: int = 600
+    priority: int = 100
+    extra: Dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class ChannelRequest(BaseModel):
+    scope: str = "platform"
+    provider_name: str = ""
+    protocol: str = "openai"
+    base_url: str = ""
+    secret: str = ""
+    status: str = "active"
+    models: List[ChannelModelRequest] = Field(default_factory=list)
+
+
+def _require_channel_access(channel: dict, user: dict) -> None:
+    """Platform channels are admin-only; user channels belong to their owner."""
+    if channel.get("scope") == "platform":
+        if user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Only administrators can manage platform channels")
+        return
+    if channel.get("owner_user_id") != user.get("id"):
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+
+def _replace_channel_models(channel_id: str, models: List[ChannelModelRequest]) -> None:
+    """Replace a channel's model profiles with the submitted set."""
+    for existing in auth_store.get_channel(channel_id).get("models", []):
+        auth_store.delete_model_profile(existing["id"])
+    for model in models:
+        auth_store.create_model_profile(
+            channel_id=channel_id,
+            role=model.role,
+            model_name=model.model_name,
+            embedding_dim=model.embedding_dim,
+            context_window=model.context_window,
+            max_concurrency=model.max_concurrency,
+            per_key_max_concurrency=model.per_key_max_concurrency,
+            timeout_seconds=model.timeout_seconds,
+            priority=model.priority,
+            extra=model.extra,
+            enabled=model.enabled,
+        )
+
+
+@app.get("/providers")
+async def list_provider_channels(user: dict = Depends(require_current_user)):
+    """List channels visible to the caller.
+
+    Administrators see platform channels plus their own; ordinary users see
+    only their own channels. Secrets are never returned.
+    """
+    is_admin = user.get("role") == "admin"
+    platform_channels = auth_store.list_channels(scope="platform") if is_admin else []
+    user_channels = auth_store.list_channels(scope="user", owner_user_id=user.get("id"))
+    return {
+        "success": True,
+        "is_admin": is_admin,
+        "platform": platform_channels,
+        "user": user_channels,
+        "roles": list(providers.MODEL_ROLES),
+        "pool": {
+            "cursor": LLM_PROVIDER_POOL_STATE.get("cursor", 0),
+            "keys_tracked": len(LLM_PROVIDER_POOL_STATE.get("keys", {})),
+        },
+    }
+
+
+@app.post("/providers")
+async def create_provider_channel(request: ChannelRequest, user: dict = Depends(require_current_user)):
+    scope = (request.scope or "platform").strip().lower()
+    if scope == "platform":
+        if user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Only administrators can create platform channels")
+        owner_user_id = None
+    else:
+        scope = "user"
+        owner_user_id = user.get("id")
+    if not request.base_url.strip() or not request.provider_name.strip():
+        raise HTTPException(status_code=400, detail="provider_name and base_url are required")
+
+    channel = auth_store.create_channel(
+        scope=scope,
+        owner_user_id=owner_user_id,
+        provider_name=request.provider_name,
+        protocol=request.protocol,
+        base_url=request.base_url,
+        secret=request.secret,
+        status=request.status,
+    )
+    _replace_channel_models(channel["id"], request.models)
+    reset_llm_provider_pool_health()
+    return {"success": True, "channel": auth_store.get_channel(channel["id"])}
+
+
+@app.put("/providers/{channel_id}")
+async def update_provider_channel(
+    channel_id: str,
+    request: ChannelRequest,
+    user: dict = Depends(require_current_user),
+):
+    channel = auth_store.get_channel(channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    _require_channel_access(channel, user)
+
+    auth_store.update_channel(
+        channel_id,
+        provider_name=request.provider_name or None,
+        protocol=request.protocol or None,
+        base_url=request.base_url or None,
+        # An empty secret keeps the stored value; the UI sends "***" when unchanged.
+        secret=request.secret if request.secret else None,
+        status=request.status or None,
+    )
+    _replace_channel_models(channel_id, request.models)
+    reset_llm_provider_pool_health()
+    return {"success": True, "channel": auth_store.get_channel(channel_id)}
+
+
+@app.delete("/providers/{channel_id}")
+async def delete_provider_channel(channel_id: str, user: dict = Depends(require_current_user)):
+    channel = auth_store.get_channel(channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    _require_channel_access(channel, user)
+    auth_store.delete_channel(channel_id)
+    reset_llm_provider_pool_health()
+    return {"success": True}
+
+
+@app.get("/providers/status")
+async def provider_status(user: dict = Depends(require_current_user)):
+    """Secret-free readiness summary of every model role."""
+    current_user_id = user.get("id")
+    roles = {}
+    for role in providers.MODEL_ROLES:
+        roles[role] = providers.summarize_role(role, current_user_id=current_user_id)
+    settings = load_effective_settings()
+    return {
+        "success": True,
+        "roles": roles,
+        "embedding_dim": configured_embedding_dim(settings, current_user_id),
+        "health": {
+            "cursor": LLM_PROVIDER_POOL_STATE.get("cursor", 0),
+            "disabled_keys": sum(
+                1 for record in LLM_PROVIDER_POOL_STATE.get("keys", {}).values() if record.get("disabled")
+            ),
+            "tracked_keys": len(LLM_PROVIDER_POOL_STATE.get("keys", {})),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Prompt Studio: versioned prompt packs
+# ---------------------------------------------------------------------------
+
+# Prompt sections that force a knowledge-base rebuild when changed, because
+# they alter what gets extracted and indexed. Answer/judge prompts only change
+# generation and can be edited without rebuilding.
+REBUILD_REQUIRED_KEYS = (
+    "entity_types",
+    "relation_types",
+    "one_pass_extraction",
+    "entity_extraction",
+    "low_order_extraction",
+    "high_order_extraction",
+    "relationship_extraction",
+    "critical_rules",
+    "entity_fields",
+    "relation_fields",
+    "hyperedge_fields",
+)
+NO_REBUILD_KEYS = ("query_keywords", "answer", "judge")
+
+
+class PromptConfigRequest(BaseModel):
+    entity_types: List[Any] = Field(default_factory=list)
+    relation_types: List[Any] = Field(default_factory=list)
+    domain_context: str = ""
+    output_format: str = "json"
+    language: str = "English"
+    critical_rules: List[str] = Field(default_factory=list)
+    entity_fields: List[Any] = Field(default_factory=list)
+    relation_fields: List[Any] = Field(default_factory=list)
+    hyperedge_fields: List[Any] = Field(default_factory=list)
+
+
+class PromptVersionRequest(BaseModel):
+    config: PromptConfigRequest
+    prompts: Dict[str, str] = Field(default_factory=dict)
+    changelog: str = ""
+
+
+class PromptPackRequest(BaseModel):
+    domain_id: str
+    name: str = ""
+    description: str = ""
+    scope: str = "user"
+
+
+def _prompts_module():
+    import hyperche.prompts.registry as registry
+
+    return registry
+
+
+def register_prompt_domain_root() -> str:
+    """Make materialized prompt packs loadable by DomainManager."""
+    root = _prompts_module().materialized_root()
+    root.mkdir(parents=True, exist_ok=True)
+    try:
+        from hyperrag.domains.domain_manager import domain_manager
+
+        domain_manager.add_search_root(root)
+    except Exception as exc:  # pragma: no cover - defensive
+        main_logger.warning(f"Unable to register prompt domain root: {safe_str(exc)}")
+    return str(root)
+
+
+def _require_pack_write_access(pack: dict, user: dict) -> None:
+    if pack.get("scope") == "system":
+        raise HTTPException(status_code=403, detail="Built-in prompt packs are read-only")
+    if pack.get("owner_user_id") != user.get("id") and user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="You can only edit your own prompt packs")
+
+
+def _require_pack_read_access(pack: dict, user: dict) -> None:
+    if pack.get("scope") == "system":
+        return
+    if pack.get("owner_user_id") != user.get("id") and user.get("role") != "admin":
+        raise HTTPException(status_code=404, detail="Prompt pack not found")
+
+
+def _version_payload(body: PromptVersionRequest) -> tuple[dict, dict]:
+    config = {k: v for k, v in body.config.model_dump().items() if v not in (None, "", [], {})}
+    config.setdefault("output_format", body.config.output_format or "json")
+    prompts = {key: value for key, value in (body.prompts or {}).items() if value is not None}
+    return config, prompts
+
+
+def _changed_keys(previous: dict | None, current: dict) -> list[str]:
+    previous = previous or {}
+    return sorted(key for key in set(previous) | set(current) if previous.get(key) != current.get(key))
+
+
+def _rebuild_impact(config_changed: list[str], prompts_changed: list[str]) -> dict:
+    rebuild_config = sorted(set(config_changed) & set(REBUILD_REQUIRED_KEYS))
+    rebuild_prompts = sorted(set(prompts_changed) & set(REBUILD_REQUIRED_KEYS))
+    no_rebuild = sorted((set(config_changed) | set(prompts_changed)) & set(NO_REBUILD_KEYS))
+    requires_rebuild = bool(rebuild_config or rebuild_prompts)
+    return {
+        "requires_rebuild": requires_rebuild,
+        "rebuild_reasons": rebuild_config + rebuild_prompts,
+        "no_rebuild_keys": no_rebuild,
+        "message": (
+            "Saving these changes requires rebuilding the knowledge base: "
+            + ", ".join(rebuild_config + rebuild_prompts)
+            if requires_rebuild
+            else "These changes affect generation only; no rebuild is required."
+        ),
+    }
+
+
+@app.get("/prompts")
+async def list_prompt_packs(user: dict = Depends(require_current_user)):
+    """List built-in (read-only) packs plus the caller's own packs."""
+    is_admin = user.get("role") == "admin"
+    packs = auth_store.list_prompt_packs(owner_user_id=user.get("id"), include_system=True)
+    if not is_admin:
+        # System packs are shown to everyone as read-only templates.
+        pass
+    return {
+        "success": True,
+        "is_admin": is_admin,
+        "packs": packs,
+        "sections": {
+            "rebuild_required": list(REBUILD_REQUIRED_KEYS),
+            "no_rebuild": list(NO_REBUILD_KEYS),
+        },
+    }
+
+
+@app.get("/prompts/{pack_id}")
+async def get_prompt_pack(pack_id: str, user: dict = Depends(require_current_user)):
+    pack = auth_store.get_prompt_pack(pack_id)
+    if not pack:
+        raise HTTPException(status_code=404, detail="Prompt pack not found")
+    _require_pack_read_access(pack, user)
+
+    published = auth_store.get_published_version(pack_id, include_body=True)
+    draft = auth_store.get_draft_version(pack_id)
+    # The editor works on the draft when present, otherwise on the published body.
+    editable = draft or published
+    return {
+        "success": True,
+        "pack": pack,
+        "published": published,
+        "draft": draft,
+        "editable": editable,
+        "versions": auth_store.list_prompt_versions(pack_id),
+        "read_only": pack.get("scope") == "system",
+    }
+
+
+@app.post("/prompts")
+async def create_prompt_pack(request: PromptPackRequest, user: dict = Depends(require_current_user)):
+    scope = (request.scope or "user").strip().lower()
+    if scope != "user":
+        raise HTTPException(status_code=403, detail="Only administrators can create system packs")
+    if not request.domain_id.strip():
+        raise HTTPException(status_code=400, detail="domain_id is required")
+    pack = auth_store.create_prompt_pack(
+        domain_id=request.domain_id,
+        name=request.name or request.domain_id,
+        description=request.description,
+        scope="user",
+        owner_user_id=user.get("id"),
+    )
+    # Seed the first draft from a built-in domain when one matches, so a new
+    # pack starts from a working ontology instead of an empty form.
+    seed_config: dict = {}
+    seed_prompts: dict = {}
+    try:
+        source = _prompts_module()
+        domain_dir = Path(__file__).resolve().parents[2] / "hyperrag" / "domains" / request.domain_id
+        if (domain_dir / "config.json").exists():
+            seed_config = json.loads((domain_dir / "config.json").read_text(encoding="utf-8"))
+            for template in source.PROMPT_TEMPLATE_NAMES:
+                template_path = domain_dir / f"{template}.txt"
+                seed_prompts[template] = template_path.read_text(encoding="utf-8") if template_path.exists() else ""
+    except Exception as exc:
+        main_logger.warning(f"Prompt pack seed skipped: {safe_str(exc)}")
+
+    auth_store.create_prompt_version(
+        pack_id=pack["id"],
+        config=seed_config,
+        prompts=seed_prompts,
+        changelog="Initial draft",
+        created_by=user.get("id"),
+    )
+    created = auth_store.get_prompt_pack(pack["id"], include_versions=True) or {}
+    created["version_count"] = len(created.get("versions", []))
+    return {"success": True, "pack": created}
+
+
+@app.put("/prompts/{pack_id}")
+async def update_prompt_draft(
+    pack_id: str,
+    body: PromptVersionRequest,
+    user: dict = Depends(require_current_user),
+):
+    """Update the working draft of a pack, reporting rebuild impact."""
+    pack = auth_store.get_prompt_pack(pack_id)
+    if not pack:
+        raise HTTPException(status_code=404, detail="Prompt pack not found")
+    _require_pack_write_access(pack, user)
+
+    config, prompts = _version_payload(body)
+    draft = auth_store.get_draft_version(pack_id)
+    published = auth_store.get_published_version(pack_id, include_body=True)
+
+    if draft:
+        previous = draft
+        version = auth_store.update_prompt_version_body(
+            draft["id"], config=config, prompts=prompts, changelog=body.changelog
+        )
+    else:
+        previous = published
+        version = auth_store.create_prompt_version(
+            pack_id=pack_id,
+            config=config,
+            prompts=prompts,
+            changelog=body.changelog or "Draft",
+            created_by=user.get("id"),
+        )
+
+    config_changed = _changed_keys(previous.get("config") if previous else {}, config)
+    prompts_changed = _changed_keys(previous.get("prompts") if previous else {}, prompts)
+    return {
+        "success": True,
+        "version": version,
+        "impact": _rebuild_impact(config_changed, prompts_changed),
+    }
+
+
+@app.post("/prompts/{pack_id}/publish")
+async def publish_prompt_pack(
+    pack_id: str,
+    body: Optional[PromptVersionRequest] = None,
+    user: dict = Depends(require_current_user),
+):
+    """Publish the current draft (optionally saving edits first)."""
+    pack = auth_store.get_prompt_pack(pack_id)
+    if not pack:
+        raise HTTPException(status_code=404, detail="Prompt pack not found")
+    _require_pack_write_access(pack, user)
+
+    draft = auth_store.get_draft_version(pack_id)
+    if body is not None:
+        config, prompts = _version_payload(body)
+        if draft:
+            draft = auth_store.update_prompt_version_body(
+                draft["id"], config=config, prompts=prompts, changelog=body.changelog
+            )
+        else:
+            draft = auth_store.create_prompt_version(
+                pack_id=pack_id,
+                config=config,
+                prompts=prompts,
+                changelog=body.changelog or "Draft",
+                created_by=user.get("id"),
+            )
+
+    if not draft:
+        raise HTTPException(status_code=400, detail="No draft to publish")
+
+    published = auth_store.publish_prompt_version(pack_id, draft["id"])
+    _prompts_module().materialize_version(published)
+    return {"success": True, "published": published, "pack": auth_store.get_prompt_pack(pack_id)}
+
+
+@app.post("/prompts/{pack_id}/rollback/{version_id}")
+async def rollback_prompt_pack(
+    pack_id: str,
+    version_id: str,
+    user: dict = Depends(require_current_user),
+):
+    """Roll back by copying an old version forward as a new draft, leaving history intact."""
+    pack = auth_store.get_prompt_pack(pack_id)
+    if not pack:
+        raise HTTPException(status_code=404, detail="Prompt pack not found")
+    _require_pack_write_access(pack, user)
+
+    source = auth_store.get_prompt_version(version_id, include_body=True)
+    if not source or source.get("pack_id") != pack_id:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    draft = auth_store.create_prompt_version(
+        pack_id=pack_id,
+        config=source.get("config") or {},
+        prompts=source.get("prompts") or {},
+        changelog=f"Rollback to v{source.get('version_no')}",
+        created_by=user.get("id"),
+    )
+    return {"success": True, "version": draft}
+
+
+@app.get("/prompts/{pack_id}/preview")
+async def preview_prompt_pack(pack_id: str, user: dict = Depends(require_current_user)):
+    """Render the editable version and report which templates are materializable."""
+    pack = auth_store.get_prompt_pack(pack_id)
+    if not pack:
+        raise HTTPException(status_code=404, detail="Prompt pack not found")
+    _require_pack_read_access(pack, user)
+
+    version = auth_store.get_draft_version(pack_id) or auth_store.get_published_version(pack_id, include_body=True)
+    if not version:
+        raise HTTPException(status_code=404, detail="No version to preview")
+
+    registry = _prompts_module()
+    domain_dir = registry.materialize_version(version)
+    templates = {
+        name: (domain_dir / f"{name}.txt").exists() for name in registry.PROMPT_TEMPLATE_NAMES
+    }
+    return {
+        "success": True,
+        "domain_alias": domain_dir.name,
+        "domain_dir": str(domain_dir),
+        "templates": templates,
+        "entity_types": [item.get("name") if isinstance(item, dict) else item for item in (version.get("config") or {}).get("entity_types", [])],
+        "relation_types": [item.get("name") if isinstance(item, dict) else item for item in (version.get("config") or {}).get("relation_types", [])],
+        "content_hash": version.get("content_hash"),
+    }
+
+
+@app.delete("/prompts/{pack_id}")
+async def delete_prompt_pack(pack_id: str, user: dict = Depends(require_current_user)):
+    pack = auth_store.get_prompt_pack(pack_id)
+    if not pack:
+        raise HTTPException(status_code=404, detail="Prompt pack not found")
+    _require_pack_write_access(pack, user)
+    auth_store.delete_prompt_pack(pack_id)
+    return {"success": True}
+
+
 @app.post("/test-database")
 async def test_database_connection(db_test: DatabaseTestModel):
     """
@@ -1836,7 +2542,7 @@ async def test_database_connection(db_test: DatabaseTestModel):
 
 # 闂傚倸鍊搁崐鐑芥嚄閸洍鈧箓宕奸姀鈥冲簥闂佸壊鍋侀崕杈╃矆婢跺备鍋撻崗澶婁壕闂佸憡娲﹂崜娆撳礈?HyperRAG 闂傚倸鍊峰ù鍥敋瑜庨〃銉х矙閸柭も偓鍧楁⒑椤掆偓缁夊澹曠紒妯圭箚妞ゆ牗鑹鹃幃鎴炪亜?- 闂傚倸鍊搁崐宄懊归崶顒€违闁逞屽墴閺屾稓鈧綆鍋呭畷灞炬叏婵犲啯銇濇い銏℃礋閺佹劙宕堕崜浣风礃缂傚倸鍊风拋鏌ュ磻閹剧粯鍊甸柨婵嗛閺嬬喖鏌涙繝鍌滀粵缂佺粯鐩獮瀣倷閸偄娅ф繝鐢靛仜閻楀﹤螞閸愵喖钃熸繛鎴烇供濞尖晠鏌ㄥ┑鍡樺櫢濠㈣娲熷濠氬磼濞嗘埈妲梺鍦拡閸嬪﹨妫熷銈嗘尪閸ㄥ湱澹曢崸妤佺厸閻忕偠顕ч崝姘舵煛鐎ｂ晝鍔嶉柕鍥у瀵潙螖閳ь剚绂嶉幆顬棃鎮╅棃娑楁勃闂佸憡姊归悧鐘荤嵁韫囨稑宸濋柡澶嬪灩椤旀劖绻涙潏鍓у埌闁硅绻濋幃妤咁敆閸曨兘鎷虹紓鍌欑劍閿曗晛鈻撻弮鍫熺厽婵°倐鍋撴俊顐ｇ〒閸掓帗绻濋崶銊︽珖闂佺鏈銊╊敊?
 hyperrag_instances = {}
-hyperrag_working_dir = "hyperrag_cache"
+hyperrag_working_dir = str(Path(__file__).resolve().parent / "hyperrag_cache")
 
 # 闂傚倸鍊搁崐鐑芥嚄閸洍鈧箓宕奸姀鈥冲簥闂佸壊鍋侀崕杈╃矆婢跺备鍋撻崗澶婁壕闂佸憡娲﹂崜娆撳礈?Cog-RAG 闂傚倸鍊峰ù鍥敋瑜庨〃銉х矙閸柭も偓鍧楁⒑椤掆偓缁夊澹曠紒妯圭箚妞ゆ牗鑹鹃幃鎴炪亜?- 闂傚倸鍊搁崐宄懊归崶顒€违闁逞屽墴閺屾稓鈧綆鍋呭畷宀勬煙椤旂瓔娈滅€规洖缍婇、鏇㈡晲閸屾稑顏搁梺璇查閻忔艾顭垮Ο灏栧亾濮樼厧澧撮柨婵堝仜閳规垹鈧絽鐏氶弲锝夋⒑缂佹ɑ鐓ュ鐟帮躬瀹曨垶鍩€椤掑嫭鈷掗柛灞剧懆閸忓矂鏌熼搹顐ｅ碍闁挎洏鍨藉畷锟犳倻閸℃ê鍏?
 cograg_instances = {}
@@ -1937,6 +2643,87 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
         )
         raise
 
+def resolve_embedding_target(settings: dict, current_user_id: str | None) -> tuple[str, str | None, str | None, str]:
+    """Resolve the embedding model, key and base URL to use.
+
+    Returns ``(model, api_key, base_url, source)`` where source is ``user`` for
+    the caller's own channel, ``platform`` for a platform channel, or
+    ``legacy-settings`` when falling back to settings.json.
+    """
+    try:
+        import providers as provider_registry
+
+        profile = provider_registry.embedding_profile(current_user_id=current_user_id)
+        if profile:
+            channel = profile.get("channel") or {}
+            secret = auth_store.get_channel_secret(channel.get("id") or "")
+            if secret and profile.get("model_name") and channel.get("base_url"):
+                source = "user" if channel.get("scope") == "user" else "platform"
+                return profile["model_name"], secret, channel["base_url"], source
+    except Exception as exc:
+        main_logger.warning(f"Embedding channel lookup failed: {safe_str(exc)}")
+
+    model = settings.get("embeddingModel", "text-embedding-3-small")
+    api_key = settings.get("embeddingApiKey", settings.get("apiKey"))
+    base_url = settings.get("embeddingBaseUrl", settings.get("baseUrl"))
+    return model, api_key, base_url, "legacy-settings"
+
+
+def configured_embedding_dim(settings: dict, current_user_id: str | None = None) -> int | None:
+    """Return the embedding dimension declared by the active registry profile."""
+    try:
+        import providers as provider_registry
+
+        profile = provider_registry.embedding_profile(current_user_id=current_user_id)
+        if profile and profile.get("embedding_dim"):
+            return int(profile["embedding_dim"])
+    except Exception:
+        pass
+    value = settings.get("embeddingDim")
+    try:
+        return int(value) if value else None
+    except (TypeError, ValueError):
+        return None
+
+
+def vector_store_dimensions(working_dir: str | Path) -> dict[str, int]:
+    """Read the ``embedding_dim`` recorded in each vdb_*.json under a cache dir."""
+    result: dict[str, int] = {}
+    directory = Path(working_dir)
+    if not directory.exists():
+        return result
+    for vector_file in directory.glob("vdb_*.json"):
+        try:
+            with open(vector_file, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            dim = payload.get("embedding_dim")
+            if dim:
+                result[vector_file.stem] = int(dim)
+        except Exception:
+            continue
+    return result
+
+
+def validate_embedding_dimension(working_dir: str | Path, configured_dim: int | None) -> None:
+    """Fail loudly when the configured embedding dim disagrees with a cache.
+
+    A mismatch silently corrupts retrieval, so it is surfaced as an error that
+    names the offending store and both dimensions rather than being ignored.
+    """
+    if not configured_dim:
+        return
+    mismatches = {
+        name: dim for name, dim in vector_store_dimensions(working_dir).items() if dim != configured_dim
+    }
+    if mismatches:
+        details = ", ".join(f"{name}={dim}" for name, dim in sorted(mismatches.items()))
+        raise RuntimeError(
+            "Embedding dimension mismatch: configured embedding dimension is "
+            f"{configured_dim}, but existing vector store(s) use {details}. "
+            "Select the embedding model that matches this knowledge base, or rebuild it."
+        )
+
+
 async def get_hyperrag_embedding_func(texts: list[str]) -> np.ndarray:
     """
     HyperRAG 婵犵數濮烽弫鎼佸磻閻愬搫鍨傞柛顐ｆ礀缁犳澘鈹戦悩瀹犲缂佺姵婢樿灃闁挎繂鎳庨弳娆撴煛鐎ｂ晝绐旈柡灞炬礋瀹曠厧鈹戦幇顓壯囨⒑缁嬪潡顎楃紒澶婄秺瀵鈽夐姀鐘插祮闂侀潧顭堥崕鎵姳娴犲鈷戦梻鍫熺〒婢с垽鏌℃担鍓茬吋鐎殿喛顕ч埥澶婎煥閸涱垱婢戦梺璇插嚱缂嶅棙绂嶅鍕弿閹兼番鍔嶉埛鎴︽煙閼测晛浠滈柍褜鍓氱换鍐矉瀹ュ洦宕夊〒姘煎灠濞堛劌顪冮妶鍡楀闁稿﹥鐗犲鍐差煥閸曗晙绨婚梺鍝勫€搁悘婵嬪煕閺冣偓閵囧嫰鏁傜拠鍙夌彎闂佸搫鐭夌紞浣规叏閳ь剟鏌嶆潪鎷屽厡濞寸厧鐗忕槐鎾存媴閸濆嫅锝夋煙閻熺増鎼愰柣锝囧厴楠炲酣鎸婃径澶岀倞闂備線娼ч¨鈧紒鐘冲灴閹灚瀵肩€涙ǚ鎷洪梺鍛婄箓鐎氼厼顔忓┑瀣厱闁绘ê鍟挎慨澶愭煠閸濆嫬鑸规い顐ｇ箞閹虫粓鎮介棃娑樼疄?
@@ -1953,24 +2740,18 @@ async def get_hyperrag_embedding_func(texts: list[str]) -> np.ndarray:
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
 
-            embedding_model = settings.get("embeddingModel", "text-embedding-3-small")
-            api_key = settings.get("embeddingApiKey", settings.get("apiKey"))
-            base_url = settings.get("embeddingBaseUrl", settings.get("baseUrl"))
             current_user_id = CURRENT_USER_ID.get()
-            user_embedding_provider = auth_store.get_enabled_provider(current_user_id, "embedding")
-            if user_embedding_provider:
-                embedding_model = user_embedding_provider["modelName"]
-                api_key = user_embedding_provider["apiKey"]
-                base_url = user_embedding_provider["baseUrl"]
-                key_candidates = get_api_key_candidates(f"embedding:user:{current_user_id}", api_key)
-            else:
+            embedding_model, api_key, base_url, profile_source = resolve_embedding_target(
+                settings, current_user_id
+            )
+            if profile_source == "platform":
                 consume_platform_quota(current_user_id, "embedding", 1)
-                key_candidates = get_api_key_candidates("embedding", api_key, settings.get("apiKey"))
+            pool_name = f"embedding:user:{current_user_id}" if profile_source == "user" else "embedding"
+            key_candidates = get_api_key_candidates(pool_name, api_key, settings.get("apiKey"))
 
             main_logger.info(
-                f"婵犵數濮烽弫鎼佸磻閻樿绠垫い蹇撴缁€濠囨煃瑜滈崜姘辨崲濞戞瑥绶為悗锝庡亞椤︿即鎮楀▓鍨珮闁稿锕ユ穱濠囧醇閺囩偛绐涘銈嗙墬缁嬫帡顢欓幘缁樷拺閻犲洩灏欑粻鎶芥煕鐎ｎ剙孝閾荤偤鏌涢弴銊ヤ航闁搞倖娲熼弻褑绠涢敐鍛暗缂備浇顕уΛ娆撳Φ閸曨垰鍐€闁靛绲肩划鍫曟⒑缁嬫鍎愰柟鍛婃倐閹箖鎮滈挊澶屽€為梺鎸庣箓閹冲秵绔? {embedding_model}, "
-                f"provider={'user' if user_embedding_provider else 'platform'}, "
-                f"Embedding Key濠? {summarize_key_pool('embedding', api_key, settings.get('apiKey'))}"
+                f"Embedding request: model={embedding_model}, source={profile_source}, "
+                f"base_url={base_url}, keys={summarize_key_pool(pool_name, api_key, settings.get('apiKey'))}"
             )
 
             if not key_candidates:
@@ -2143,17 +2924,73 @@ async def preflight_hyperrag_api_services() -> None:
         suggestion = extract_user_friendly_error(detail)
         raise RuntimeError(f"LLM闂傚倸鍊搁崐椋庣矆娓氣偓楠炴牠顢曢敂钘変罕闂佺硶鍓濋悷褔鎯岄幘缁樺€垫繛鎴烆伆閹达箑鐭楅煫鍥ㄧ⊕閻撶喖鏌￠崘銊у濞存嚎鍊楃槐鎺楀箟鐎ｎ剛袦闂佸搫鏈惄顖氼嚕閹绢喖惟闁靛鍎哄浠嬫煟鎼达紕浠涙繝銏☆焽閳ь剚鍑归崢濂糕€﹂崶顏嗙杸婵炴垼椴搁弲婵嬫⒑? {detail}闂傚倸鍊搁崐椋庢濮橆剦鐒界憸宥堢亱濠德板€曢幊搴ｅ瑜版帗鐓曟繝闈涘閸斻倗鐥崣銉х煓闁哄瞼鍠栭獮鎴﹀箛椤掑倸甯垮┑? {suggestion}")
 
+def resolve_llm_candidates(role: str, current_user_id: str | None, settings: dict) -> list[dict]:
+    """Resolve LLM provider/key candidates for a model role.
+
+    User-owned channels take precedence over platform channels; when the
+    registry has nothing configured for the role, fall back to the legacy
+    settings.json pool so existing deployments keep working.
+    """
+    try:
+        import providers as provider_registry
+
+        role_providers = provider_registry.resolve_role_providers(role, current_user_id=current_user_id)
+        if role_providers:
+            user_providers = [item for item in role_providers if item.get("scope") == "user"]
+            other_providers = [item for item in role_providers if item.get("scope") != "user"]
+            ordered = (user_providers + other_providers) if user_providers else other_providers
+            candidates = provider_registry.build_candidates(
+                ordered,
+                key_state=LLM_PROVIDER_POOL_STATE.setdefault("keys", {}),
+                cursor=LLM_PROVIDER_POOL_STATE.get("cursor", 0),
+            )
+            if candidates:
+                LLM_PROVIDER_POOL_STATE["cursor"] = LLM_PROVIDER_POOL_STATE.get("cursor", 0) + 1
+                return candidates
+    except Exception as exc:
+        main_logger.warning(f"Channel registry lookup failed for role={role}: {safe_str(exc)}")
+
+    # Legacy fallback: settings.json providers.
+    user_llm_candidates = get_user_llm_provider_candidates(current_user_id, settings)
+    if user_llm_candidates:
+        return user_llm_candidates
+    return get_llm_provider_candidates(settings)
+
+
+def summarize_llm_candidate_pool(candidates: list[dict], role: str) -> dict:
+    """Secret-free summary of resolved LLM candidates for logging."""
+    providers = {}
+    for candidate in candidates:
+        provider = candidate.get("provider") or {}
+        key = (provider.get("scope", "platform"), provider.get("name"), provider.get("modelName"), provider.get("baseUrl"))
+        providers[key] = {
+            "scope": provider.get("scope", "platform"),
+            "name": provider.get("name"),
+            "model": provider.get("modelName"),
+            "base_url": provider.get("baseUrl"),
+            "priority": provider.get("priority"),
+            "keys": candidate.get("key_total"),
+        }
+    return {"role": role, "candidates": len(candidates), "providers": list(providers.values())}
+
+
 async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[], **kwargs) -> str:
-    """HyperRAG LLM function backed by the multi-provider API key pool."""
+    """HyperRAG LLM function backed by the unified channel registry.
+
+    Candidates come from ``channels``/``model_profiles`` for the requested role.
+    The settings.json provider pool remains as a fallback for deployments whose
+    channel tables are still empty.
+    """
     cleaned_history = []
     model_name = None
     base_url = None
     timeout = None
     provider_name = None
+    role = kwargs.pop("role", "answer") or "answer"
     try:
         main_logger.info(f"LLM call queued: prompt_chars={len(prompt) if prompt is not None else 0}")
         if system_prompt:
-            main_logger.info(f"LLM system prompt chars: {len(system_prompt)}")
+            main_logger.info(f"LLM system prompt chars={len(system_prompt)}")
 
         if history_messages:
             for msg in history_messages:
@@ -2167,15 +3004,18 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
         max_retries = _coerce_positive_int(settings.get("llmMaxRetries", 1), 1, minimum=0)
         max_attempts = max(1, max_retries + 1)
         current_user_id = CURRENT_USER_ID.get()
-        user_llm_candidates = get_user_llm_provider_candidates(current_user_id, settings)
-        if user_llm_candidates:
-            provider_candidates = user_llm_candidates
-        else:
+
+        provider_candidates = resolve_llm_candidates(role, current_user_id, settings)
+        uses_user_channel = any(
+            (candidate["provider"].get("scope") == "user") for candidate in provider_candidates
+        )
+        if not uses_user_channel:
             consume_platform_quota(current_user_id, "llm", 1)
-            provider_candidates = get_llm_provider_candidates(settings)
         main_logger.info(
             "LLM provider pool: "
-            f"{json.dumps(redact_for_log(summarize_user_provider_pool(current_user_id, 'llm')), ensure_ascii=False) if user_llm_candidates else json.dumps(redact_for_log(summarize_llm_provider_pool(settings)), ensure_ascii=False)}"
+            f"role={role}, candidates={len(provider_candidates)}, "
+            f"user_channel={uses_user_channel}, "
+            f"{json.dumps(redact_for_log(summarize_llm_candidate_pool(provider_candidates, role)), ensure_ascii=False)}"
         )
         main_logger.info(f"LLM history messages: {len(cleaned_history)} (raw: {len(history_messages)})")
 
@@ -2281,12 +3121,13 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
         raise
 
 async def get_hyperrag_llm_stream_func(prompt, system_prompt=None, history_messages=[], **kwargs):
-    """Streaming HyperRAG LLM function backed by the same multi-provider API key pool."""
+    """Streaming HyperRAG LLM function backed by the unified channel registry."""
     cleaned_history = []
     model_name = None
     base_url = None
     timeout = None
     provider_name = None
+    role = kwargs.pop("role", "answer") or "answer"
     try:
         main_logger.info(f"LLM stream call queued: prompt_chars={len(prompt) if prompt is not None else 0}")
         if system_prompt:
@@ -2304,12 +3145,18 @@ async def get_hyperrag_llm_stream_func(prompt, system_prompt=None, history_messa
         max_retries = _coerce_positive_int(settings.get("llmMaxRetries", 1), 1, minimum=0)
         max_attempts = max(1, max_retries + 1)
         current_user_id = CURRENT_USER_ID.get()
-        user_llm_candidates = get_user_llm_provider_candidates(current_user_id, settings)
-        if user_llm_candidates:
-            provider_candidates = user_llm_candidates
-        else:
+
+        provider_candidates = resolve_llm_candidates(role, current_user_id, settings)
+        uses_user_channel = any(
+            (candidate["provider"].get("scope") == "user") for candidate in provider_candidates
+        )
+        if not uses_user_channel:
             consume_platform_quota(current_user_id, "llm", 1)
-            provider_candidates = get_llm_provider_candidates(settings)
+        main_logger.info(
+            "LLM stream provider pool: "
+            f"role={role}, candidates={len(provider_candidates)}, user_channel={uses_user_channel}, "
+            f"{json.dumps(redact_for_log(summarize_llm_candidate_pool(provider_candidates, role)), ensure_ascii=False)}"
+        )
 
         if not provider_candidates:
             raise RuntimeError("No healthy LLM provider/key candidates are available")
@@ -2535,6 +3382,69 @@ async def preflight_hyperrag_api_services() -> None:
         suggestion = extract_user_friendly_error(detail)
         raise RuntimeError(f"LLM service preflight failed: {detail}. Suggestion: {suggestion}")
 
+def resolve_bound_prompt_domain(settings: dict, current_user_id: str | None) -> dict:
+    """Resolve the domain to build/query with, and the prompt version it came from.
+
+    A user's runtime settings may bind a ``prompt_pack_id`` (optionally with a
+    pinned ``prompt_version_id``). When bound, the pack's published version is
+    materialized and its synthetic domain name is returned so DomainManager
+    loads those prompts. Otherwise the plain domain name is returned.
+
+    Returns a dict with ``domain``, ``pack_id``, ``version_id``, ``version_no``
+    and ``content_hash`` so the caller can record provenance in run_config.
+    """
+    result = {
+        "domain": settings.get("hyperrag_domain", "default"),
+        "pack_id": None,
+        "version_id": None,
+        "version_no": None,
+        "content_hash": None,
+        "source": "domain",
+    }
+    pack_id = settings.get("prompt_pack_id") or settings.get("promptPackId")
+    if not pack_id:
+        return result
+
+    try:
+        pack = auth_store.get_prompt_pack(pack_id)
+        if not pack:
+            main_logger.warning(f"Bound prompt pack not found: {pack_id}")
+            return result
+        if pack.get("scope") == "user" and pack.get("owner_user_id") not in (None, current_user_id):
+            main_logger.warning(f"Bound prompt pack not accessible to current user: {pack_id}")
+            return result
+
+        pinned_version = settings.get("prompt_version_id") or settings.get("promptVersionId")
+        if pinned_version:
+            version = auth_store.get_prompt_version(pinned_version, include_body=True)
+            if not version or version.get("pack_id") != pack_id:
+                version = None
+        else:
+            version = auth_store.get_published_version(pack_id, include_body=True)
+
+        if not version:
+            main_logger.warning(f"Bound prompt pack {pack_id} has no usable version")
+            return result
+
+        domain_dir = _prompts_module().materialize_version(version)
+        result.update(
+            {
+                "domain": domain_dir.name,
+                "pack_id": pack_id,
+                "version_id": version.get("id"),
+                "version_no": version.get("version_no"),
+                "content_hash": version.get("content_hash"),
+                "source": "prompt_pack",
+            }
+        )
+        main_logger.info(
+            f"Using prompt pack {pack_id} v{version.get('version_no')} as domain {domain_dir.name}"
+        )
+    except Exception as exc:
+        main_logger.warning(f"Prompt pack resolution failed for {pack_id}: {safe_str(exc)}")
+    return result
+
+
 def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_overlap: int = None):
     """
     闂傚倸鍊搁崐椋庣矆娓氣偓瀹曘儳鈧綆鍠栫壕鍧楁煙閹増顥夐幖鏉戯躬閺屻倝鎳濋幍顔肩墯婵炲瓨绮岀紞濠囧蓟濞戙垹唯妞ゆ梻鍘ч～鈺冪磽娴ｅ搫顎撶紓宥勭窔瀵鍨惧畷鍥ㄦ濡炪倖姊婚崢褔寮抽悢璁垮綊鎮埀顒勫矗閸愵喖绠栨俊銈呮噺閸婄兘鏌ｉ悢绋款棎闁稿鎸歌灃闁告侗鍘鹃敍鐔兼⒑闂堟稓澧曟繛鑼█瀹曟垿骞樼拠鎻掔€銈嗗姧缁插灝鈻撻妶澶嬧拺闂侇偆鍋涢懟顖涙櫠閸欏浜滄い鎰╁焺濡叉椽鏌涢悩璇у伐妞ゆ挸鍚嬪鍕節閸愵厾鍙戦梻鍌欒兌缁垰顫忔繝姘偍鐟滃繒鍒掓繝姘殤妞ゆ帒鍊婚敍婊堟⒑闂堟单鍫ュ疾濞嗘挸绠熷Δ锝呭暞閻?HyperRAG 闂傚倸鍊峰ù鍥敋瑜庨〃銉х矙閸柭も偓鍧楁⒑椤掆偓缁夊澹曠紒妯圭箚妞ゆ牗鑹鹃幃鎴炪亜?
@@ -2565,10 +3475,14 @@ def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_o
         db_working_dir = os.path.join(hyperrag_working_dir, db_dir_name)
         Path(db_working_dir).mkdir(parents=True, exist_ok=True)
         
-        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-            settings = json.load(f)
+        settings = load_effective_settings()
 
-        embedding_dim = settings.get("embeddingDim")
+        # The embedding dimension comes from the active model profile; the
+        # legacy settings field is only a fallback.
+        embedding_dim = configured_embedding_dim(settings, CURRENT_USER_ID.get())
+        if not embedding_dim:
+            embedding_dim = settings.get("embeddingDim")
+        validate_embedding_dimension(db_working_dir, embedding_dim)
 
         # 闂傚倸鍊搁崐椋庣矆娓氣偓瀹曘儳鈧綆鍠栫壕鍧楁煙閹増顥夐幖鏉戯躬閺屻倝鎳濋幍顔肩墯婵炲瓨绮岀紞濠囧蓟濞戙垹唯妞ゆ梹鍎崇敮銊х磽娴ｇ懓鏁剧紓宥勭窔瀵鈽夐姀鐘靛姶闂佸憡鍔楅崑鎾绘偩婵傚憡鈷戦柛娑橆煬閻掍粙鏌℃担绛嬪殭妞ゎ偄绻愮叅妞ゅ繐瀚鍥煟閻樺厖鑸柛鎾讳憾婵¤埖寰勭€ｎ剙骞?
         requested_domain = settings.get("hyperrag_domain", "default")
@@ -2591,6 +3505,8 @@ def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_o
                 ("enable_efu_repair", "enable_efu_repair"),
                 ("enableHybridRerank", "enable_hybrid_rerank"),
                 ("enable_hybrid_rerank", "enable_hybrid_rerank"),
+                ("indexProfile", "index_profile"),
+                ("index_profile", "index_profile"),
             ]:
                 if setting_key in settings:
                     experiment_config[config_key] = settings[setting_key]
@@ -2607,9 +3523,20 @@ def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_o
                 "enable_measurement_instances": settings.get("enableMeasurementInstances", settings.get("enable_measurement_instances", True)),
                 "enable_efu_repair": settings.get("enableEfuRepair", settings.get("enable_efu_repair", True)),
                 "enable_hybrid_rerank": settings.get("enableHybridRerank", settings.get("enable_hybrid_rerank", True)),
+                "index_profile": settings.get("indexProfile", settings.get("index_profile", "dual_concat")),
             }
             current_domain = requested_domain
         main_logger.info(f"Using Hyper-RAG domain: {current_domain}, experiment={experiment_config.get('experiment_mode')}")
+
+        # A bound prompt pack overrides the plain domain name so the knowledge
+        # base is built with exactly the prompts the user published.
+        prompt_binding = resolve_bound_prompt_domain(settings, CURRENT_USER_ID.get())
+        if prompt_binding["source"] == "prompt_pack":
+            current_domain = prompt_binding["domain"]
+            experiment_config["prompt_pack_id"] = prompt_binding["pack_id"]
+            experiment_config["prompt_version"] = prompt_binding["version_no"]
+            experiment_config["prompt_version_id"] = prompt_binding["version_id"]
+            experiment_config["prompt_content_hash"] = prompt_binding["content_hash"]
 
         # 婵犵數濮烽弫鍛婃叏閻戝鈧倹绂掔€ｎ亞鍔﹀銈嗗坊閸嬫捇鏌涢悢閿嬪仴闁糕斁鍋撳銈嗗坊閸嬫挾绱撳鍜冭含妤犵偛鍟灒閻犲洩灏欑粣鐐烘⒑瑜版帒浜伴柛鎾寸懃椤曪綁鏌ㄧ€ｎ剛鐦堥梺闈涢獜缂嶅棗顭囬幇鐗堝仺妞ゆ牗绮屾禒閬嶆煕閳规儳浜炬俊鐐€栫敮鎺楀窗濮橆剦鐒介柟閭﹀枓閸嬫捇宕楁径濠佸闂備礁缍婂Λ鍧楁倿閿曞倹鍋傞柡鍥ュ灪閻撳啴鏌涘┑鍡楊仼闁哄棙鐟︾换娑㈠川椤旂厧顫庣紓浣介哺鐢顭囪箛娑樜╃憸蹇涙偩婵傚憡鈷戦柣鐔告緲濡茬粯銇勯幋婵愭Ц闁伙絽鍢查…銊╁幢閳哄倐顒勬⒒娴ｅ憡鎯堟い鎴濇嚇瀹曟劕顫㈠畝鈧禍閬嶆⒒娴ｅ憡鎯堟い锔藉閳ь剛鐟抽崶浣割槸椤劑宕奸悢鍝勫箺闂備浇顫夐崕鎶筋敋椤撱垹绠犻柛娑卞灣绾惧吋銇勯弮鍌楁嫛闁绘挸銈搁弻鈩冩媴閸濄儛褏鈧娲滈崰鏍€佸Δ鍛劦妞ゆ帒瀚悞鍨亜閹烘垵鈧憡绂掗柆宥嗙厸?
         if current_domain != "default":
@@ -2650,6 +3577,12 @@ def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_o
             "enable_measurement_instances": bool(experiment_config.get("enable_measurement_instances", True)),
             "enable_efu_repair": bool(experiment_config.get("enable_efu_repair", True)),
             "enable_hybrid_rerank": bool(experiment_config.get("enable_hybrid_rerank", True)),
+            "index_profile": experiment_config.get("index_profile", "dual_concat"),
+            "extra_run_config": {
+                key: experiment_config[key]
+                for key in ("prompt_pack_id", "prompt_version", "prompt_version_id", "prompt_content_hash")
+                if experiment_config.get(key) is not None
+            },
         }
 
         if requested_chunk_size:
@@ -2675,8 +3608,7 @@ def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_o
     
     instance = hyperrag_instances[database]
     try:
-        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-            settings = json.load(f)
+        settings = load_effective_settings()
         requested_domain = settings.get("hyperrag_domain", getattr(instance, "domain", "default"))
         experiment_mode = settings.get("experimentMode", settings.get("experiment_mode", getattr(instance, "experiment_mode", "hyper_final")))
         try:
@@ -2694,6 +3626,7 @@ def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_o
             instance.enable_measurement_instances = bool(settings.get("enableMeasurementInstances", settings.get("enable_measurement_instances", experiment_config.get("enable_measurement_instances", True))))
             instance.enable_efu_repair = bool(settings.get("enableEfuRepair", settings.get("enable_efu_repair", experiment_config.get("enable_efu_repair", True))))
             instance.enable_hybrid_rerank = bool(settings.get("enableHybridRerank", settings.get("enable_hybrid_rerank", experiment_config.get("enable_hybrid_rerank", True))))
+            instance.index_profile = settings.get("indexProfile", settings.get("index_profile", experiment_config.get("index_profile", getattr(instance, "index_profile", "dual_concat"))))
         except Exception:
             instance.domain = requested_domain
     except Exception as e:
@@ -2742,7 +3675,10 @@ def get_or_create_cograg(database: str = None):
         with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
             settings = json.load(f)
 
-        embedding_dim = settings.get("embeddingDim")
+        embedding_dim = configured_embedding_dim(settings, CURRENT_USER_ID.get())
+        if not embedding_dim:
+            embedding_dim = settings.get("embeddingDim")
+        validate_embedding_dimension(db_working_dir, embedding_dim)
 
         # 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁嶉崟顒佹濠德板€曢崯顖氱暦閺屻儲鐓曠€光偓閳ь剟宕戦悙鐑樺亗?Cog-RAG 闂傚倸鍊峰ù鍥敋瑜庨〃銉х矙閸柭も偓鍧楁⒑椤掆偓缁夊澹曠紒妯圭箚妞ゆ牗鑹鹃幃鎴炪亜閹邦亞鐭欓柡灞炬礃瀵板嫰宕卞Ο鑽ゅ絾闂備礁鎼幏瀣礈閻旂厧绠栨慨妞诲亾闁诡喗鐟╅獮宥夘敊閸撗冨箚闂傚倷娴囬鏍窗閺囩姴鍨濇繛鍡樺姃缁诲棙鎱ㄥ┑鍡欑劸婵¤尪宕电槐鎾存媴閸濆嫅锝夋煟閳哄﹤鐏︾€殿喖顭烽弫鎾绘偐閺屻儱鏁规繝鐢靛Т閻忔岸宕濋弽顭戞婵犵數濮烽弫鎼佸磻濞戙垺鍋嬪┑鐘叉搐閸屻劎绱掗埀顒€顫㈡笟鈧濠氬磼濞嗘埈妲梺纭咁嚋缁辨洟宕氶幒鎴犳殕闁告洦鍓欏▓锝咁渻閵堝棛澧紒顔奸叄閹矂宕奸妷锔惧幗闂侀潧绻堥崺鍕倿閸撗呯＜闁逞屽墴瀹曟帡鎮欑€电甯惧┑鐘灱濞夋盯鎮ч崱娑樼婵﹩鍘介崣蹇涙煥濠靛棙顥滃┑顔肩Ч閺?
         cograg_instances[database] = CogRAGClass(
@@ -2808,21 +3744,29 @@ def normalize_query_result(result: Any) -> dict:
     return {"response": safe_str(result), "entities": [], "themes": [], "hyperedges": [], "text_units": []}
 
 
+def get_public_demo_status() -> dict:
+    """Inspect the one configured public demo without exposing server paths."""
+    configured = file_manager.sanitize_database_name(
+        os.getenv("HYPERCHE_PUBLIC_DEMO_DATABASE", DEFAULT_PUBLIC_DEMO_DATABASE)
+    )
+    status = inspect_public_demo_cache(hyperrag_working_dir, configured)
+    status.update({"success": True, "demo": public_demo_metadata(configured)})
+    return status
+
+
 def resolve_public_demo_database() -> tuple[str | None, dict | None]:
-    """Resolve the read-only public demo database."""
-    configured = file_manager.sanitize_database_name(os.getenv("HYPERCHE_PUBLIC_DEMO_DATABASE", "public_example"))
+    """Resolve the single read-only liquid-flow-battery demo database."""
+    status = get_public_demo_status()
+    if not status["ready"]:
+        return None, None
+
+    configured = status["database"]
     metadata = getattr(kb_manager, "_load_metadata", lambda: {})()
-
-    configured_dir = os.path.join(hyperrag_working_dir, configured)
-    if os.path.isdir(configured_dir):
-        return configured, metadata.get(configured)
-    if configured in metadata:
-        return metadata[configured].get("database_name", configured), metadata[configured]
-
-    for kb in metadata.values():
-        if kb.get("name") == "example" or kb.get("database_name") == "example":
-            return kb.get("database_name"), kb
-    return None, None
+    kb = dict(public_demo_metadata(configured))
+    kb.update(metadata.get(configured) or {})
+    kb["database_name"] = configured
+    kb.setdefault("domain", "flow_battery")
+    return configured, kb
 
 
 def build_rag_query_response(query: QueryModel, result: Any, database: str, rag_system: str = "hyperrag") -> dict:
@@ -2941,27 +3885,32 @@ async def query_hyperrag(query: QueryModel, user: dict = Depends(require_current
             )
 
             result = await rag.aquery(query.question, param)
-
-            return {
-                "success": True,
-                "response": result.get("response", ""),
-                "entities": result.get("entities", []),
-                "hyperedges": result.get("hyperedges", []),
-                "text_units": result.get("text_units", []),
-                "mode": query.mode,
-                "rag_system": "hyperrag",
-                "question": query.question,
-                "database": query.database or "default"
-            }
+            return build_rag_query_response(query, result, query.database, "hyperrag")
         else:
             return {"success": False, "message": f"Unknown query mode: {query.mode}"}
 
     except Exception as e:
-        main_logger.error("Log message")
-        return {"success": False, "message": f"Query failed: {safe_str(e)}"}
-        
-    except Exception as e:
-        return {"success": False, "message": f"Query failed: {safe_str(e)}"}
+        detailed_error = log_detailed_exception(
+            main_logger,
+            "HyperRAG query failed",
+            e,
+            {
+                "mode": query.mode,
+                "database": query.database,
+                "runtime_settings": get_runtime_settings_context(),
+            },
+        )
+        return {
+            "success": False,
+            "message": f"Query failed: {extract_user_friendly_error(detailed_error)}",
+            "error_type": type(e).__name__,
+        }
+
+@app.get("/public/demo/status")
+async def public_demo_status():
+    """Return cache readiness for the single public liquid-flow-battery demo."""
+    return get_public_demo_status()
+
 
 @app.post("/public/demo/query")
 async def public_demo_query(query: QueryModel):
@@ -2976,7 +3925,7 @@ async def public_demo_query(query: QueryModel):
         if not database:
             return {
                 "success": False,
-                "message": "Public demo database is not configured. Set HYPERCHE_PUBLIC_DEMO_DATABASE or create an example KB.",
+                "message": "液流电池公开实例缓存未安装完整。请下载 Git LFS 中的 web-ui/backend/hyperrag_cache/case1 文件。",
             }
 
         rag = get_or_create_hyperrag(database)
@@ -2996,7 +3945,7 @@ async def public_demo_query(query: QueryModel):
         result = await rag.aquery(query.question, param)
         payload = build_rag_query_response(query, result, database, "hyperrag")
         payload["demo"] = True
-        payload["kb_name"] = kb.get("name") if kb else "example"
+        payload["kb_name"] = kb.get("name") if kb else "液流电池公开知识库"
         payload["domain"] = getattr(rag, "domain", None)
         return payload
 
@@ -3018,7 +3967,7 @@ async def public_demo_query_stream(query: QueryModel):
 
             database, kb = resolve_public_demo_database()
             if not database:
-                yield f"event: error\ndata: {json.dumps({'message': 'Public demo database is not configured.'}, ensure_ascii=False)}\n\n"
+                yield f"event: error\ndata: {json.dumps({'message': '液流电池公开实例缓存未安装完整。请先执行 git lfs pull。'}, ensure_ascii=False)}\n\n"
                 return
 
             rag = get_or_create_hyperrag(database)
@@ -3029,7 +3978,7 @@ async def public_demo_query_stream(query: QueryModel):
                 "success": True,
                 "demo": True,
                 "database": database,
-                "kb_name": kb.get("name") if kb else "example",
+                "kb_name": kb.get("name") if kb else "液流电池公开知识库",
                 "domain": getattr(rag, "domain", None),
                 "mode": query.mode,
             }
@@ -3981,6 +4930,7 @@ def setup_comprehensive_logging():
     log_dir.mkdir(parents=True, exist_ok=True)
 
     # 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁嶉崟顒佹濠德板€曢崯浼存儗濞嗘挻鐓欓悗鐢殿焾鍟哥紒鎯у綖缁瑩寮婚悢璁胯櫣绱掑Ο鐓庢锭bSocket婵犵數濮烽弫鍛婃叏娴兼潙鍨傞柣鎾崇岸閺嬫牗绻涢幋鐐茬劰闁稿鎸搁～婵嬫偂鎼淬垻褰庢俊銈囧Х閸嬫盯宕婊勫床婵犻潧顑呴悙濠勬喐閺傝?    ws_handler = WebSocketLogHandler(manager)
+    ws_handler = WebSocketLogHandler(manager)
     ws_handler.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     detailed_formatter = logging.Formatter(
@@ -3989,6 +4939,7 @@ def setup_comprehensive_logging():
     ws_handler.setFormatter(formatter)
     
     # 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁嶉崟顒佹濠德板€曢崯浼存儗濞嗘挻鐓欓悗鐢殿焾鍟哥紒鎯у綖缁瑩寮婚悢鐓庣闁逛即娼у▓顓犵磽娴ｅ搫孝缁剧虎鍙冮獮澶岀矙濞嗘儳鎮戞繝銏ｆ硾閿曘儱危椤掆偓閳规垶骞婇柛濠冩礋楠炲﹥鎯旈妸锕€鍓瑰┑掳鍊曢幊蹇涙偂濞戞﹩鐔嗛悹铏瑰皑閺€濠氭煕鐎ｃ劌鍔﹂柡宀€鍠栭、娆撴嚃閳轰胶鍘介柣搴ゎ潐濞叉牕鐣烽鍐簷濠电偠鎻徊浠嬪箹椤愩倗绀婇柡鍐ㄧ墛閳锋帒霉閿濆洦鍤€妞ゆ洘绮庣槐鎺斺偓锝庡亜閻忔挳鏌熼銊ユ搐瀹告繃銇勯弽銊р槈閹兼潙锕ら埞鎴︻敊缁涘鍔搁梺绯曟櫆閻楃姴鐣烽幋锕€鐓涢柛灞剧矌椤旀洟姊虹化鏇炲⒉闁挎艾鈹戦鍏兼悙闂囧鏌ｅΟ纰卞姕闁兼澘娼￠弻锛勪沪閸撗勫垱濡ょ姷鍋炵敮鈥愁嚕閹绢喗鍋勯柟顓熷坊閸嬫捇骞囬悧鍫濅画濠电姴锕ょ€氼厾娆㈤弻銉︾厽閹烘娊宕濆畝鍕ㄢ偓锕傚炊椤忓棛鏉稿┑鐐村灦椤洭顢欓幒妤佲拺闁告稑锕ゆ慨鍥┾偓娈垮枛閻栧ジ骞嗘笟鈧顕€宕奸悢鍙夊?    console_handler = logging.StreamHandler()
+    console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
     # 闂傚倸鍊峰ù鍥х暦閸偅鍙忕€规洖娲ㄩ惌鍡椕归敐鍫綈婵炲懐濮撮湁闁绘ê妯婇崕鎰版煕鐎ｅ吀閭柡灞剧洴閸╁嫰宕橀鍛珮缂備焦鍎宠ぐ鐐靛垝濞嗘挸钃熼柍銉﹀墯閸氬骞栫划鍏夊亾閼碱剚鏅奸梻鍌欑劍閹爼宕濆畝鍕柈闁秆勵殔閻撯€愁熆閼搁潧濮囩紒鐘侯嚙铻為柣妤€鐗忕粻鎾寸箾閸喆鈧€?8婵犵數濮烽弫鎼佸磻濞戙埄鏁嬫い鎾跺枑閸欏繐霉閸忓吋缍戠痪鎯ф健閺岋紕浠︾拠鎻掑闂佸搫顑勯悞锕傚Φ閸曨垰鍗虫俊銈傚亾濞存粍鍎宠灃闁绘﹢娼ф禒锕傛煕閺冣偓閻楃娀鐛箛娑樺窛闁哄鍨崇槐鍫曟⒑閸涘﹥绀€闁诲繑宀歌棢婵犲﹤瀚弧鈧梺姹囧灲濞佳勭濠婂牊鐓熸俊銈傚亾婵☆偅绻堝顐﹀礃椤斿槈褍顭跨捄渚剰濞寸娀浜堕幃宄邦煥閸愵亞顔婇梺?
@@ -4100,6 +5051,23 @@ def configure_hyperrag_logging():
 # 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁嶉崟顒佹濠德板€曢崯顖氱暦閺屻儲鐓曠€光偓閳ь剟宕戦悙鐑樺亗闁哄洢鍨洪悡娑氣偓骞垮劚閸燁偅淇婇崹顕呯唵鐟滄粓宕滃顓犫攳濠电姴娴傞弫鍐煟閺傛寧鍟為柣婵囶殘缁辨挻鎷呴崫鍕戯絿绱掔€ｎ偄鐏遍柣蹇撳暣濮婃椽宕ㄦ繝鍌毿曢梺鍝ュУ閻楃姴鐣烽姀鐘瀻闁瑰濮烽敍?
 main_logger = setup_comprehensive_logging()
 
+# Import built-in domains into the prompt registry and migrate legacy model
+# configuration into the unified channel tables. Both steps are idempotent.
+try:
+    from migrations import run_startup_migrations
+
+    _migration_summary = run_startup_migrations(SETTINGS_FILE)
+    main_logger.info(f"Startup migrations: {_migration_summary}")
+except Exception as _migration_error:  # pragma: no cover - must never block startup
+    main_logger.warning(f"Startup migrations skipped: {_migration_error}")
+
+# Let DomainManager discover prompt packs materialized from the database.
+try:
+    _prompt_root = register_prompt_domain_root()
+    main_logger.info(f"Prompt domain root registered: {_prompt_root}")
+except Exception as _prompt_root_error:  # pragma: no cover - must never block startup
+    main_logger.warning(f"Prompt domain root registration skipped: {_prompt_root_error}")
+
 # 闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏇楀亾妞ゎ厼鐏濊灒闁兼祴鏅濋悡瀣⒑閸撴彃浜濇繛鍙夛耿瀹曟垿顢旈崼鐔哄幈濠电姴锕ら幊鎰板汲閺€鎱箁RAG闂傚倸鍊搁崐椋庣矆娓氣偓楠炴牠顢曢敃鈧悿顕€鏌曟繛鐐珔缁炬儳娼″鍫曞醇濮橆厽鐝曢悗?
 configure_hyperrag_logging()
 
@@ -4142,17 +5110,13 @@ async def embed_files_with_progress(request: FileEmbedRequest, user: dict = Depe
             request.chunk_overlap = kb.get("chunk_overlap", request.chunk_overlap)
             request.update_file_database = True
             # 闂傚倸鍊峰ù鍥х暦閸偅鍙忕€规洖娲ㄩ惌鍡椕归敐鍫綈婵炲懐濮撮湁闁绘ê妯婇崕鎰版煕鐎ｅ吀閭柡灞剧洴閸╁嫰宕橀崹顔煎絾缂傚倷鐒﹂崬鑽ょ礊娓氣偓瀵鈽夐姀鐘靛姶闂佸憡鍔楅崑鎾绘偩婵傚憡鈷?- 闂傚倸鍊搁崐鐑芥嚄閸洖纾块柣銏㈩焾閻ょ偓绻涢幋娆忕仾闁稿鍊濋弻鏇熺箾瑜嶇€氼厼鈻撴导瀛樷拺闁革富鍙€濡炬悂鏌涢悩宕囧⒌鐎规洩绻濋獮搴ㄦ嚍閵夈儮鍋撻崹顐ょ闁瑰鍎愭导鍡涙煙鏉堥箖妾柛瀣€块弻宥堫檨闁告挾鍠栧濠氭晲婢跺浜归柡澶婄墐閺呪晛危椤旂晫绡€闁冲皝鍋撻柛灞剧矌閻撴捇姊虹拠鈥虫灈婵炲皷鈧磭鏆﹂柛妤冨亹濡插牊淇婇娑欍仧婵☆偆鍠栧缁樻媴鐟欏嫬浠╅梺绋块椤嘲顫忔禒瀣妞ゆ牭绲鹃弲婵嬫⒑閼恒儍顏埶囬鈶斤綁宕奸妷锔惧幍闂佽鍨庣仦鑺ヮ啀闂?domain
+            # Keep knowledge-base domain changes scoped to the current user.
             try:
-                if os.path.exists(SETTINGS_FILE):
-                    with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                        _settings = json.load(f)
-                else:
-                    _settings = {}
-                _settings["hyperrag_domain"] = kb.get("domain", "default")
-                with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(_settings, f, ensure_ascii=False, indent=2)
+                runtime_settings = get_user_runtime_settings(user.get("id"))
+                runtime_settings["hyperrag_domain"] = kb.get("domain", "default")
+                auth_store.set_user_runtime_settings(user["id"], runtime_settings)
             except Exception as e:
-                main_logger.warning("Log message")
+                main_logger.warning(f"Unable to persist user HyperRAG domain: {safe_str(e)}")
 
     # 缂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏇炲€搁拑鐔兼煏婵炵偓娅撻柡浣稿閺屾稑鈽夐崡鐐茬闂佸搫妫庨崐婵嬪蓟濞戙垹鐒洪柛蹇婃櫆閸ㄥ墎绮嬪澶娢у璺侯儑閸樻悂姊虹粙鎸庢拱缂佸鍨块、姘煥閸涱垳锛滈梺閫炲苯澧撮柛鈹惧亾濡炪倖甯婇懗鍓佸姬閳ь剟姊洪棃娑㈢崪缂佹彃澧藉☉鍨偅閸愨晛鈧灚鎱ㄥΟ鐓庡付婵炲懎绉甸〃銉╂倷閹绘帗娈茬紓浣虹帛缁诲牆鐣烽幒妤€围闁告侗鍣崥娆撴⒒閸屾瑧绐旈柍褜鍓涢崑娑㈡嚐椤栨稒娅犳い鏍仦閻撴瑥銆掑顒備虎濠碘€虫健閺屽秷顧侀柛鎾卞妿缁辩偤宕卞☉妯碱槶濠殿喗顭堥崺鏍磻閳哄懏鈷戞い鎺嗗亾缂佸鏁婚幃锟犲即閻旇櫣鐦堥梻鍌氱墛缁嬫帡藟閻樼鍋撳☉娆戠畼缂?
     if request.kb_name and not request.target_database:
@@ -4461,22 +5425,3 @@ async def process_files_with_progress(request: FileEmbedRequest, total_files: in
             "type": "error",
             "error": error_msg
         })
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

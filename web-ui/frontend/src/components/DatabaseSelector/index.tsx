@@ -43,12 +43,10 @@ const DatabaseSelector: React.FC<DatabaseSelectorProps> = ({
 
   // WebSocket处理
   useWebSocket((data) => {
-    console.log('[DatabaseSelector] 收到WebSocket消息:', data);
 
     // 处理数据库删除事件
     if (data.type === 'database_deleted') {
       const deletedDb = data.database_name;
-      console.log('[DatabaseSelector] 数据库已删除:', deletedDb);
 
       // 如果当前选中的数据库被删除，清除选择
       if (storeGlobalUser.selectedDatabase === deletedDb) {
@@ -69,10 +67,6 @@ const DatabaseSelector: React.FC<DatabaseSelectorProps> = ({
     if (!hasRestoredRef.current) {
       hasRestoredRef.current = true;
 
-      console.log('[DatabaseSelector] 首次挂载，开始初始化');
-      console.log('[DatabaseSelector] 当前 selectedDatabase:', storeGlobalUser.selectedDatabase);
-      console.log('[DatabaseSelector] 当前 availableDatabases 数量:', storeGlobalUser.availableDatabases.length);
-
       if (!storeGlobalUser.selectedDatabase) {
         storeGlobalUser.restoreSelectedDatabase();
       }
@@ -85,7 +79,6 @@ const DatabaseSelector: React.FC<DatabaseSelectorProps> = ({
   // 定期刷新数据库列表（每60秒，因为有WebSocket实时通知）
   useEffect(() => {
     const interval = setInterval(async () => {
-      console.log('[DatabaseSelector] 定期刷新数据库列表（60秒间隔）');
       await storeGlobalUser.loadDatabases();
     }, 60000); // 60秒刷新一次
 
@@ -94,7 +87,6 @@ const DatabaseSelector: React.FC<DatabaseSelectorProps> = ({
 
   // 处理数据库变更
   const handleDatabaseChange = async (value: string) => {
-    console.log('[DatabaseSelector] handleDatabaseChange 被调用, value:', value);
 
     // 验证数据库是否真的存在
     try {

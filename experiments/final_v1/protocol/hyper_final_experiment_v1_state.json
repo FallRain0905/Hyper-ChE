@@ -1,0 +1,112 @@
+{
+  "version": "final-experiment-v1",
+  "stages": {
+    "wait_cache": {
+      "status": "completed",
+      "updated_at": "2026-10-01T17:02:47Z",
+      "details": {
+        "validation_passed": true,
+        "validation_failures": [],
+        "documents": 60,
+        "chunks": 1328,
+        "entities": 11950,
+        "relationships": 13629,
+        "audited_evidence_instances": 14676,
+        "embedding_model": "Qwen/Qwen3-Embedding-4B",
+        "embedding_dim": 2560
+      }
+    },
+    "retrieval": {
+      "status": "completed",
+      "updated_at": "2026-10-01T16:48:07Z",
+      "details": {}
+    },
+    "pool": {
+      "status": "completed",
+      "updated_at": "2026-10-01T16:48:08Z",
+      "details": {}
+    },
+    "qrels": {
+      "status": "completed",
+      "updated_at": "2026-10-01T17:06:17Z",
+      "details": {}
+    },
+    "retrieval_metrics": {
+      "status": "completed",
+      "updated_at": "2026-10-01T17:06:18Z",
+      "details": {}
+    },
+    "qa": {
+      "status": "completed",
+      "updated_at": "2026-10-01T17:09:19Z",
+      "details": {}
+    },
+    "main_evaluation": {
+      "status": "completed",
+      "updated_at": "2026-10-01T17:09:19Z",
+      "details": {
+        "reporting_pending": true,
+        "qrels_final_audit_pending": true,
+        "next": "Source-level Hit@5, Composite Fact Recall, QA baseline comparison and attribution report"
+      }
+    },
+    "source_level": {
+      "status": "completed",
+      "updated_at": "2026-10-02T17:17:24Z",
+      "details": {
+        "output": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding"
+      }
+    },
+    "qrels_final_audit": {
+      "status": "completed",
+      "updated_at": "2026-10-02T17:18:52.122698+00:00",
+      "details": {
+        "status": "user_accepted_audit_gold",
+        "output": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding\\shared_qrels\\shared_qrels_final_audit.json",
+        "accepted_qrels": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding\\shared_qrels\\shared_qrels.json"
+      }
+    },
+    "qa_comparison": {
+      "status": "completed",
+      "updated_at": "2026-10-02T17:17:24Z",
+      "details": {
+        "output": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding"
+      }
+    },
+    "attribution": {
+      "status": "completed",
+      "updated_at": "2026-10-02T17:17:24Z",
+      "details": {
+        "output": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding"
+      }
+    },
+    "composite_fact_recall": {
+      "status": "completed",
+      "updated_at": "2026-10-02T17:18:52.122698+00:00",
+      "details": {
+        "status": "completed_user_accepted_audit",
+        "output": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding\\composite_fact_recall_user_accepted.json",
+        "accepted_gold": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding\\composite_fact_gold_user_accepted.json",
+        "facts": 1050,
+        "method": "accepted_atomic_gold_exact_chunk_binding"
+      }
+    },
+    "deepseek_audit": {
+      "status": "completed",
+      "updated_at": "2026-10-02T17:18:52.122698+00:00",
+      "details": {
+        "model": "deepseek-v4.1-flash",
+        "endpoint_count": 30,
+        "concurrency": 30,
+        "status": "user_accepted_audit_gold",
+        "accepted_by": "user",
+        "accepted_at": "2026-10-02T17:18:52.122698+00:00",
+        "output": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding\\deepseek_audit",
+        "acceptance_manifest": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding\\deepseek_audit_user_acceptance.json"
+      }
+    }
+  },
+  "pid": null,
+  "reporting_pending": false,
+  "qa_provider_limitation": "Historical four-group QA used Moonshot; final QA uses Aliyun with the same kimi-k2.6 model name. Provider difference is disclosed; do not claim a fully controlled model-serving comparison."
+}

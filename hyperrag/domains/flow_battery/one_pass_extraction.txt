@@ -1,0 +1,90 @@
+{DOMAIN_CONTEXT}
+
+Extract redox-flow-battery knowledge from the text chunk in ONE LLM call.
+
+Your output must contain:
+1. entities
+2. low_order_relations
+3. high_order_hyperedges
+
+Important reasoning order:
+1. Identify the entities first.
+2. Extract pairwise low-order relations using only entity names you just output.
+3. Build high-order hyperedges by grouping 3 or more entities that participate in the same experimental fact.
+
+Do not create relation vertices that are absent from the entities array.
+Every relation source, target, and hyperedge vertex MUST exactly equal one entities[].name value.
+
+ENTITY TYPES:
+- ACTIVE_SPECIES: redox-active species, redox couples, supporting electrolytes, additives, salts, solvents.
+- MEMBRANE: ion-exchange membranes, porous separators, membrane modifications.
+- ELECTRODE: electrodes, carbon felt, graphite felt, carbon cloth, modified electrodes, bipolar plates.
+- CONDITION: operating or processing parameters, such as current density, temperature, flow rate, pH, cycle number, concentration, electrolyte volume, cutoff voltage.
+- METRIC: CE, VE, EE, capacity retention, capacity decay, energy density, power density, crossover, resistance, permeability, IEC, contact angle, Rct, peak separation.
+- DEGRADATION: crossover, HER, capacity fade, electrode passivation, electrolyte imbalance, dendrite growth, shuttle effect, mass-transfer limitation.
+- SYSTEM: named flow battery systems or devices, such as VRFB, ICRFB, zinc-bromine flow battery, soluble lead-acid flow battery, organic flow battery, stack.
+
+ENTITY RULES:
+- Preserve original surface names. Do not translate or canonicalize names.
+- Chemical identity must be precise: V(IV) is not V(V); VO2+ is not VO^2+ unless the text clearly uses them as the same surface form.
+- Derived materials are separate entities: C-C, MC-C, BMC-C, Nafion 117, Nafion 212, SNPBI-1.42, SPEEK/APK.
+- Numeric values must be split into value/unit or value_min/value_max/unit.
+- For numeric metric or condition mentions, keep the metric/condition name in name and put the number in value/unit.
+  Example: name="EE", value=80.9, unit="%"; name="current density", value=100, unit="mA/cm2".
+
+RELATION TYPES:
+- COMPOSITION: component, precursor, formulation, synthesis route, membrane/electrode modification.
+- OPERATION: system/material/species tested under condition with metric.
+- DEGRADATION: condition/material/mechanism causing performance decay or failure.
+- COMPARISON: materials, membranes, electrodes, species, or conditions compared under shared metrics.
+
+HIGH-ORDER HYPEREDGE RULES:
+- Prefer complete experimental fact units: system + material + active species/electrolyte + condition + metric.
+- For comparisons, include compared candidates, shared condition, and shared metric.
+- For degradation, include affected system/material, condition, mechanism, and performance metric when available.
+- High-order hyperedges should connect 3 or more vertices. If only two entities are involved, use a low-order relation.
+- Use evidence_span as a short verbatim quote from the text, max 120 characters.
+
+Text:
+{CHUNK_TEXT}
+
+OUTPUT FORMAT - strict JSON object, nothing else:
+{{
+  "entities": [
+    {{
+      "name": "<exact original entity name>",
+      "type": "ACTIVE_SPECIES | MEMBRANE | ELECTRODE | CONDITION | METRIC | DEGRADATION | SYSTEM",
+      "subtype": "<operating | processing | performance | material_property | optional>",
+      "value": <number or null>,
+      "value_min": <number or null>,
+      "value_max": <number or null>,
+      "unit": "<unit or empty string>",
+      "description": "<English description grounded in the text>",
+      "key_attribute": "<important attribute or empty string>"
+    }}
+  ],
+  "low_order_relations": [
+    {{
+      "source": "<must exactly match one entities[].name>",
+      "target": "<must exactly match one entities[].name>",
+      "relation_type": "COMPOSITION | OPERATION | DEGRADATION | COMPARISON",
+      "description": "<why the two entities are related in this text>",
+      "keywords": "<short keywords>",
+      "strength": <0-10 integer>,
+      "evidence_span": "<verbatim quote from text, <=120 chars>"
+    }}
+  ],
+  "high_order_hyperedges": [
+    {{
+      "vertices": ["<must exactly match one entities[].name>", "<must exactly match one entities[].name>", "..."],
+      "relation_type": "COMPOSITION | OPERATION | DEGRADATION | COMPARISON",
+      "description": "<complete experimental fact involving all vertices>",
+      "generalization": "<one-sentence summary>",
+      "keywords": "<short keywords>",
+      "strength": <0-10 integer>,
+      "evidence_span": "<verbatim quote from text, <=120 chars>"
+    }}
+  ]
+}}
+
+Output ONLY the JSON object. No prose before or after.

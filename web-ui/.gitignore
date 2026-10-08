@@ -29,3 +29,8 @@ frontend/.env.*
 backend/file_metadata.json
 local
 backend/data
+# Local dependency/cache artifacts
+frontend/.npm-cache/
+frontend/.vite/
+backend/hyperrag_cache/*
+!backend/hyperrag_cache/README.md

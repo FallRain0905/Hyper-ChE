@@ -1,0 +1,759 @@
+{
+  "protocol": {
+    "protocol_version": "qa-formal-v3-normalized-final-extension-v1",
+    "run_id": "qa-final-old-embedding-v1",
+    "question_file": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\qa_eval\\real_flow_60_qa_gold_v1\\qa_questions.json",
+    "question_file_sha256": "a01fd36a1795e651fe8a08d9fb8482f61dcbce1197839064c072c3fe515014c0",
+    "cache_root": "C:\\Users\\19855\\Desktop\\Hyper-rag\\real_flow_80_chunk1000_v3",
+    "groups": {
+      "normalized_final": {
+        "label": "Normalized Final (EFU repair disabled)",
+        "cache": "hyper_final_posthoc_v1",
+        "view": "hyper",
+        "retriever": "normalized_final_hybrid_rerank_v1",
+        "rerank": true
+      }
+    },
+    "top_k": 5,
+    "evidence_budget_chars": 1500,
+    "evidence_format": "legacy",
+    "structured_graph_retrieval": {
+      "method": "relationship dense + relationship BM25 + entity dense + entity BM25 + weighted RRF + one-hop incident-edge expansion + deterministic structural rerank + full source-chunk reconstruction",
+      "config": {
+        "relationship_candidate_depth": 50,
+        "entity_candidate_depth": 30,
+        "bm25_candidate_depth": 50,
+        "rrf_k": 60,
+        "relationship_dense_weight": 1.0,
+        "relationship_bm25_weight": 1.0,
+        "entity_dense_weight": 0.8,
+        "entity_bm25_weight": 0.8,
+        "expansion_weight": 0.9,
+        "expansion_hops": 1,
+        "max_expanded_edges": 100,
+        "rerank_candidate_depth": 50,
+        "chunk_candidate_depth": 30
+      },
+      "cache_mapping_audits": {
+        "hyper_final_posthoc_v1": {
+          "relationship_vector_rows": 13629,
+          "graph_edges": 13629,
+          "mapped_relationship_vector_rows": 13629,
+          "unique_mapped_graph_edges": 13629,
+          "duplicate_vector_rows": 0,
+          "graph_edges_without_relationship_vectors": 0
+        }
+      },
+      "graph_hypergraph_difference": "identical retrieval pipeline and parameters; graph permits only arity=2 while hypergraph permits all arities"
+    },
+    "hybrid_baseline": {
+      "method": "BM25 + Qwen/Qwen3-Embedding-4B dense cosine + weighted RRF",
+      "candidate_depth": 50,
+      "rrf_k": 60,
+      "dense_weight": 1.0,
+      "bm25_weight": 1.0
+    },
+    "generator": {
+      "provider": "custom_env",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "model": "kimi-k2.6",
+      "key_count": 5
+    },
+    "judge": {
+      "provider": "custom_env",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "model": "kimi-k2.6",
+      "key_count": 5
+    },
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "parallel_workers": 3,
+    "llm_timeout": 120.0,
+    "embedding_timeout": 120.0,
+    "seed": 20260811,
+    "gold_source_doc_filtering": false,
+    "base_chem_text_difference_policy": "accepted non-blocking experiment variable",
+    "normalized_final_retrieval": {
+      "method": "hybrid RRF candidate pool frozen before existing lexical/structural rerank",
+      "config": {
+        "relationship_candidate_depth": 50,
+        "entity_candidate_depth": 30,
+        "bm25_candidate_depth": 50,
+        "rrf_k": 60,
+        "relationship_dense_weight": 1.0,
+        "relationship_bm25_weight": 1.0,
+        "entity_dense_weight": 0.8,
+        "entity_bm25_weight": 0.8,
+        "expansion_weight": 0.9,
+        "expansion_hops": 1,
+        "max_expanded_edges": 100,
+        "rerank_candidate_depth": 50,
+        "chunk_candidate_depth": 30,
+        "enable_rerank": true
+      },
+      "cache_validation": {
+        "validation_passed": true,
+        "validation_failures": [],
+        "documents": 60,
+        "chunks": 1328,
+        "entities": 11950,
+        "relationships": 13629,
+        "audited_evidence_instances": 14676,
+        "embedding_model": "Qwen/Qwen3-Embedding-4B",
+        "embedding_dim": 2560
+      }
+    }
+  },
+  "readiness": {
+    "protocol_version": "qa-formal-v3-normalized-final-extension-v1",
+    "generated_at_utc": "2026-10-01T17:06:32Z",
+    "status": "PASS",
+    "fail_count": 0,
+    "warn_count": 1,
+    "question_file": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\qa_eval\\real_flow_60_qa_gold_v1\\qa_questions.json",
+    "question_file_sha256": "a01fd36a1795e651fe8a08d9fb8482f61dcbce1197839064c072c3fe515014c0",
+    "cache_root": "C:\\Users\\19855\\Desktop\\Hyper-rag\\real_flow_80_chunk1000_v3",
+    "groups": {
+      "normalized_final": {
+        "label": "Normalized Final (EFU repair disabled)",
+        "cache": "hyper_final_posthoc_v1",
+        "view": "hyper",
+        "retriever": "normalized_final_hybrid_rerank_v1",
+        "rerank": true
+      }
+    },
+    "checks": [
+      {
+        "name": "question_file_exists",
+        "status": "PASS",
+        "observed": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\qa_eval\\real_flow_60_qa_gold_v1\\qa_questions.json",
+        "expected": "existing file"
+      },
+      {
+        "name": "benchmark_status_final_gold",
+        "status": "PASS",
+        "observed": "final_gold",
+        "expected": "final_gold"
+      },
+      {
+        "name": "benchmark_human_confirmed",
+        "status": "PASS",
+        "observed": true,
+        "expected": true
+      },
+      {
+        "name": "question_count",
+        "status": "PASS",
+        "observed": 40,
+        "expected": 40
+      },
+      {
+        "name": "question_ids_nonempty_unique",
+        "status": "PASS",
+        "observed": 40,
+        "expected": 40
+      },
+      {
+        "name": "answerability_split",
+        "status": "PASS",
+        "observed": [
+          35,
+          5
+        ],
+        "expected": [
+          35,
+          5
+        ]
+      },
+      {
+        "name": "all_questions_final_gold",
+        "status": "PASS",
+        "observed": 40,
+        "expected": 40
+      },
+      {
+        "name": "all_questions_human_confirmed",
+        "status": "PASS",
+        "observed": 40,
+        "expected": 40
+      },
+      {
+        "name": "all_rubrics_present",
+        "status": "PASS",
+        "observed": 40,
+        "expected": 40
+      },
+      {
+        "name": "unanswerable_absence_confirmed",
+        "status": "PASS",
+        "observed": 5,
+        "expected": 5
+      },
+      {
+        "name": "cache_hyper_final_posthoc_v1",
+        "status": "PASS",
+        "observed": {
+          "cache_dir": "C:\\Users\\19855\\Desktop\\Hyper-rag\\real_flow_80_chunk1000_v3\\hyper_final_posthoc_v1",
+          "exists": true,
+          "required_files": {
+            "kv_store_full_docs.json": true,
+            "kv_store_text_chunks.json": true,
+            "run_config.json": true,
+            "vdb_chunks.json": true,
+            "vdb_entities.json": true,
+            "vdb_relationships.json": true,
+            "hypergraph_chunk_entity_relation.hgdb": true
+          },
+          "errors": [],
+          "warnings": [],
+          "documents": 60,
+          "chunks": 1328,
+          "document_ids_exact": true,
+          "graph_vertices": 11950,
+          "graph_edges": 13629,
+          "vectors": {
+            "chunks": {
+              "embedding_dimension": 2560,
+              "rows": 1328
+            },
+            "entities": {
+              "embedding_dimension": 2560,
+              "rows": 11950
+            },
+            "relationships": {
+              "embedding_dimension": 2560,
+              "rows": 13629
+            }
+          },
+          "run_config": {
+            "index_profile": "dual_concat",
+            "enable_entity_normalization": true,
+            "normalization_mode": null,
+            "embedding_model": "Qwen/Qwen3-Embedding-4B",
+            "embedding_dim": 2560
+          },
+          "status": "PASS"
+        },
+        "expected": "complete 60-doc cache"
+      },
+      {
+        "name": "cache_hyper_final_posthoc_v1_not_locked",
+        "status": "PASS",
+        "observed": null,
+        "expected": "no active writer lock"
+      },
+      {
+        "name": "cache_hyper_final_posthoc_v1_gold_chunk_compatibility",
+        "status": "PASS",
+        "observed": [],
+        "expected": "all answerable gold chunk IDs exist"
+      },
+      {
+        "name": "base_chem_chunk_id_alignment",
+        "status": "PASS",
+        "observed": 0,
+        "expected": 0
+      },
+      {
+        "name": "base_chem_text_difference_policy",
+        "status": "WARN",
+        "observed": 259,
+        "expected": "accepted non-blocking experiment variable"
+      }
+    ],
+    "cache_reports": {
+      "hyper_final_posthoc_v1": {
+        "cache_dir": "C:\\Users\\19855\\Desktop\\Hyper-rag\\real_flow_80_chunk1000_v3\\hyper_final_posthoc_v1",
+        "exists": true,
+        "required_files": {
+          "kv_store_full_docs.json": true,
+          "kv_store_text_chunks.json": true,
+          "run_config.json": true,
+          "vdb_chunks.json": true,
+          "vdb_entities.json": true,
+          "vdb_relationships.json": true,
+          "hypergraph_chunk_entity_relation.hgdb": true
+        },
+        "errors": [],
+        "warnings": [],
+        "documents": 60,
+        "chunks": 1328,
+        "document_ids_exact": true,
+        "graph_vertices": 11950,
+        "graph_edges": 13629,
+        "vectors": {
+          "chunks": {
+            "embedding_dimension": 2560,
+            "rows": 1328
+          },
+          "entities": {
+            "embedding_dimension": 2560,
+            "rows": 11950
+          },
+          "relationships": {
+            "embedding_dimension": 2560,
+            "rows": 13629
+          }
+        },
+        "run_config": {
+          "index_profile": "dual_concat",
+          "enable_entity_normalization": true,
+          "normalization_mode": null,
+          "embedding_model": "Qwen/Qwen3-Embedding-4B",
+          "embedding_dim": 2560
+        },
+        "status": "PASS"
+      }
+    }
+  },
+  "record_count": 40,
+  "expected_record_count": 40,
+  "complete": true,
+  "summary": [
+    {
+      "group": "normalized_final",
+      "questions": 40,
+      "Good Rate": 0.25,
+      "Satisfactory-or-Better Rate": 0.5,
+      "Macro KPC": 0.4633,
+      "Micro KPC": 0.4825,
+      "Hallucination Rate": 0.2,
+      "False Abstention Rate": 0.1714,
+      "False Answer Rate": 0.0,
+      "Unanswerable Abstention Accuracy": 1.0,
+      "Citation Reference Validity": 1.0,
+      "Citation Presence Rate": 0.725,
+      "Citation Support Score (LLM)": 0.4649
+    }
+  ],
+  "strata": {
+    "answerable": [
+      {
+        "group": "normalized_final",
+        "answerable": "False",
+        "questions": 5,
+        "Good Rate": 0.2,
+        "Satisfactory-or-Better Rate": 0.2,
+        "Macro KPC": 0.2,
+        "Micro KPC": 0.2,
+        "Hallucination Rate": 0.0,
+        "False Abstention Rate": 0.0,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 1.0,
+        "Citation Reference Validity": null,
+        "Citation Presence Rate": 0.0,
+        "Citation Support Score (LLM)": 0.16
+      },
+      {
+        "group": "normalized_final",
+        "answerable": "True",
+        "questions": 35,
+        "Good Rate": 0.2571,
+        "Satisfactory-or-Better Rate": 0.5429,
+        "Macro KPC": 0.501,
+        "Micro KPC": 0.5038,
+        "Hallucination Rate": 0.2286,
+        "False Abstention Rate": 0.1714,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 0.8286,
+        "Citation Support Score (LLM)": 0.5085
+      }
+    ],
+    "question_type": [
+      {
+        "group": "normalized_final",
+        "question_type": "balance_of_plant_durability",
+        "questions": 1,
+        "Good Rate": 1.0,
+        "Satisfactory-or-Better Rate": 1.0,
+        "Macro KPC": 1.0,
+        "Micro KPC": 1.0,
+        "Hallucination Rate": 0.0,
+        "False Abstention Rate": 0.0,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 1.0,
+        "Citation Reference Validity": null,
+        "Citation Presence Rate": 0.0,
+        "Citation Support Score (LLM)": 0.8
+      },
+      {
+        "group": "normalized_final",
+        "question_type": "comparison",
+        "questions": 7,
+        "Good Rate": 0.1429,
+        "Satisfactory-or-Better Rate": 0.8571,
+        "Macro KPC": 0.6786,
+        "Micro KPC": 0.6786,
+        "Hallucination Rate": 0.1429,
+        "False Abstention Rate": 0.0,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 1.0,
+        "Citation Support Score (LLM)": 0.7143
+      },
+      {
+        "group": "normalized_final",
+        "question_type": "condition_multi_metric",
+        "questions": 8,
+        "Good Rate": 0.625,
+        "Satisfactory-or-Better Rate": 0.625,
+        "Macro KPC": 0.65,
+        "Micro KPC": 0.625,
+        "Hallucination Rate": 0.25,
+        "False Abstention Rate": 0.125,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 0.875,
+        "Citation Support Score (LLM)": 0.6188
+      },
+      {
+        "group": "normalized_final",
+        "question_type": "cross_section_synthesis",
+        "questions": 6,
+        "Good Rate": 0.0,
+        "Satisfactory-or-Better Rate": 0.3333,
+        "Macro KPC": 0.3472,
+        "Micro KPC": 0.3333,
+        "Hallucination Rate": 0.3333,
+        "False Abstention Rate": 0.1667,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 0.8333,
+        "Citation Support Score (LLM)": 0.3411
+      },
+      {
+        "group": "normalized_final",
+        "question_type": "direct_measurement",
+        "questions": 4,
+        "Good Rate": 0.25,
+        "Satisfactory-or-Better Rate": 0.25,
+        "Macro KPC": 0.25,
+        "Micro KPC": 0.2308,
+        "Hallucination Rate": 0.25,
+        "False Abstention Rate": 0.5,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 0.5,
+        "Citation Support Score (LLM)": 0.25
+      },
+      {
+        "group": "normalized_final",
+        "question_type": "gas_safety_control",
+        "questions": 1,
+        "Good Rate": 0.0,
+        "Satisfactory-or-Better Rate": 0.0,
+        "Macro KPC": 0.0,
+        "Micro KPC": 0.0,
+        "Hallucination Rate": 0.0,
+        "False Abstention Rate": 0.0,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 1.0,
+        "Citation Reference Validity": null,
+        "Citation Presence Rate": 0.0,
+        "Citation Support Score (LLM)": 0.0
+      },
+      {
+        "group": "normalized_final",
+        "question_type": "mechanism_chain",
+        "questions": 9,
+        "Good Rate": 0.2222,
+        "Satisfactory-or-Better Rate": 0.5556,
+        "Macro KPC": 0.5,
+        "Micro KPC": 0.5,
+        "Hallucination Rate": 0.2222,
+        "False Abstention Rate": 0.1111,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 0.8889,
+        "Citation Support Score (LLM)": 0.5333
+      },
+      {
+        "group": "normalized_final",
+        "question_type": "operando_control",
+        "questions": 1,
+        "Good Rate": 0.0,
+        "Satisfactory-or-Better Rate": 0.0,
+        "Macro KPC": 0.0,
+        "Micro KPC": 0.0,
+        "Hallucination Rate": 0.0,
+        "False Abstention Rate": 0.0,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 1.0,
+        "Citation Reference Validity": null,
+        "Citation Presence Rate": 0.0,
+        "Citation Support Score (LLM)": 0.0
+      },
+      {
+        "group": "normalized_final",
+        "question_type": "performance_comparison",
+        "questions": 1,
+        "Good Rate": 0.0,
+        "Satisfactory-or-Better Rate": 0.0,
+        "Macro KPC": 0.0,
+        "Micro KPC": 0.0,
+        "Hallucination Rate": 0.0,
+        "False Abstention Rate": 1.0,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": null,
+        "Citation Presence Rate": 0.0,
+        "Citation Support Score (LLM)": 0.0
+      },
+      {
+        "group": "normalized_final",
+        "question_type": "qualification_standard",
+        "questions": 1,
+        "Good Rate": 0.0,
+        "Satisfactory-or-Better Rate": 0.0,
+        "Macro KPC": 0.0,
+        "Micro KPC": 0.0,
+        "Hallucination Rate": 0.0,
+        "False Abstention Rate": 0.0,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 1.0,
+        "Citation Reference Validity": null,
+        "Citation Presence Rate": 0.0,
+        "Citation Support Score (LLM)": 0.0
+      },
+      {
+        "group": "normalized_final",
+        "question_type": "thermal_management",
+        "questions": 1,
+        "Good Rate": 0.0,
+        "Satisfactory-or-Better Rate": 0.0,
+        "Macro KPC": 0.0,
+        "Micro KPC": 0.0,
+        "Hallucination Rate": 0.0,
+        "False Abstention Rate": 0.0,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 1.0,
+        "Citation Reference Validity": null,
+        "Citation Presence Rate": 0.0,
+        "Citation Support Score (LLM)": 0.0
+      }
+    ],
+    "difficulty": [
+      {
+        "group": "normalized_final",
+        "difficulty": "compositional",
+        "questions": 15,
+        "Good Rate": 0.2,
+        "Satisfactory-or-Better Rate": 0.4667,
+        "Macro KPC": 0.4556,
+        "Micro KPC": 0.5,
+        "Hallucination Rate": 0.2,
+        "False Abstention Rate": 0.1,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 1.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 0.6,
+        "Citation Support Score (LLM)": 0.4398
+      },
+      {
+        "group": "normalized_final",
+        "difficulty": "high_order",
+        "questions": 20,
+        "Good Rate": 0.3,
+        "Satisfactory-or-Better Rate": 0.6,
+        "Macro KPC": 0.535,
+        "Micro KPC": 0.5309,
+        "Hallucination Rate": 0.2,
+        "False Abstention Rate": 0.1,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 0.9,
+        "Citation Support Score (LLM)": 0.55
+      },
+      {
+        "group": "normalized_final",
+        "difficulty": "simple",
+        "questions": 5,
+        "Good Rate": 0.2,
+        "Satisfactory-or-Better Rate": 0.2,
+        "Macro KPC": 0.2,
+        "Micro KPC": 0.1875,
+        "Hallucination Rate": 0.2,
+        "False Abstention Rate": 0.6,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 0.4,
+        "Citation Support Score (LLM)": 0.2
+      }
+    ],
+    "support_mode": [
+      {
+        "group": "normalized_final",
+        "support_mode": "adjacent_chunks",
+        "questions": 7,
+        "Good Rate": 0.2857,
+        "Satisfactory-or-Better Rate": 0.7143,
+        "Macro KPC": 0.6357,
+        "Micro KPC": 0.6207,
+        "Hallucination Rate": 0.1429,
+        "False Abstention Rate": 0.1429,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 0.8571,
+        "Citation Support Score (LLM)": 0.6429
+      },
+      {
+        "group": "normalized_final",
+        "support_mode": "cross_section",
+        "questions": 17,
+        "Good Rate": 0.1765,
+        "Satisfactory-or-Better Rate": 0.5882,
+        "Macro KPC": 0.4804,
+        "Micro KPC": 0.4776,
+        "Hallucination Rate": 0.1765,
+        "False Abstention Rate": 0.1176,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 0.8824,
+        "Citation Support Score (LLM)": 0.5157
+      },
+      {
+        "group": "normalized_final",
+        "support_mode": "none",
+        "questions": 5,
+        "Good Rate": 0.2,
+        "Satisfactory-or-Better Rate": 0.2,
+        "Macro KPC": 0.2,
+        "Micro KPC": 0.2,
+        "Hallucination Rate": 0.0,
+        "False Abstention Rate": 0.0,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 1.0,
+        "Citation Reference Validity": null,
+        "Citation Presence Rate": 0.0,
+        "Citation Support Score (LLM)": 0.16
+      },
+      {
+        "group": "normalized_final",
+        "support_mode": "single_chunk",
+        "questions": 11,
+        "Good Rate": 0.3636,
+        "Satisfactory-or-Better Rate": 0.3636,
+        "Macro KPC": 0.447,
+        "Micro KPC": 0.4595,
+        "Hallucination Rate": 0.3636,
+        "False Abstention Rate": 0.2727,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 0.7273,
+        "Citation Support Score (LLM)": 0.4118
+      }
+    ],
+    "fact_arity": [
+      {
+        "group": "normalized_final",
+        "fact_arity": "3",
+        "questions": 1,
+        "Good Rate": 0.0,
+        "Satisfactory-or-Better Rate": 0.0,
+        "Macro KPC": 0.0,
+        "Micro KPC": 0.0,
+        "Hallucination Rate": 0.0,
+        "False Abstention Rate": 1.0,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": null,
+        "Citation Presence Rate": 0.0,
+        "Citation Support Score (LLM)": 0.0
+      },
+      {
+        "group": "normalized_final",
+        "fact_arity": "4",
+        "questions": 3,
+        "Good Rate": 0.0,
+        "Satisfactory-or-Better Rate": 0.3333,
+        "Macro KPC": 0.25,
+        "Micro KPC": 0.25,
+        "Hallucination Rate": 0.3333,
+        "False Abstention Rate": 0.0,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 1.0,
+        "Citation Support Score (LLM)": 0.3667
+      },
+      {
+        "group": "normalized_final",
+        "fact_arity": "5",
+        "questions": 13,
+        "Good Rate": 0.3077,
+        "Satisfactory-or-Better Rate": 0.4615,
+        "Macro KPC": 0.4744,
+        "Micro KPC": 0.5,
+        "Hallucination Rate": 0.3077,
+        "False Abstention Rate": 0.2308,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 0.7692,
+        "Citation Support Score (LLM)": 0.4638
+      },
+      {
+        "group": "normalized_final",
+        "fact_arity": "6",
+        "questions": 15,
+        "Good Rate": 0.2667,
+        "Satisfactory-or-Better Rate": 0.6667,
+        "Macro KPC": 0.5778,
+        "Micro KPC": 0.5614,
+        "Hallucination Rate": 0.1333,
+        "False Abstention Rate": 0.1333,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 0.8667,
+        "Citation Support Score (LLM)": 0.5844
+      },
+      {
+        "group": "normalized_final",
+        "fact_arity": "7",
+        "questions": 3,
+        "Good Rate": 0.3333,
+        "Satisfactory-or-Better Rate": 0.6667,
+        "Macro KPC": 0.65,
+        "Micro KPC": 0.6154,
+        "Hallucination Rate": 0.3333,
+        "False Abstention Rate": 0.0,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 0.0,
+        "Citation Reference Validity": 1.0,
+        "Citation Presence Rate": 1.0,
+        "Citation Support Score (LLM)": 0.6333
+      },
+      {
+        "group": "normalized_final",
+        "fact_arity": "None",
+        "questions": 5,
+        "Good Rate": 0.2,
+        "Satisfactory-or-Better Rate": 0.2,
+        "Macro KPC": 0.2,
+        "Micro KPC": 0.2,
+        "Hallucination Rate": 0.0,
+        "False Abstention Rate": 0.0,
+        "False Answer Rate": 0.0,
+        "Unanswerable Abstention Accuracy": 1.0,
+        "Citation Reference Validity": null,
+        "Citation Presence Rate": 0.0,
+        "Citation Support Score (LLM)": 0.16
+      }
+    ]
+  },
+  "pairwise": [],
+  "errors": []
+}

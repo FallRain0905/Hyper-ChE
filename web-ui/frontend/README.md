@@ -1,19 +1,8 @@
-## 安装依赖
+# HyperChE frontend
 
-```bash
-pnpm install
-```
+From this directory run `npm ci`, then set `VITE_SERVER_URL` to the backend
+address and run `npm run start:production`. The usual backend development
+address is `http://localhost:8000`.
 
-## 脚本描述
-
-### 开发启动
-```bash
-# mock模式启动
-npm run dev
-```
-
-### 打包
-
-```bash
-npm run build
-```
+`npm run dev` uses mock responses. `npm run build` creates the production
+`dist/` directory, which is ignored by Git. See the root README for deployment.

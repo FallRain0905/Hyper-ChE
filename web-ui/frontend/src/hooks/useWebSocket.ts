@@ -20,13 +20,11 @@ export const useWebSocket = (onMessage?: (data: any) => void): WebSocketHookRetu
 
   const connect = useCallback(() => {
     const wsUrl = getWebSocketUrl('/ws');
-    console.log('[WebSocket] 连接中...', wsUrl);
 
     try {
       wsRef.current = new WebSocket(wsUrl);
 
       wsRef.current.onopen = () => {
-        console.log('[WebSocket] 连接成功');
         setIsConnected(true);
         if (reconnectTimeoutRef.current) {
           clearTimeout(reconnectTimeoutRef.current);
@@ -37,7 +35,6 @@ export const useWebSocket = (onMessage?: (data: any) => void): WebSocketHookRetu
       wsRef.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('[WebSocket] 收到消息:', data);
 
           // 处理数据库更新通知
           if (data.type === 'database_deleted' && onMessageRef.current) {
@@ -49,11 +46,9 @@ export const useWebSocket = (onMessage?: (data: any) => void): WebSocketHookRetu
       };
 
       wsRef.current.onclose = () => {
-        console.log('[WebSocket] 连接关闭');
         setIsConnected(false);
         // 5秒后尝试重连
         reconnectTimeoutRef.current = setTimeout(() => {
-          console.log('[WebSocket] 5秒后尝试重连...');
           connect();
         }, 5000);
       };
@@ -82,7 +77,6 @@ export const useWebSocket = (onMessage?: (data: any) => void): WebSocketHookRetu
     if (wsRef.current && isConnected) {
       wsRef.current.send(JSON.stringify(message));
     } else {
-      console.warn('[WebSocket] 未连接，无法发送消息');
     }
   }, [isConnected]);
 

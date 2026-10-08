@@ -1,0 +1,20 @@
+﻿.git
+.git/**
+.gitignore
+
+# Local research and build artifacts
+outputs/
+test-materials/
+web-ui/frontend/node_modules/
+web-ui/frontend/.npm-cache/
+web-ui/frontend/dist/
+
+# Runtime secrets and mutable data
+web-ui/backend/settings.json
+web-ui/backend/uploads/
+web-ui/backend/knowledge_bases/
+web-ui/backend/logs/
+web-ui/backend/*.db
+web-ui/backend/*.db-journal
+web-ui/backend/hyperrag_cache/
+web-ui/backend/cograg_cache/

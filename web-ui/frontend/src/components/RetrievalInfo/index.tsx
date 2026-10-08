@@ -204,7 +204,7 @@ const RetrievalInfo = ({
 
   const panelItems = []
 
-  // 主题面板 (Cog-RAG特有)
+  // 主题面板
   if (themes.length > 0) {
     panelItems.push({
       key: 'themes',

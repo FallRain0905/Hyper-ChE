@@ -1,0 +1,105 @@
+{
+  "protocol_version": "qa-formal-v3-normalized-final-extension-v1",
+  "run_id": "qa-final-old-embedding-v1",
+  "question_file": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\qa_eval\\real_flow_60_qa_gold_v1\\qa_questions.json",
+  "question_file_sha256": "a01fd36a1795e651fe8a08d9fb8482f61dcbce1197839064c072c3fe515014c0",
+  "cache_root": "C:\\Users\\19855\\Desktop\\Hyper-rag\\real_flow_80_chunk1000_v3",
+  "groups": {
+    "normalized_final": {
+      "label": "Normalized Final (EFU repair disabled)",
+      "cache": "hyper_final_posthoc_v1",
+      "view": "hyper",
+      "retriever": "normalized_final_hybrid_rerank_v1",
+      "rerank": true
+    }
+  },
+  "top_k": 5,
+  "evidence_budget_chars": 1500,
+  "evidence_format": "legacy",
+  "structured_graph_retrieval": {
+    "method": "relationship dense + relationship BM25 + entity dense + entity BM25 + weighted RRF + one-hop incident-edge expansion + deterministic structural rerank + full source-chunk reconstruction",
+    "config": {
+      "relationship_candidate_depth": 50,
+      "entity_candidate_depth": 30,
+      "bm25_candidate_depth": 50,
+      "rrf_k": 60,
+      "relationship_dense_weight": 1.0,
+      "relationship_bm25_weight": 1.0,
+      "entity_dense_weight": 0.8,
+      "entity_bm25_weight": 0.8,
+      "expansion_weight": 0.9,
+      "expansion_hops": 1,
+      "max_expanded_edges": 100,
+      "rerank_candidate_depth": 50,
+      "chunk_candidate_depth": 30
+    },
+    "cache_mapping_audits": {
+      "hyper_final_posthoc_v1": {
+        "relationship_vector_rows": 13629,
+        "graph_edges": 13629,
+        "mapped_relationship_vector_rows": 13629,
+        "unique_mapped_graph_edges": 13629,
+        "duplicate_vector_rows": 0,
+        "graph_edges_without_relationship_vectors": 0
+      }
+    },
+    "graph_hypergraph_difference": "identical retrieval pipeline and parameters; graph permits only arity=2 while hypergraph permits all arities"
+  },
+  "hybrid_baseline": {
+    "method": "BM25 + Qwen/Qwen3-Embedding-4B dense cosine + weighted RRF",
+    "candidate_depth": 50,
+    "rrf_k": 60,
+    "dense_weight": 1.0,
+    "bm25_weight": 1.0
+  },
+  "generator": {
+    "provider": "custom_env",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "model": "kimi-k2.6",
+    "key_count": 5
+  },
+  "judge": {
+    "provider": "custom_env",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "model": "kimi-k2.6",
+    "key_count": 5
+  },
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "parallel_workers": 3,
+  "llm_timeout": 120.0,
+  "embedding_timeout": 120.0,
+  "seed": 20260811,
+  "gold_source_doc_filtering": false,
+  "base_chem_text_difference_policy": "accepted non-blocking experiment variable",
+  "normalized_final_retrieval": {
+    "method": "hybrid RRF candidate pool frozen before existing lexical/structural rerank",
+    "config": {
+      "relationship_candidate_depth": 50,
+      "entity_candidate_depth": 30,
+      "bm25_candidate_depth": 50,
+      "rrf_k": 60,
+      "relationship_dense_weight": 1.0,
+      "relationship_bm25_weight": 1.0,
+      "entity_dense_weight": 0.8,
+      "entity_bm25_weight": 0.8,
+      "expansion_weight": 0.9,
+      "expansion_hops": 1,
+      "max_expanded_edges": 100,
+      "rerank_candidate_depth": 50,
+      "chunk_candidate_depth": 30,
+      "enable_rerank": true
+    },
+    "cache_validation": {
+      "validation_passed": true,
+      "validation_failures": [],
+      "documents": 60,
+      "chunks": 1328,
+      "entities": 11950,
+      "relationships": 13629,
+      "audited_evidence_instances": 14676,
+      "embedding_model": "Qwen/Qwen3-Embedding-4B",
+      "embedding_dim": 2560
+    }
+  }
+}

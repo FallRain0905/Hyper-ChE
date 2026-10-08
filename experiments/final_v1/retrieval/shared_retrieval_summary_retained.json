@@ -1,0 +1,208 @@
+{
+  "metadata": {
+    "created_at": "2026-10-02T17:16:26.953243+00:00",
+    "status": "formal_shared_qrels",
+    "benchmark_scope": "chemistry_high_order_compositional_retrieval",
+    "candidate_union": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding\\shared_pool\\candidate_union.json",
+    "qrels": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding\\shared_qrels\\shared_qrels.json",
+    "queries": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\retrieval_benchmark\\query_benchmark_curated_v2\\retrieval_queries.json",
+    "qrel_key": [
+      "query_id",
+      "chunk_id"
+    ],
+    "idcg_policy": "one IDCG per query from the complete judged candidate union, shared by every system",
+    "allow_incomplete_qrels": false,
+    "paper_database_scope": "retained five groups; text baselines excluded from paper headline analysis",
+    "excluded_systems": [
+      "chem_prompt_hypergraph_chunk_rerank",
+      "hybrid_rag_baseline"
+    ]
+  },
+  "integrity": {
+    "systems": [
+      "chem_prompt_graph",
+      "chem_prompt_hypergraph",
+      "chem_prompt_hypergraph_chunk_rerank",
+      "hybrid_rag_baseline",
+      "normalized_final",
+      "normalized_final_no_rerank",
+      "original_hypergraph"
+    ],
+    "queries": 58,
+    "pooled_query_chunk_pairs": 4196,
+    "judged_pairs": 4196,
+    "unjudged_pairs": 0,
+    "extra_qrels_not_in_pool": 0,
+    "zero_idcg_queries": [
+      "UQ_001",
+      "UQ_002",
+      "UQ_004",
+      "UQ_009",
+      "UQ_015"
+    ],
+    "grade_distribution": {
+      "0": 3698,
+      "1": 294,
+      "2": 81,
+      "3": 123
+    }
+  },
+  "summary": [
+    {
+      "system": "chem_prompt_graph",
+      "relevance_threshold": "grade>=1",
+      "queries": 58,
+      "P@1": 0.517241,
+      "Hit@5": 0.724138,
+      "MRR": 0.613921,
+      "gNDCG@5": 0.312238,
+      "shared_idcg": true
+    },
+    {
+      "system": "chem_prompt_graph",
+      "relevance_threshold": "grade>=2",
+      "queries": 58,
+      "P@1": 0.275862,
+      "Hit@5": 0.62069,
+      "MRR": 0.409134,
+      "gNDCG@5": 0.312238,
+      "shared_idcg": true
+    },
+    {
+      "system": "chem_prompt_graph",
+      "relevance_threshold": "grade>=3",
+      "queries": 58,
+      "P@1": 0.189655,
+      "Hit@5": 0.534483,
+      "MRR": 0.333149,
+      "gNDCG@5": 0.312238,
+      "shared_idcg": true
+    },
+    {
+      "system": "chem_prompt_hypergraph",
+      "relevance_threshold": "grade>=1",
+      "queries": 58,
+      "P@1": 0.482759,
+      "Hit@5": 0.62069,
+      "MRR": 0.554565,
+      "gNDCG@5": 0.23294,
+      "shared_idcg": true
+    },
+    {
+      "system": "chem_prompt_hypergraph",
+      "relevance_threshold": "grade>=2",
+      "queries": 58,
+      "P@1": 0.224138,
+      "Hit@5": 0.448276,
+      "MRR": 0.319448,
+      "gNDCG@5": 0.23294,
+      "shared_idcg": true
+    },
+    {
+      "system": "chem_prompt_hypergraph",
+      "relevance_threshold": "grade>=3",
+      "queries": 58,
+      "P@1": 0.206897,
+      "Hit@5": 0.37931,
+      "MRR": 0.276916,
+      "gNDCG@5": 0.23294,
+      "shared_idcg": true
+    },
+    {
+      "system": "normalized_final",
+      "relevance_threshold": "grade>=1",
+      "queries": 58,
+      "P@1": 0.5,
+      "Hit@5": 0.775862,
+      "MRR": 0.624767,
+      "gNDCG@5": 0.387291,
+      "shared_idcg": true
+    },
+    {
+      "system": "normalized_final",
+      "relevance_threshold": "grade>=2",
+      "queries": 58,
+      "P@1": 0.327586,
+      "Hit@5": 0.672414,
+      "MRR": 0.468397,
+      "gNDCG@5": 0.387291,
+      "shared_idcg": true
+    },
+    {
+      "system": "normalized_final",
+      "relevance_threshold": "grade>=3",
+      "queries": 58,
+      "P@1": 0.189655,
+      "Hit@5": 0.568966,
+      "MRR": 0.361555,
+      "gNDCG@5": 0.387291,
+      "shared_idcg": true
+    },
+    {
+      "system": "normalized_final_no_rerank",
+      "relevance_threshold": "grade>=1",
+      "queries": 58,
+      "P@1": 0.5,
+      "Hit@5": 0.775862,
+      "MRR": 0.625246,
+      "gNDCG@5": 0.38424,
+      "shared_idcg": true
+    },
+    {
+      "system": "normalized_final_no_rerank",
+      "relevance_threshold": "grade>=2",
+      "queries": 58,
+      "P@1": 0.327586,
+      "Hit@5": 0.655172,
+      "MRR": 0.468301,
+      "gNDCG@5": 0.38424,
+      "shared_idcg": true
+    },
+    {
+      "system": "normalized_final_no_rerank",
+      "relevance_threshold": "grade>=3",
+      "queries": 58,
+      "P@1": 0.172414,
+      "Hit@5": 0.551724,
+      "MRR": 0.353249,
+      "gNDCG@5": 0.38424,
+      "shared_idcg": true
+    },
+    {
+      "system": "original_hypergraph",
+      "relevance_threshold": "grade>=1",
+      "queries": 58,
+      "P@1": 0.344828,
+      "Hit@5": 0.586207,
+      "MRR": 0.43532,
+      "gNDCG@5": 0.17788,
+      "shared_idcg": true
+    },
+    {
+      "system": "original_hypergraph",
+      "relevance_threshold": "grade>=2",
+      "queries": 58,
+      "P@1": 0.189655,
+      "Hit@5": 0.482759,
+      "MRR": 0.283206,
+      "gNDCG@5": 0.17788,
+      "shared_idcg": true
+    },
+    {
+      "system": "original_hypergraph",
+      "relevance_threshold": "grade>=3",
+      "queries": 58,
+      "P@1": 0.137931,
+      "Hit@5": 0.362069,
+      "MRR": 0.216139,
+      "gNDCG@5": 0.17788,
+      "shared_idcg": true
+    }
+  ],
+  "outputs": {
+    "summary_csv": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding\\retrieval_metrics_user_accepted\\shared_retrieval_summary.csv",
+    "per_query_csv": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding\\retrieval_metrics_user_accepted\\shared_retrieval_per_query.csv",
+    "ranked_topk_csv": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding\\retrieval_metrics_user_accepted\\shared_retrieval_ranked_topk.csv",
+    "slice_summary_csv": "C:\\Users\\19855\\Desktop\\Hyper-rag\\hyper-gragh\\outputs\\final_experiment_v1_old_embedding\\retrieval_metrics_user_accepted\\shared_retrieval_slice_summary.csv"
+  }
+}

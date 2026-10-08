@@ -1,0 +1,26 @@
+{
+  "version": "shared-qrels-final-audit-v1",
+  "created_at": "2026-10-02T17:17:23.953720+00:00",
+  "status": "completed_user_accepted_audit",
+  "pool_pairs": 4196,
+  "qrel_rows": 4196,
+  "unique_qrel_keys": 4196,
+  "missing_pool_pairs": 0,
+  "extra_qrel_pairs": 0,
+  "invalid_grade_rows": 0,
+  "duplicate_qrel_keys": 0,
+  "annotation_status": "user_accepted_audit_gold",
+  "seeded_judgments": 3875,
+  "incremental_llm_judgments": 321,
+  "audit_attempt_records": 356,
+  "audit_duplicate_success_records": 0,
+  "grade_distribution": {
+    "0": 3631,
+    "1": 318,
+    "2": 110,
+    "3": 137
+  },
+  "manual_review_reason": "User spot-checked the DeepSeek audit and confirmed no anomalies; provider successes were accepted and provider failures retained the existing frozen qrel grade.",
+  "accepted_at": "2026-10-02T17:18:52.122698+00:00",
+  "accepted_by": "user"
+}

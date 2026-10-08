@@ -1,0 +1,4 @@
+﻿group,difficulty,questions,Good Rate,Satisfactory-or-Better Rate,Macro KPC,Micro KPC,Hallucination Rate,False Abstention Rate,False Answer Rate,Unanswerable Abstention Accuracy,Citation Reference Validity,Citation Presence Rate,Citation Support Score (LLM)
+normalized_final,compositional,15,0.2,0.4667,0.4556,0.5,0.2,0.1,0.0,1.0,1.0,0.6,0.4398
+normalized_final,high_order,20,0.3,0.6,0.535,0.5309,0.2,0.1,0.0,0.0,1.0,0.9,0.55
+normalized_final,simple,5,0.2,0.2,0.2,0.1875,0.2,0.6,0.0,0.0,1.0,0.4,0.2

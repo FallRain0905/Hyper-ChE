@@ -84,7 +84,6 @@ return;
 }
 
         setLoading(true);
-        console.log('Fetching data from:', SERVER_URL, 'Database:', database);
 
         // 如果需要重置分页，则重置到第一页
         const currentVerticesPage = resetPagination ? 1 : verticesPagination.current;
@@ -94,18 +93,10 @@ return;
             const verticesUrl = `${SERVER_URL}/db/vertices?database=${encodeURIComponent(database)}&page=${currentVerticesPage}&page_size=${verticesPagination.pageSize}`;
             const hyperedgesUrl = `${SERVER_URL}/db/hyperedges?database=${encodeURIComponent(database)}&page=${currentHyperedgesPage}&page_size=${hyperedgesPagination.pageSize}`;
 
-            console.log('Making requests to:');
-            console.log('- Vertices:', verticesUrl);
-            console.log('- Hyperedges:', hyperedgesUrl);
-
             const [verticesRes, hyperedgesRes] = await Promise.all([
                 fetch(verticesUrl),
                 fetch(hyperedgesUrl)
             ]);
-
-            console.log('Response status:');
-            console.log('- Vertices:', verticesRes.status, verticesRes.ok);
-            console.log('- Hyperedges:', hyperedgesRes.status, hyperedgesRes.ok);
 
             if (!verticesRes.ok) {
                 throw new Error(`Vertices API failed: ${verticesRes.status} ${verticesRes.statusText}`);
@@ -116,10 +107,6 @@ return;
 
             const verticesData = await verticesRes.json();
             const hyperedgesData = await hyperedgesRes.json();
-
-            console.log('Data received:');
-            console.log('- Vertices:', verticesData);
-            console.log('- Hyperedges:', hyperedgesData);
 
             // 处理vertices数据
             if (verticesData.data) {

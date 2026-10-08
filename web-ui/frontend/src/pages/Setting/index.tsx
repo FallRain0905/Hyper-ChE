@@ -31,8 +31,10 @@ import {
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import LanguageSelector from '../../components/LanguageSelector'
+import RuntimeSettingsPanel from '@/components/RuntimeSettingsPanel'
 import { SERVER_URL } from '../../utils'
 import { authStore } from '../../store/auth'
+import { PUBLIC_DEMO } from '../../config/publicDemo'
 
 const { Title, Text } = Typography
 const { Option } = Select
@@ -47,7 +49,6 @@ const Setting: React.FC = () => {
   const [availableDatabases, setAvailableDatabases] = useState<any[]>([])
   const [testResults, setTestResults] = useState<any>({})
   const [isCustomEmbedding, setIsCustomEmbedding] = useState(false)
-  const [availableDomains, setAvailableDomains] = useState<any[]>([])
   const [userApiKeys, setUserApiKeys] = useState<any[]>([])
   const [userKeyLoading, setUserKeyLoading] = useState(false)
   const [quotaConfig, setQuotaConfig] = useState<any>({
@@ -80,9 +81,8 @@ const Setting: React.FC = () => {
     embeddingDim: 1536,
     embeddingBaseUrl: '', // 嵌入模型的API地址
     embeddingApiKey: '', // 嵌入模型的API密钥
-    // 新增Mode配置，默认显示所有modes（包含Cog-RAG）
-    availableModes: ['llm', 'naive', 'graph', 'hyper', 'hyper-lite', 'cog', 'cog-hybrid', 'cog-entity', 'cog-theme'],
-    hyperrag_domain: 'default'
+    // 聊天界面侧边栏可显示的查询模式
+    availableModes: ['llm', 'naive', 'graph', 'hyper', 'hyper-lite']
   }
 
   // 可用的查询模式配置
@@ -99,11 +99,6 @@ const Setting: React.FC = () => {
       description: '轻量级超图检索增强生成',
       system: 'hyperrag'
     },
-    // Cog-RAG 模式
-    { value: 'cog', label: 'Cog-RAG', icon: '🧠', description: '双超图认知检索（实体+主题）', system: 'cograg' },
-    { value: 'cog-hybrid', label: 'Cog-Hybrid', icon: '🔄', description: '混合模式：结合实体和主题检索', system: 'cograg' },
-    { value: 'cog-entity', label: 'Cog-Entity', icon: '🔷', description: '仅使用实体超图检索', system: 'cograg' },
-    { value: 'cog-theme', label: 'Cog-Theme', icon: '🎨', description: '仅使用主题超图检索', system: 'cograg' }
   ]
 
   // 模型提供商配置
@@ -339,13 +334,11 @@ const Setting: React.FC = () => {
     try {
       // 首先尝试从localStorage加载Mode配置
       const localModeSettings = localStorage.getItem('hyperrag_mode_settings')
-      console.log('📥 [Settings] 从localStorage加载Mode设置:', localModeSettings) // 调试日志
 
       let modeSettings = {}
       if (localModeSettings) {
         try {
           modeSettings = JSON.parse(localModeSettings)
-          console.log('📊 [Settings] 解析后的Mode设置:', modeSettings) // 调试日志
         } catch (e) {
           console.error('解析本地Mode设置失败:', e)
         }
@@ -354,7 +347,6 @@ const Setting: React.FC = () => {
       const response = await fetch(`${SERVER_URL}/settings`)
       if (response.ok) {
         const settings = await response.json()
-        console.log('📦 [Settings] 从后端获取的原始设置:', JSON.stringify(settings, null, 2))
 
         // 处理自定义嵌入模型
         let embeddingModel = settings.embeddingModel || defaultSettings.embeddingModel
@@ -387,14 +379,11 @@ const Setting: React.FC = () => {
           customEmbeddingModel,
           llmProviders: formatProvidersForForm(settings.llmProviders || [])
         }
-        console.log('🎯 [Settings] 最终设置的表单值:', JSON.stringify(finalSettings, null, 2)) // 调试日志
 
         form.setFieldsValue(finalSettings)
-        console.log('✅ [Settings] 表单值已设置')
       } else {
         // 如果获取失败，使用默认设置加上本地Mode设置
         const finalSettings = { ...defaultSettings, ...modeSettings }
-        console.log('🎯 [Settings] 最终设置的表单值 (API失败):', finalSettings) // 调试日志
 
         form.setFieldsValue(finalSettings)
       }
@@ -402,19 +391,16 @@ const Setting: React.FC = () => {
       console.error('加载设置失败:', error)
       // 尝试加载本地Mode设置
       const localModeSettings = localStorage.getItem('hyperrag_mode_settings')
-      console.log('📥 [Settings] 从localStorage加载Mode设置 (异常):', localModeSettings) // 调试日志
 
       let modeSettings = {}
       if (localModeSettings) {
         try {
           modeSettings = JSON.parse(localModeSettings)
-          console.log('📊 [Settings] 解析后的Mode设置 (异常):', modeSettings) // 调试日志
         } catch (e) {
           console.error('解析本地Mode设置失败:', e)
         }
       }
       const finalSettings = { ...defaultSettings, ...modeSettings }
-      console.log('🎯 [Settings] 最终设置的表单值 (异常):', finalSettings) // 调试日志
       form.setFieldsValue(finalSettings)
       setIsCustomEmbedding(false) // 重置自定义状态
       message.warning(t('settings.load_failed'))
@@ -435,24 +421,7 @@ const Setting: React.FC = () => {
       console.error('加载数据库列表失败:', error)
       // 如果API不存在，提供一些默认选项
       setAvailableDatabases([
-        { name: 'example', description: 'HyperChE 化工示例库' },
-        { name: 'case1', description: '液流电池示例库' }
-      ])
-    }
-  }
-
-  // 加载可用领域列表
-  const loadDomains = async () => {
-    try {
-      const response = await fetch(`${SERVER_URL}/domains`)
-      if (response.ok) {
-        const data = await response.json()
-        setAvailableDomains(data.domains || [])
-      }
-    } catch (error) {
-      console.error('加载领域列表失败:', error)
-      setAvailableDomains([
-        { name: 'default', description: '通用领域（分隔符格式）', output_format: 'delimiter' }
+        { name: PUBLIC_DEMO.database, description: PUBLIC_DEMO.name }
       ])
     }
   }
@@ -464,16 +433,10 @@ const Setting: React.FC = () => {
       // 分离Mode设置和其他设置
       const { availableModes, customEmbeddingModel, ...otherSettings } = values
 
-      console.log('💾 保存设置 - 完整表单值:', JSON.stringify(values, null, 2)) // 调试日志
-      console.log('💾 保存设置 - availableModes:', availableModes) // 调试日志
-      console.log('💾 保存设置 - availableModes 类型:', typeof availableModes) // 调试日志
-      console.log('💾 保存设置 - otherSettings:', JSON.stringify(otherSettings, null, 2)) // 调试日志
-
       // 处理自定义嵌入模型
       let finalEmbeddingModel = otherSettings.embeddingModel
       if (otherSettings.embeddingModel === 'custom' && customEmbeddingModel) {
         finalEmbeddingModel = customEmbeddingModel
-        console.log('💾 使用自定义嵌入模型:', finalEmbeddingModel)
       }
 
       const settingsToSave = {
@@ -482,16 +445,12 @@ const Setting: React.FC = () => {
         llmProviders: formatProvidersForSave(otherSettings.llmProviders || [])
       }
 
-      console.log('💾 准备保存的完整设置:', JSON.stringify(settingsToSave, null, 2))
-
       // 确保 availableModes 始终是数组
       const normalizedModes = Array.isArray(availableModes) ? availableModes : [availableModes]
-      console.log('💾 保存设置 - normalizedModes:', normalizedModes) // 调试日志
 
       // Mode设置保存到localStorage
       const modeSettings = { availableModes: normalizedModes }
       localStorage.setItem('hyperrag_mode_settings', JSON.stringify(modeSettings))
-      console.log('✅ 已保存到localStorage hyperrag_mode_settings') // 调试日志
 
       const response = await fetch(`${SERVER_URL}/settings`, {
         method: 'POST',
@@ -788,7 +747,6 @@ const Setting: React.FC = () => {
   useEffect(() => {
     loadSettings()
     loadDatabases()
-    loadDomains()
     authStore.refreshQuota()
     loadUserApiKeys()
     loadQuotaConfig()
@@ -796,7 +754,9 @@ const Setting: React.FC = () => {
 
   return (
     <div className="p-6">
-      <Card className="border-gray-200 rounded-xl">
+      <div className="mx-auto max-w-7xl">
+        <RuntimeSettingsPanel />
+        <Card className="border-gray-200 rounded-3xl shadow-sm">
         <div className="mb-4">
           <div className="flex items-center text-2xl font-bold">
             <SettingOutlined style={{ marginRight: '8px' }} />
@@ -1406,51 +1366,6 @@ const Setting: React.FC = () => {
             />
           </Card>
 
-          {/* 嵌入领域配置区块 */}
-          <Card
-            title={
-              <span>
-                <AppstoreOutlined style={{ marginRight: '8px' }} />
-                嵌入领域配置
-              </span>
-            }
-            style={adminOnlyStyle}
-          >
-            <Alert
-              message="嵌入领域配置"
-              description="选择文档嵌入时使用的知识提取领域。不同领域使用不同的实体类型、关系类型和输出格式。更换领域后需要清空数据库重新嵌入文档。"
-              type="info"
-              showIcon
-              style={{ marginBottom: '24px' }}
-            />
-            <Form.Item
-              name="hyperrag_domain"
-              label="嵌入领域"
-              extra="选择文档嵌入时使用的知识提取领域"
-            >
-              <Select placeholder="选择嵌入领域">
-                {availableDomains.map(domain => (
-                  <Option key={domain.name} value={domain.name}>
-                    <div>
-                      <div style={{ fontWeight: 'bold' }}>
-                        {domain.name === 'default' ? '通用领域 (Default)' : domain.name}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#666' }}>
-                        {domain.description || '无描述'} | 输出格式: {domain.output_format}
-                      </div>
-                    </div>
-                  </Option>
-                ))}
-              </Select>
-            </Form.Item>
-            <Alert
-              message="注意"
-              description="切换领域后，已有的嵌入数据不会自动更新。建议新建数据库并用新领域重新嵌入文档。"
-              type="warning"
-              showIcon
-            />
-          </Card>
-
           {/* Mode配置区块 */}
           <Card
             title={
@@ -1510,40 +1425,6 @@ const Setting: React.FC = () => {
                   </Row>
                 </div>
 
-                {/* Cog-RAG 系统分组 */}
-                <div>
-                  <div style={{
-                    fontSize: '14px',
-                    fontWeight: 'bold',
-                    color: '#722ed1',
-                    marginBottom: '12px',
-                    padding: '8px 12px',
-                    background: '#f9f0ff',
-                    borderRadius: '4px',
-                    borderLeft: '3px solid #722ed1'
-                  }}>
-                    Cog-RAG 系统
-                  </div>
-                  <Row gutter={[16, 16]}>
-                    {queryModes.filter(m => m.system === 'cograg').map(mode => (
-                      <Col span={12} key={mode.value}>
-                        <Card size="small" style={{ height: '100%' }}>
-                          <Checkbox value={mode.value} style={{ width: '100%' }}>
-                            <div style={{ marginLeft: '8px' }}>
-                              <div style={{ fontWeight: 'bold', fontSize: '14px' }}>
-                                <span style={{ marginRight: '6px' }}>{mode.icon}</span>
-                                {mode.label}
-                              </div>
-                              <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                                {mode.description}
-                              </div>
-                            </div>
-                          </Checkbox>
-                        </Card>
-                      </Col>
-                    ))}
-                  </Row>
-                </div>
               </Checkbox.Group>
             </Form.Item>
           </Card>
@@ -1622,6 +1503,7 @@ const Setting: React.FC = () => {
           </Form.Item>
         </Form>
       </Card>
+      </div>
     </div>
   )
 }

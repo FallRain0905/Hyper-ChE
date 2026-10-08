@@ -1,0 +1,14 @@
+{
+  "version": "deepseek-final-audit-user-acceptance-v1",
+  "accepted_at": "2026-10-02T17:15:34.190493+00:00",
+  "status": "accepted_after_user_spot_check",
+  "qrels": {
+    "accepted_provider_grade": 4175,
+    "accepted_existing_grade": 21
+  },
+  "atomic_expected_queries": 58,
+  "provider": "deepseek-v4.1-flash",
+  "endpoint_count": 30,
+  "concurrency": 30,
+  "note": "User confirmed no anomalies; no further provider calls are required."
+}

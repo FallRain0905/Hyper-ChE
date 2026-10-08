@@ -1,0 +1,49 @@
+{
+  "experiment_mode": "hyper_final",
+  "query_mode": "hyper",
+  "prompt_profile": "chemistry",
+  "domain": "flow_battery",
+  "effective_domain": "flow_battery",
+  "enable_one_pass_extraction": true,
+  "enable_entity_normalization": true,
+  "enable_measurement_instances": true,
+  "enable_efu_repair": false,
+  "enable_hybrid_rerank": true,
+  "index_profile": "dual_concat",
+  "corpus_id": "hyper_final_posthoc_v1",
+  "cache_dir": "C:\\Users\\19855\\Desktop\\Hyper-rag\\real_flow_80_chunk1000_v3\\hyper_final_posthoc_v1",
+  "timestamp": "2026-10-01T16:33:34Z",
+  "input": "C:\\Users\\19855\\Desktop\\case1\\mineru_output\\all_markdown",
+  "doc_id_prefix": "RFB",
+  "doc_start": 1,
+  "doc_end": 60,
+  "resume": true,
+  "corpus_manifest_path": "C:\\Users\\19855\\Desktop\\Hyper-rag\\real_flow_80_chunk1000_v3\\hyper_final_posthoc_v1\\corpus_manifest.jsonl",
+  "build_progress_path": "C:\\Users\\19855\\Desktop\\Hyper-rag\\real_flow_80_chunk1000_v3\\hyper_final_posthoc_v1\\build_progress.jsonl",
+  "llm": {
+    "model": "Qwen/Qwen3.5-35B-A3B",
+    "base_url": "https://api.siliconflow.cn/v1",
+    "api_key_count": 15
+  },
+  "embedding": {
+    "model": "Qwen/Qwen3-Embedding-4B",
+    "base_url": "https://api.siliconflow.cn/v1",
+    "embedding_dim": 2560,
+    "api_key_count": 5
+  },
+  "chunk_size": 1000,
+  "chunk_overlap": null,
+  "max_entities_per_chunk": 40,
+  "entity_extract_max_gleaning": 0,
+  "parent_cache": "C:\\Users\\19855\\Desktop\\Hyper-rag\\real_flow_80_chunk1000_v3\\hyper_chem_prompt",
+  "normalization_cache": "C:\\Users\\19855\\Desktop\\Hyper-rag\\real_flow_80_chunk1000_v3\\hyper_norm_posthoc_v1",
+  "normalization_version": "final-posthoc-v1",
+  "embedding_model": "Qwen/Qwen3-Embedding-4B",
+  "embedding_dim": 2560,
+  "embedding_provenance": {
+    "chunks": "copied unchanged from chemistry cache",
+    "entities": "Qwen/Qwen3-Embedding-4B",
+    "relationships": "Qwen/Qwen3-Embedding-4B"
+  },
+  "measurement_value_source": "chunk-local cached extraction; ambiguous values preserved unsplit"
+}

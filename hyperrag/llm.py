@@ -22,6 +22,7 @@ from tenacity import (
     retry,
     stop_after_attempt,
     wait_exponential,
+    retry_if_exception,
     retry_if_exception_type,
 )
 from pydantic import BaseModel, Field
@@ -31,11 +32,37 @@ from .utils import compute_args_hash, logger, wrap_embedding_func_with_attrs
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+def _is_retryable_openai_error(error: BaseException) -> bool:
+    """Retry transient provider failures, but not configuration 4xx errors."""
+    status_code = getattr(error, "status_code", None)
+    if status_code is not None and 400 <= int(status_code) < 500:
+        return False
+    return isinstance(error, (RateLimitError, APIConnectionError, Timeout, APIStatusError))
+
+
+def _normalize_openai_base_url(base_url: str | None, resource: str) -> str | None:
+    """Normalize endpoint settings before the OpenAI SDK appends its resource path."""
+    if not base_url:
+        return base_url
+    value = str(base_url).strip().rstrip("/")
+    suffixes = {
+        "chat": ("/chat/completions", "/completions"),
+        "embedding": ("/embeddings", "/embedding"),
+    }
+    for suffix in suffixes.get(resource, ()):
+        if value.lower().endswith(suffix):
+            value = value[: -len(suffix)].rstrip("/")
+            break
+    return value
+
 
 @retry(
-    stop=stop_after_attempt(1),  # 只重试1次，避免长时间等待
-    wait=wait_exponential(multiplier=2, min=10, max=60),
-    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout, APIStatusError)),
+    # The experiment builder already retries across its API-key pool. Keep this
+    # inner layer single-attempt by default so a timed-out key is handed back to
+    # the pool immediately instead of being retried repeatedly with the same key.
+    stop=stop_after_attempt(int(os.getenv("OPENAI_LLM_RETRY_ATTEMPTS", "1"))),
+    wait=wait_exponential(multiplier=2, min=10, max=120),
+    retry=retry_if_exception(_is_retryable_openai_error),
 )
 async def openai_complete_if_cache(
     model,
@@ -46,21 +73,26 @@ async def openai_complete_if_cache(
     api_key=None,
     timeout: float = 600.0,  # 增加到600秒（10分钟）
     **kwargs,
-) -> str:
+) -> str | dict[str, Any]:
+    client_kwargs = {"timeout": timeout, "max_retries": 0}
+    if base_url is not None:
+        client_kwargs["base_url"] = _normalize_openai_base_url(base_url, "chat")
     if api_key:
-        os.environ["OPENAI_API_KEY"] = api_key
-
-    openai_async_client = (
-        AsyncOpenAI(timeout=timeout) if base_url is None else AsyncOpenAI(base_url=base_url, timeout=timeout)
-    )
+        client_kwargs["api_key"] = api_key
+    openai_async_client = AsyncOpenAI(**client_kwargs)
     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
     skip_cache = kwargs.pop("skip_cache", False)
+    force_cache_refresh = kwargs.pop("force_cache_refresh", False)
+    # Callers that need to diagnose provider-side truncation or reasoning
+    # budget exhaustion can request the completion metadata.  Keep the
+    # historical string return value as the default for all existing callers.
+    return_metadata = kwargs.pop("return_metadata", False)
     messages = []
     if system_prompt is not None:
         messages.append({"role": "system", "content": system_prompt})
     messages.extend(history_messages)
     messages.append({"role": "user", "content": prompt})
-    if hashing_kv is not None and not skip_cache:
+    if hashing_kv is not None and not skip_cache and not force_cache_refresh:
         args_hash = compute_args_hash(model, messages)
         if_cache_return = await hashing_kv.get_by_id(args_hash)
         if if_cache_return is not None:
@@ -69,17 +101,39 @@ async def openai_complete_if_cache(
                 f"LLM cache hit: model={model}, prompt_chars={len(prompt)}, "
                 f"response_chars={len(cached_return)}"
             )
+            if return_metadata:
+                return {
+                    "content": cached_return,
+                    "finish_reason": "cache_hit",
+                    "reasoning_content": "",
+                    "usage": None,
+                }
             return if_cache_return["return"]
 
     response = await openai_async_client.chat.completions.create(
         model=model, messages=messages, **kwargs
     )
 
+    choice = response.choices[0]
+    message = choice.message
+    content = message.content or ""
     if hashing_kv is not None and not skip_cache:
+        if force_cache_refresh:
+            args_hash = compute_args_hash(model, messages)
         await hashing_kv.upsert(
-            {args_hash: {"return": response.choices[0].message.content, "model": model}}
+            {args_hash: {"return": content, "model": model}}
         )
-    return response.choices[0].message.content
+    if return_metadata:
+        usage = getattr(response, "usage", None)
+        if usage is not None and hasattr(usage, "model_dump"):
+            usage = usage.model_dump()
+        return {
+            "content": content,
+            "finish_reason": getattr(choice, "finish_reason", None),
+            "reasoning_content": getattr(message, "reasoning_content", "") or "",
+            "usage": usage,
+        }
+    return content
 
 async def openai_complete_stream_if_cache(
     model,
@@ -97,12 +151,12 @@ async def openai_complete_stream_if_cache(
     - 命中缓存：按 chunk_size 分块 yield
     - 不命中：stream=True 逐 token yield，并在结束后写缓存
     """
+    client_kwargs = {"timeout": timeout}
+    if base_url is not None:
+        client_kwargs["base_url"] = _normalize_openai_base_url(base_url, "chat")
     if api_key:
-        os.environ["OPENAI_API_KEY"] = api_key
-
-    openai_async_client = (
-        AsyncOpenAI(timeout=timeout) if base_url is None else AsyncOpenAI(base_url=base_url, timeout=timeout)
-    )
+        client_kwargs["api_key"] = api_key
+    openai_async_client = AsyncOpenAI(**client_kwargs)
 
     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
 
@@ -148,7 +202,7 @@ async def openai_complete_stream_if_cache(
 @retry(
     stop=stop_after_attempt(1),
     wait=wait_exponential(multiplier=2, min=10, max=60),
-    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout, APIStatusError)),
+    retry=retry_if_exception(_is_retryable_openai_error),
 )
 async def azure_openai_complete_if_cache(
     model,
@@ -337,9 +391,11 @@ async def bedrock_complete(
 
 @wrap_embedding_func_with_attrs(embedding_dim=2048, max_token_size=8192)
 @retry(
-    stop=stop_after_attempt(3),
+    # Key-pool retrying is owned by build_experiment_cache.py. Avoid multiplying
+    # retries here and in the OpenAI SDK for every embedding request.
+    stop=stop_after_attempt(int(os.getenv("OPENAI_EMBEDDING_RETRY_ATTEMPTS", "1"))),
     wait=wait_exponential(multiplier=1, min=4, max=60),
-    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout, APIStatusError)),
+    retry=retry_if_exception(_is_retryable_openai_error),
 )
 async def openai_embedding(
     texts: list[str],
@@ -347,16 +403,18 @@ async def openai_embedding(
     base_url: str = None,
     api_key: str = None,
     timeout: float = 60.0,
+    dimensions: int | None = None,
 ) -> np.ndarray:
+    client_kwargs = {"timeout": timeout, "max_retries": 0}
+    if base_url is not None:
+        client_kwargs["base_url"] = _normalize_openai_base_url(base_url, "embedding")
     if api_key:
-        os.environ["OPENAI_API_KEY"] = api_key
-
-    openai_async_client = (
-        AsyncOpenAI(timeout=timeout) if base_url is None else AsyncOpenAI(base_url=base_url, timeout=timeout)
-    )
-    response = await openai_async_client.embeddings.create(
-        model=model, input=texts, encoding_format="float"
-    )
+        client_kwargs["api_key"] = api_key
+    openai_async_client = AsyncOpenAI(**client_kwargs)
+    request = {"model": model, "input": texts, "encoding_format": "float"}
+    if dimensions is not None:
+        request["dimensions"] = int(dimensions)
+    response = await openai_async_client.embeddings.create(**request)
     return np.array([dp.embedding for dp in response.data])
 
 
@@ -364,7 +422,7 @@ async def openai_embedding(
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout, APIStatusError)),
+    retry=retry_if_exception(_is_retryable_openai_error),
 )
 async def azure_openai_embedding(
     texts: list[str],
@@ -394,7 +452,7 @@ async def azure_openai_embedding(
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=60),
-    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout, APIStatusError)),
+    retry=retry_if_exception(_is_retryable_openai_error),
 )
 async def siliconcloud_embedding(
     texts: list[str],
@@ -433,7 +491,7 @@ async def siliconcloud_embedding(
 # @retry(
 #     stop=stop_after_attempt(3),
 #     wait=wait_exponential(multiplier=1, min=4, max=10),
-#     retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout, APIStatusError)),  # TODO: fix exceptions
+#     retry=retry_if_exception(_is_retryable_openai_error),  # TODO: fix exceptions
 # )
 async def bedrock_embedding(
     texts: list[str],

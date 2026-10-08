@@ -5,13 +5,16 @@ import Home from '@/pages/Home'
 import Landing from '@/pages/Landing'
 import WhyHypergraph from '@/pages/Landing/WhyHypergraph'
 import TryDemo from '@/pages/Landing/TryDemo'
-import FlowBatteryDemo from '@/pages/Landing/FlowBatteryDemo'
-import PFASDemo from '@/pages/Landing/PFASDemo'
 import Files from '@/pages/Files'
 import Graph from '@/pages/Hyper/Graph'
 import FullGraph from '@/pages/Hyper/FullGraph'
 import HyperDB from '@/pages/Hyper/DB'
 import Setting from '@/pages/Setting'
+import Admin from '@/pages/Admin'
+import DocumentConvert from '@/pages/DocumentConvert'
+import PromptStudio from '@/pages/Prompts'
+import Providers from '@/pages/Providers'
+import { PUBLIC_DEMO } from '@/config/publicDemo'
 import {
   DatabaseOutlined,
   DeploymentUnitOutlined,
@@ -19,7 +22,10 @@ import {
   ProjectOutlined,
   QuestionCircleOutlined,
   SettingOutlined,
+  SafetyCertificateOutlined,
   SmileFilled,
+  ApiOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons'
 import { Navigate } from 'react-router-dom'
 
@@ -33,16 +39,16 @@ export const routers = [
     element: <WhyHypergraph />,
   },
   {
-    path: '/try',
+    path: PUBLIC_DEMO.route,
     element: <TryDemo />,
   },
   {
-    path: '/demo/flow-battery',
-    element: <FlowBatteryDemo />,
+    path: PUBLIC_DEMO.legacyRoute,
+    element: <Navigate replace to={PUBLIC_DEMO.route} />,
   },
   {
     path: '/demo/pfas',
-    element: <PFASDemo />,
+    element: <Navigate replace to={PUBLIC_DEMO.route} />,
   },
   {
     path: '/app',
@@ -85,16 +91,34 @@ export const routers = [
         element: <Files />,
       },
       {
-        path: '/app/API',
-        name: 'API 文档',
-        hideInMenu: true,
-        element: <Navigate replace to="/app/Hyper/chat" />,
+        path: '/app/convert',
+        name: '文档转换',
+        icon: <FileAddOutlined />,
+        element: <DocumentConvert />,
+      },
+      {
+        path: '/app/prompts',
+        name: '领域提示词',
+        icon: <FileTextOutlined />,
+        element: <PromptStudio />,
+      },
+      {
+        path: '/app/providers',
+        name: 'API 渠道',
+        icon: <ApiOutlined />,
+        element: <Providers />,
       },
       {
         path: '/app/Setting',
         name: '系统设置',
         icon: <SettingOutlined />,
         element: <Setting />,
+      },
+      {
+        path: '/app/admin',
+        name: '管理员后台',
+        icon: <SafetyCertificateOutlined />,
+        element: <Admin />,
       },
     ],
   },
@@ -104,6 +128,10 @@ export const routers = [
   { path: '/Hyper/FullGraph', element: <Navigate replace to="/app/Hyper/FullGraph" /> },
   { path: '/Hyper/files', element: <Navigate replace to="/app/Hyper/files" /> },
   { path: '/API', element: <Navigate replace to="/app/Hyper/chat" /> },
+  { path: '/convert', element: <Navigate replace to="/app/convert" /> },
+  { path: '/prompts', element: <Navigate replace to="/app/prompts" /> },
+  { path: '/providers', element: <Navigate replace to="/app/providers" /> },
   { path: '/Setting', element: <Navigate replace to="/app/Setting" /> },
+  { path: '/admin', element: <Navigate replace to="/app/admin" /> },
   { path: '*', element: <NotFoundPage /> },
 ]

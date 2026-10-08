@@ -214,3 +214,76 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* HyperChE motion system */
+@keyframes hyperche-float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(1deg); }
+}
+
+@keyframes hyperche-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(28px, -18px, 0) scale(1.08); }
+}
+
+@keyframes hyperche-drift-reverse {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-26px, 20px, 0) scale(.94); }
+}
+
+@keyframes hyperche-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(37 99 235 / 0); }
+  50% { box-shadow: 0 0 0 12px rgb(37 99 235 / .08); }
+}
+
+@keyframes hyperche-node {
+  0%, 100% { transform: translate(-50%, -50%) translateY(0); }
+  50% { transform: translate(-50%, -50%) translateY(-5px); }
+}
+
+@keyframes hyperche-reveal {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes hyperche-shimmer {
+  from { background-position: 200% 50%; }
+  to { background-position: -200% 50%; }
+}
+
+.hyperche-grid {
+  background-image: radial-gradient(circle at center, rgb(148 163 184 / .38) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: linear-gradient(to bottom, black, transparent 88%);
+}
+
+.hyperche-card {
+  transition: transform .28s ease, box-shadow .28s ease, border-color .28s ease;
+}
+
+.hyperche-card:hover {
+  border-color: rgb(203 213 225);
+  box-shadow: 0 18px 45px rgb(15 23 42 / .07);
+}
+
+.hyperche-float { animation: hyperche-float 5s ease-in-out infinite; }
+.hyperche-drift { animation: hyperche-drift 13s ease-in-out infinite; }
+.hyperche-drift-reverse { animation: hyperche-drift-reverse 15s ease-in-out infinite; }
+.hyperche-pulse { animation: hyperche-pulse 3.5s ease-in-out infinite; }
+.hyperche-node { animation: hyperche-node 4.8s ease-in-out infinite; }
+.hyperche-reveal { animation: hyperche-reveal .7s cubic-bezier(.2,.8,.2,1) both; }
+.hyperche-reveal-delayed { animation: hyperche-reveal .8s .14s cubic-bezier(.2,.8,.2,1) both; }
+.hyperche-shimmer { background-size: 200% 100%; animation: hyperche-shimmer 4s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hyperche-float,
+  .hyperche-drift,
+  .hyperche-drift-reverse,
+  .hyperche-pulse,
+  .hyperche-node,
+  .hyperche-reveal,
+  .hyperche-reveal-delayed,
+  .hyperche-shimmer {
+    animation: none !important;
+  }
+}

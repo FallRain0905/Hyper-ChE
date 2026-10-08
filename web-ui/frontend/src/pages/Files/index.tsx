@@ -468,7 +468,7 @@ const Files: React.FC = () => {
           </div>
           <div className="flex items-center gap-3">
             <span className="px-2.5 py-1 text-xs font-medium bg-blue-50 text-blue-600 rounded-full">
-              {activeKB.rag_system === 'cograg' ? 'Cog-RAG' : 'HyperRAG'}
+              {'HyperRAG'}
             </span>
             <span className="px-2.5 py-1 text-xs font-medium bg-gray-100 text-gray-500 rounded-full">
               {activeKB.domain}
@@ -627,7 +627,7 @@ const Files: React.FC = () => {
                 </div>
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">RAG 系统</label>
-                  <div className="text-sm text-gray-900">{activeKB.rag_system === 'cograg' ? 'Cog-RAG' : 'HyperRAG'}</div>
+                  <div className="text-sm text-gray-900">{'HyperRAG'}</div>
                 </div>
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">领域</label>
@@ -729,7 +729,7 @@ const Files: React.FC = () => {
                   <h3 className="font-medium text-gray-900 truncate group-hover:text-blue-600 transition-colors">{kb.name}</h3>
                   {kb.description && <p className="text-sm text-gray-500 mt-1 line-clamp-2">{kb.description}</p>}
                   <div className="flex items-center gap-2 mt-2">
-                    <span className="px-2 py-0.5 text-xs bg-blue-50 text-blue-600 rounded-full">{kb.rag_system === 'cograg' ? 'Cog-RAG' : 'HyperRAG'}</span>
+                    <span className="px-2 py-0.5 text-xs bg-blue-50 text-blue-600 rounded-full">{'HyperRAG'}</span>
                     <span className="text-xs text-gray-400">{kb.stats?.file_count || 0} 个文档</span>
                     {kb.stats && kb.stats.embedded_count > 0 && (
                       <span className="text-xs text-green-500">{kb.stats.embedded_count} 已嵌入</span>
@@ -775,7 +775,6 @@ const Files: React.FC = () => {
               <label className="text-sm text-gray-700 block mb-1">RAG 系统</label>
               <Select value={newKBRagSystem} onChange={setNewKBRagSystem} style={{ width: '100%' }}>
                 <Select.Option value="hyperrag">HyperRAG</Select.Option>
-                <Select.Option value="cograg">Cog-RAG</Select.Option>
               </Select>
             </div>
             <div>

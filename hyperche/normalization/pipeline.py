@@ -13,6 +13,7 @@ from .condition_normalizer import ConditionNormalizer
 from .entity_normalizer import EntityNormalizer, NormalizationResult
 from .llm_normalizer import LLMNormalizationDecision, judge_with_llm
 from .negative_rules import NegativeRules
+from .text_normalizer import normalize_text_for_match
 
 
 CONFIG_ROOT = Path(__file__).resolve().parents[2] / "configs" / "normalization"
@@ -276,11 +277,32 @@ async def _apply_llm_judgement(
         return results
 
     updated = []
+    judgment_cache: dict[tuple[Any, ...], NormalizationResult] = {}
+    cache_hits = 0
+    cache_misses = 0
     for index, (entity, result) in enumerate(zip(entities, results)):
         should_judge = result.decision == "NEED_REVIEW" and bool(result.candidates) and not result.blocked_reason
         if not should_judge:
             updated.append(result)
             continue
+
+        cache_key = _llm_judgement_cache_key(result)
+        cached = judgment_cache.get(cache_key)
+        if cached is not None:
+            cache_hits += 1
+            reused = _clone_cached_llm_result(cached, result)
+            logger.info(
+                "[%s] Step 1N.4 LLM cache hit entity[%s]: mention=%r decision=%s target=%s",
+                chunk_key,
+                index,
+                result.original_name,
+                reused.decision,
+                reused.canonical_id,
+            )
+            updated.append(reused)
+            continue
+
+        cache_misses += 1
 
         payload = {
             "mention": result.original_name,
@@ -313,7 +335,9 @@ async def _apply_llm_judgement(
                 decision.need_review,
                 decision.reason,
             )
-            updated.append(_apply_llm_decision(result, decision, normalizer, negative_rules))
+            judged = _apply_llm_decision(result, decision, normalizer, negative_rules)
+            judgment_cache[cache_key] = judged
+            updated.append(judged)
         except Exception as e:
             logger.warning(
                 "[%s] Step 1N.4 LLM failed entity[%s]: mention=%r error=%s: %s",
@@ -324,7 +348,49 @@ async def _apply_llm_judgement(
                 e,
             )
             updated.append(result)
+    if cache_hits or cache_misses:
+        logger.info(
+            "[%s] Step 1N.4 LLM judgement cache summary: misses=%s, hits=%s, unique_judgements=%s",
+            chunk_key,
+            cache_misses,
+            cache_hits,
+            len(judgment_cache),
+        )
     return updated
+
+
+def _llm_judgement_cache_key(result: NormalizationResult) -> tuple[Any, ...]:
+    """Cache repeated review decisions inside one chunk.
+
+    Tables often repeat the same metric names many times. The initial fuzzy
+    candidates are deterministic, so the same mention/type/candidate set can
+    safely reuse the same conservative LLM normalization decision within the
+    current chunk context.
+    """
+
+    candidate_ids = tuple(str(item.get("canonical_id") or "") for item in (result.candidates or [])[:5])
+    candidate_scores = tuple(round(float(item.get("score") or 0.0), 4) for item in (result.candidates or [])[:5])
+    return (
+        normalize_text_for_match(result.original_name or ""),
+        str(result.entity_type or "").upper(),
+        result.semantic_group or "",
+        candidate_ids,
+        candidate_scores,
+    )
+
+
+def _clone_cached_llm_result(cached: NormalizationResult, current: NormalizationResult) -> NormalizationResult:
+    data = cached.to_dict()
+    data.update(
+        {
+            "original_entity_id": current.original_entity_id,
+            "original_name": current.original_name,
+            "raw_mention": current.raw_mention or current.original_name,
+            "candidates": current.candidates,
+            "reason": f"{cached.reason} [reused from same-chunk LLM normalization cache]",
+        }
+    )
+    return NormalizationResult(**data)
 
 
 def _apply_llm_decision(
@@ -670,4 +736,3 @@ def _candidate_summary(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
         }
         for item in candidates[:5]
     ]
-

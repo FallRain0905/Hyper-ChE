@@ -15,6 +15,7 @@ import {
 import RetrievalHyperGraph from '@/components/RetrievalHyperGraph'
 import RetrievalInfo from '@/components/RetrievalInfo'
 import { SERVER_URL } from '@/utils'
+import { PUBLIC_DEMO, type PublicDemoStatus } from '@/config/publicDemo'
 
 type DemoMessage = {
   id: string
@@ -30,15 +31,6 @@ type SseFrame = {
   event: string
   data: string
 }
-
-const suggestedQuestions = [
-  '比较 Nafion 117、SPEEK/APK、SPI-DH-6O 和 SPTPC-2.59 在 CE、VE、EE、电流密度、交叉渗透、溶胀和成本上的差异。',
-  '为什么 SPTPC-2.59 能在 280 mA cm^-2 下保持约 80% EE？多孔膜策略还存在哪些孔径控制和耐久性风险？',
-  'B/N 共掺杂的 BMC-C 电极为什么比 MC-C 和 C-C 更适合高电流密度 VRFB？请结合 200 与 500 mA cm^-2 的性能指标解释。',
-  '在铁铬液流电池中，Bi@C 和 glycine 如何共同影响 Cr3+/Cr2+ 动力学与析氢副反应？为什么 EDTA 可能反而降低 VE/EE？',
-  '比较 VRFB、ICRFB、锌基、有机和多硫化物-溴液流电池的成熟度、成本、能量密度和主要失效机制。',
-  '请用 crossover、HER、polarization 和 current density 的例子解释 CE、VE 与 EE 分别反映什么问题。',
-]
 
 const getEntityName = (entity: any) => String(entity?.entity_name || entity?.name || entity?.id || '')
 
@@ -126,6 +118,23 @@ const TryDemo = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [mode, setMode] = useState('hyper')
   const [selectedEntity, setSelectedEntity] = useState('')
+  const [demoStatus, setDemoStatus] = useState<PublicDemoStatus | null>(null)
+  const demoUnavailable = demoStatus?.success === true && demoStatus.ready === false
+
+  useEffect(() => {
+    let active = true
+    fetch(`${SERVER_URL}/public/demo/status`)
+      .then(response => response.json())
+      .then(data => {
+        if (active) setDemoStatus(data)
+      })
+      .catch(() => {
+        if (active) setDemoStatus(null)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const latestGraphMessage = useMemo(
     () => [...messages].reverse().find(message => (message.entities?.length || 0) > 0 || (message.hyperedges?.length || 0) > 0),
@@ -282,7 +291,7 @@ const TryDemo = () => {
 
   const ask = async (question: string) => {
     const trimmed = question.trim()
-    if (!trimmed || isLoading) {
+    if (!trimmed || isLoading || demoUnavailable) {
       return
     }
 
@@ -347,11 +356,11 @@ const TryDemo = () => {
               <div>
                 <div className="flex items-center gap-2 text-sm font-medium text-teal-700">
                   <Database size={16} />
-                  公共示例知识库：example
+                  公共示例知识库：{PUBLIC_DEMO.name}
                 </div>
                 <h1 className="mt-2 text-2xl font-semibold text-slate-950">试用 HyperChE 问答</h1>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  该页面固定使用液流电池示例库，开放流式问答、消息内检索图和右侧实体邻域超图，不支持上传、删除或修改知识库。
+                  {PUBLIC_DEMO.description} 不支持上传、删除或修改知识库。
                 </p>
               </div>
               <div className="flex rounded-lg bg-slate-100 p-1 text-sm">
@@ -371,14 +380,22 @@ const TryDemo = () => {
               </div>
             </div>
 
+            {demoStatus && (
+              <div className={`mt-4 rounded-lg border px-3 py-2 text-xs ${demoStatus.ready ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+                {demoStatus.ready
+                  ? `实例缓存已就绪 · ${demoStatus.database}`
+                  : `实例缓存未就绪 · 缺少 ${demoStatus.missing_files.length} 个文件${demoStatus.lfs_pointer_files.length ? `，另有 ${demoStatus.lfs_pointer_files.length} 个 Git LFS 指针未下载` : ''}`}
+              </div>
+            )}
+
             <div className="mt-4 flex flex-wrap gap-2">
-              {suggestedQuestions.map(question => (
+              {PUBLIC_DEMO.suggestedQuestions.map(question => (
                 <button
                   key={question}
                   type="button"
                   onClick={() => ask(question)}
                   className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-left text-xs text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-teal-200 hover:bg-white hover:text-teal-700"
-                  disabled={isLoading}
+                  disabled={isLoading || demoUnavailable}
                 >
                   {question}
                 </button>
@@ -441,13 +458,13 @@ const TryDemo = () => {
                   }
                 }}
                 className="min-h-[48px] flex-1 resize-none rounded-lg border border-slate-200 px-3 py-3 text-sm outline-none transition focus:border-teal-600 focus:ring-4 focus:ring-teal-50"
-                placeholder="询问这个化工示例库..."
-                disabled={isLoading}
+                placeholder={demoUnavailable ? '液流电池缓存尚未安装' : '询问液流电池公开知识库...'}
+                disabled={isLoading || demoUnavailable}
               />
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={!inputValue.trim() || isLoading}
+                disabled={!inputValue.trim() || isLoading || demoUnavailable}
                 className="flex h-12 w-12 items-center justify-center rounded-lg bg-teal-700 text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-teal-800 disabled:opacity-60"
               >
                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

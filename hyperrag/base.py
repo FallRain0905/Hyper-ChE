@@ -5,7 +5,19 @@ from .utils import EmbeddingFunc
 
 TextChunkSchema = TypedDict(
     "TextChunkSchema",
-    {"tokens": int, "content": str, "full_doc_id": str, "chunk_order_index": int},
+    {
+        "tokens": int,
+        "content": str,
+        "full_doc_id": str,
+        "chunk_order_index": int,
+        "doc_id": str,
+        "source_doc_id": str,
+        "source_file": str,
+        "chunk_id": str,
+        "source_chunk_id": str,
+        "text_hash": str,
+    },
+    total=False,
 )
 
 T = TypeVar("T")

@@ -17,11 +17,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODES_PATH = REPO_ROOT / "configs" / "experiments" / "modes.yaml"
 DEFAULT_EXPERIMENT_MODE = "hyper_final"
 EXPERIMENT_SWITCHES = (
+    "enable_one_pass_extraction",
     "enable_entity_normalization",
     "enable_measurement_instances",
     "enable_efu_repair",
     "enable_hybrid_rerank",
 )
+EXPERIMENT_FIELDS = EXPERIMENT_SWITCHES + ("index_profile",)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -49,6 +51,8 @@ def resolve_prompt_domain(prompt_profile: str | None, domain: str | None = None)
     profile = (prompt_profile or "chemistry").strip()
     if profile == "generic_json":
         return "generic_json"
+    if profile in {"default", "original", "original_hyperrag", "hyperrag_original"}:
+        return "default"
     if profile == "chemistry":
         return domain or "flow_battery"
     return domain or profile
@@ -81,6 +85,12 @@ def resolve_experiment_mode(
     }
     for key in EXPERIMENT_SWITCHES:
         resolved[key] = bool(config.get(key, True))
+    resolved["index_profile"] = str(
+        config.get(
+            "index_profile",
+            "dual_concat" if resolved["enable_entity_normalization"] else "canonical_only",
+        )
+    )
     return resolved
 
 
@@ -98,10 +108,12 @@ def write_run_config(
         "prompt_profile": resolved_config.get("prompt_profile"),
         "domain": resolved_config.get("domain"),
         "effective_domain": resolved_config.get("effective_domain", resolved_config.get("domain")),
+        "enable_one_pass_extraction": bool(resolved_config.get("enable_one_pass_extraction", True)),
         "enable_entity_normalization": bool(resolved_config.get("enable_entity_normalization", True)),
         "enable_measurement_instances": bool(resolved_config.get("enable_measurement_instances", True)),
         "enable_efu_repair": bool(resolved_config.get("enable_efu_repair", True)),
         "enable_hybrid_rerank": bool(resolved_config.get("enable_hybrid_rerank", True)),
+        "index_profile": resolved_config.get("index_profile", "dual_concat"),
         "corpus_id": resolved_config.get("corpus_id") or path.name,
         "cache_dir": str(path.resolve()),
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -118,6 +130,9 @@ def _redact_payload(value: Any) -> Any:
         result = {}
         for key, item in value.items():
             lower = str(key).lower()
+            if lower.endswith("_key_count") or lower in {"key_count", "api_key_count"}:
+                result[key] = _redact_payload(item)
+                continue
             if any(token in lower for token in ("key", "token", "secret", "password", "authorization")):
                 result[key] = "[REDACTED]"
             else:

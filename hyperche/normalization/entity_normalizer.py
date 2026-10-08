@@ -499,12 +499,12 @@ class EntityNormalizer:
             return "metric:ce", "coulombic efficiency", "efficiency_metric"
         if re.search(r"(^|[^a-z])ve([^a-z]|$)|voltage efficiency|voltaic efficiency", name, flags=re.I) or normalized.startswith("ve"):
             return "metric:ve", "voltage efficiency", "efficiency_metric"
-        if re.search(r"(^|[^a-z])ee([^a-z]|$)|energy", name, flags=re.I) or normalized.startswith("ee"):
+        if "energydensity" in normalized:
+            return "metric:energy_density", "energy density", "energy_metric"
+        if re.search(r"(^|[^a-z])ee([^a-z]|$)|energy efficiency", name, flags=re.I) or normalized.startswith("ee"):
             return "metric:ee", "energy efficiency", "efficiency_metric"
         if "capacityretention" in normalized:
             return "metric:capacity_retention", "capacity retention", "capacity_metric"
-        if "energydensity" in normalized:
-            return "metric:energy_density", "energy density", "energy_metric"
         if "ionexchangecapacity" in normalized or re.search(r"(^|[^a-z])iec([^a-z]|$)", name, flags=re.I):
             return "metric:ion_exchange_capacity", "ion exchange capacity", "ion_exchange_metric"
         if "arearesistance" in normalized:

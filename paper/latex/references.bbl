@@ -1,0 +1,139 @@
+\begin{thebibliography}{10}
+
+\bibitem{PathRAG}
+Boyu Chen, Zirui Guo, Zidan Yang, Yuluo Chen, Junze Chen, Zhenghao Liu, Chuan Shi, and Cheng Yang.
+\newblock Pathrag: Pruning graph-based retrieval augmented generation with relational paths, 2025.
+
+\bibitem{GraphRAG}
+Darren Edge, Ha~Trinh, Newman Cheng, Joshua Bradley, Alex Chao, Apurva Mody, Steven Truitt, and Jonathan Larson.
+\newblock From local to global: A graph rag approach to query-focused summarization, 2024.
+
+\bibitem{RAGAS}
+Shahul Es, Jithin James, Luis Espinosa~Anke, and Steven Schockaert.
+\newblock {RAGA}s: Automated evaluation of retrieval augmented generation.
+\newblock In Nikolaos Aletras and Orphee De~Clercq, editors, {\em Proceedings of the 18th Conference of the European Chapter of the Association for Computational Linguistics: System Demonstrations}, pages 150--158, St. Julians, Malta, March 2024. Association for Computational Linguistics.
+
+\bibitem{MiniRAG}
+Tianyu Fan, Jingyuan Wang, Xubin Ren, and Chao Huang.
+\newblock Minirag: Towards extremely simple retrieval-augmented generation, 2025.
+
+\bibitem{StarE}
+Mikhail Galkin, Priyansh Trivedi, Gaurav Maheshwari, Ricardo Usbeck, and Jens Lehmann.
+\newblock Message passing for hyper-relational knowledge graphs.
+\newblock In {\em Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP)}, pages 7346--7359, Online, November 2020. Association for Computational Linguistics.
+
+\bibitem{RAGsurvey}
+Yunfan Gao, Yun Xiong, Xinyu Gao, Kangxiang Jia, Jinliu Pan, Yuxi Bi, Yi~Dai, Jiawei Sun, Meng Wang, and Haofen Wang.
+\newblock Retrieval-augmented generation for large language models: A survey, 2024.
+
+\bibitem{LightRAG}
+Zirui Guo, Lianghao Xia, Yanhua Yu, Tu~Ao, and Chao Huang.
+\newblock Lightrag: Simple and fast retrieval-augmented generation, 2024.
+
+\bibitem{HippoRAG2}
+Bernal~Jiménez Gutiérrez, Yiheng Shu, Weijian Qi, Sizhe Zhou, and Yu~Su.
+\newblock From rag to memory: Non-parametric continual learning for large language models, 2025.
+
+\bibitem{FlashRAG}
+Jiajie Jin, Yutao Zhu, Xinyu Yang, Chenghao Zhang, and Zhicheng Dou.
+\newblock Flashrag: {A} modular toolkit for efficient retrieval-augmented generation research.
+\newblock {\em CoRR}, abs/2405.13576, 2024.
+
+\bibitem{RAG}
+Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir Karpukhin, Naman Goyal, Heinrich K\"{u}ttler, Mike Lewis, Wen-tau Yih, Tim Rockt\"{a}schel, Sebastian Riedel, and Douwe Kiela.
+\newblock Retrieval-augmented generation for knowledge-intensive nlp tasks.
+\newblock In H.~Larochelle, M.~Ranzato, R.~Hadsell, M.F. Balcan, and H.~Lin, editors, {\em Advances in Neural Information Processing Systems}, volume~33, pages 9459--9474. Curran Associates, Inc., 2020.
+
+\bibitem{KAG}
+Lei Liang, Mengshu Sun, Zhengke Gui, Zhongshu Zhu, Zhouyu Jiang, Ling Zhong, Yuan Qu, Peilong Zhao, Zhongpu Bo, Jin Yang, Huaidong Xiong, Lin Yuan, Jun Xu, Zaoyang Wang, Zhiqiang Zhang, Wen Zhang, Huajun Chen, Wenguang Chen, and Jun Zhou.
+\newblock Kag: Boosting llms in professional domains via knowledge augmented generation, 2024.
+
+\bibitem{n-TuckER}
+Yu~Liu, Quanming Yao, and Yong Li.
+\newblock Generalizing tensor decomposition for n-ary relational knowledge bases.
+\newblock In {\em Proceedings of The Web Conference 2020}, WWW '20, page 1104–1114, New York, NY, USA, 2020. Association for Computing Machinery.
+
+\bibitem{Text2Event}
+Yaojie Lu, Hongyu Lin, Jin Xu, Xianpei Han, Jialong Tang, Annan Li, Le~Sun, Meng Liao, and Shaoyi Chen.
+\newblock {T}ext2{E}vent: Controllable sequence-to-structure generation for end-to-end event extraction.
+\newblock In Chengqing Zong, Fei Xia, Wenjie Li, and Roberto Navigli, editors, {\em Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and the 11th International Joint Conference on Natural Language Processing (Volume 1: Long Papers)}, pages 2795--2806, Online, August 2021. Association for Computational Linguistics.
+
+\bibitem{HAHE}
+Haoran Luo, Haihong E, Yuhao Yang, Yikai Guo, Mingzhi Sun, Tianyu Yao, Zichen Tang, Kaiyang Wan, Meina Song, and Wei Lin.
+\newblock {HAHE}: Hierarchical attention for hyper-relational knowledge graphs in global and local level.
+\newblock In {\em Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)}, pages 8095--8107, Toronto, Canada, July 2023. Association for Computational Linguistics.
+
+\bibitem{Text2NKG}
+Haoran Luo, Haihong E, Yuhao Yang, Tianyu Yao, Yikai Guo, Zichen Tang, Wentai Zhang, Kaiyang Wan, Shiyao Peng, Meina Song, Wei Lin, Yifan Zhu, and Luu~Anh Tuan.
+\newblock Text2nkg: Fine-grained n-ary relation extraction for n-ary relational knowledge graph construction, 2024.
+
+\bibitem{Hypertension}
+John~William McEvoy, Cian~P McCarthy, Rosa~Maria Bruno, Sofie Brouwers, Michelle~D Canavan, Claudio Ceconi, Ruxandra~Maria Christodorescu, Stella~S Daskalopoulou, Charles~J Ferro, Eva Gerdts, et~al.
+\newblock 2024 esc guidelines for the management of elevated blood pressure and hypertension.
+\newblock {\em Giornale italiano di cardiologia (2006)}, 25(11):1e--107e, 2024.
+
+\bibitem{GPT4}
+OpenAI, Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, Florencia~Leoni Aleman, Diogo Almeida, Janko Altenschmidt, Sam Altman, et~al.
+\newblock Gpt-4 technical report, 2024.
+
+\bibitem{KGLLMsurvey}
+Shirui Pan, Linhao Luo, Yufei Wang, Chen Chen, Jiapu Wang, and Xindong Wu.
+\newblock Unifying large language models and knowledge graphs: A roadmap.
+\newblock {\em IEEE Transactions on Knowledge and Data Engineering}, 36(7):3580--3599, 2024.
+
+\bibitem{UltraDomain}
+Hongjin Qian, Peitian Zhang, Zheng Liu, Kelong Mao, and Zhicheng Dou.
+\newblock Memorag: Moving towards next-gen rag via memory-inspired knowledge discovery, 2024.
+
+\bibitem{HelloBench}
+Haoran Que, Feiyu Duan, Liqun He, Yutao Mou, Wangchunshu Zhou, Jiaheng Liu, Wenge Rong, Zekun~Moore Wang, Jian Yang, Ge~Zhang, Junran Peng, Zhaoxiang Zhang, Songyang Zhang, and Kai Chen.
+\newblock Hellobench: Evaluating long text generation capabilities of large language models, 2024.
+
+\bibitem{HINGE}
+Paolo Rosso, Dingqi Yang, and Philippe Cudr\'{e}-Mauroux.
+\newblock Beyond triplets: Hyper-relational knowledge graph embedding for link prediction.
+\newblock In {\em Proceedings of The Web Conference 2020}, WWW '20, page 1885–1896, New York, NY, USA, 2020. Association for Computing Machinery.
+
+\bibitem{OG-RAG}
+Kartik Sharma, Peeyush Kumar, and Yunqing Li.
+\newblock Og-rag: Ontology-grounded retrieval-augmented generation for large language models, 2024.
+
+\bibitem{PIKE-RAG}
+Jinyu Wang, Jingjing Fu, Rui Wang, Lei Song, and Jiang Bian.
+\newblock Pike-rag: specialized knowledge and rationale augmented generation, 2025.
+
+\bibitem{GRAN}
+Quan Wang, Haifeng Wang, Yajuan Lyu, and Yong Zhu.
+\newblock Link prediction on n-ary relational facts: A graph-based approach.
+\newblock In {\em Findings of the Association for Computational Linguistics: ACL-IJCNLP 2021}, pages 396--407, Online, August 2021. Association for Computational Linguistics.
+
+\bibitem{m-TransH}
+Jianfeng Wen, Jianxin Li, Yongyi Mao, Shini Chen, and Richong Zhang.
+\newblock On the representation and embedding of knowledge bases beyond binary relations.
+\newblock In {\em Proceedings of the Twenty-Fifth International Joint Conference on Artificial Intelligence}, IJCAI'16, page 1300–1307. AAAI Press, 2016.
+
+\bibitem{MedGraphRAG}
+Junde Wu, Jiayuan Zhu, Yunli Qi, Jingkun Chen, Min Xu, Filippo Menolascina, and Vicente Grau.
+\newblock Medical graph rag: Towards safe medical large language model via graph retrieval-augmented generation, 2024.
+
+\bibitem{RAE}
+Richong Zhang, Junpeng Li, Jiajie Mei, and Yongyi Mao.
+\newblock Scalable instance reconstruction in knowledge bases via relatedness affiliated embedding.
+\newblock In {\em Proceedings of the 2018 World Wide Web Conference}, WWW '18, page 1185–1194, Republic and Canton of Geneva, CHE, 2018. International World Wide Web Conferences Steering Committee.
+
+\bibitem{LLMsurvey}
+Wayne~Xin Zhao, Kun Zhou, Junyi Li, et~al.
+\newblock A survey of large language models, 2024.
+
+\bibitem{Hypergraph}
+Dengyong Zhou, Jiayuan Huang, and Bernhard Sch\"{o}lkopf.
+\newblock Learning with hypergraphs: Clustering, classification, and embedding.
+\newblock In B.~Sch\"{o}lkopf, J.~Platt, and T.~Hoffman, editors, {\em Advances in Neural Information Processing Systems}, volume~19. MIT Press, 2006.
+
+
+\bibitem{HyperGraphRAG}
+Haoran Luo, Haihong E, Guanting Chen, Yandan Zheng, Xiaobao Wu, Yikai Guo, Qika Lin, Yu Feng, Zemin Kuang, Meina Song, Yifan Zhu, and Luu Anh Tuan.
+\newblock HyperGraphRAG: Retrieval-augmented generation via hypergraph-structured knowledge representation.
+\newblock arXiv preprint arXiv:2503.21322, 2025.
+
+\end{thebibliography}

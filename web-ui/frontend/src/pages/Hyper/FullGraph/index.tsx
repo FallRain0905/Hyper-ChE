@@ -73,20 +73,16 @@ const FullGraphPage = observer(() => {
   const lastLoadedDbRef = useRef<string | null>(null);
 
   const loadData = async (dbName: string) => {
-    console.log('[FullGraph] loadData 被调用, dbName:', dbName);
 
     if (!isMountedRef.current || !dbName) {
-      console.log('[FullGraph] loadData 被跳过 - isMountedRef:', isMountedRef.current, ', dbName:', dbName);
       return;
     }
 
     // 防止重复加载同一个数据库（正在加载）
     if (loadingRef.current) {
-      console.log('[FullGraph] 跳过重复加载（正在加载）:', dbName);
       return;
     }
 
-    console.log('[FullGraph] 开始加载数据:', dbName);
     // 在开始加载时立即设置标志，防止 useEffect 在加载期间再次触发
     lastLoadedDbRef.current = dbName;
     loadingRef.current = true;
@@ -96,7 +92,6 @@ const FullGraphPage = observer(() => {
     try {
       // 首先检查数据库是否存在
       const statusUrl = `${SERVER_URL}/database/status?database=${encodeURIComponent(dbName)}`;
-      console.log('[FullGraph] 检查数据库状态:', statusUrl);
 
       const statusRes = await fetch(statusUrl);
       if (!statusRes.ok) {
@@ -104,10 +99,8 @@ const FullGraphPage = observer(() => {
       }
 
       const statusData = await statusRes.json();
-      console.log('[FullGraph] 数据库状态:', statusData);
 
       if (!statusData.exists) {
-        console.log('[FullGraph] 数据库不存在，清空数据');
         if (isMountedRef.current) {
           setVertices([]);
           setHyperedges([]);
@@ -125,14 +118,10 @@ const FullGraphPage = observer(() => {
         ? `${SERVER_URL}/db/theme_hyperedges?database=${encodeURIComponent(dbName)}&page=1&page_size=1000`
         : `${SERVER_URL}/db/hyperedges?database=${encodeURIComponent(dbName)}&page=1&page_size=1000`;
 
-      console.log('[FullGraph] 请求 URL:', { verticesUrl, hyperedgesUrl });
-
       const [verticesRes, hyperedgesRes] = await Promise.all([
         fetch(verticesUrl),
         fetch(hyperedgesUrl)
       ]);
-
-      console.log('[FullGraph] API 响应状态:', { vertices: verticesRes.status, hyperedges: hyperedgesRes.status });
 
       if (!verticesRes.ok || !hyperedgesRes.ok) {
         throw new Error('API 请求失败');
@@ -140,8 +129,6 @@ const FullGraphPage = observer(() => {
 
       const verticesData = await verticesRes.json();
       const hyperedgesData = await hyperedgesRes.json();
-
-      console.log('[FullGraph] API 返回数据:', { vertices: verticesData, hyperedges: hyperedgesData });
 
       if (isMountedRef.current) {
         const verticesList = verticesData.data || verticesData || [];
@@ -161,7 +148,6 @@ const FullGraphPage = observer(() => {
 
         setVertices(verticesList);
         setHyperedges(hyperedgesList);
-        console.log('[FullGraph] 数据已更新:', { verticesCount: verticesList.length, hyperedgesCount: hyperedgesList.length });
 
         if (verticesList.length === 0 && hyperedgesList.length === 0) {
           message.info(`数据库 "${dbName}" 为空，请先上传文档并嵌入`);
@@ -185,7 +171,6 @@ const FullGraphPage = observer(() => {
       if (isMountedRef.current) {
         loadingRef.current = false;
         setLoading(false);
-        console.log('[FullGraph] 加载完成，loadingRef 已重置');
       }
     }
   };
@@ -194,11 +179,8 @@ const FullGraphPage = observer(() => {
   useEffect(() => {
     const dbName = storeGlobalUser.selectedDatabase || '';
 
-    console.log('[FullGraph] useEffect 触发, dbName:', dbName, 'lastLoadedDb:', lastLoadedDbRef.current);
-
     if (!dbName) {
       // 数据库清空时清空数据
-      console.log('[FullGraph] 数据库为空，清空数据');
       setVertices([]);
       setHyperedges([]);
       setError(null);
@@ -206,10 +188,8 @@ const FullGraphPage = observer(() => {
       storeGlobalUser.resetVisualizationState();
     } else if (storeGlobalUser.hasUserInitiatedVisualization && lastLoadedDbRef.current !== dbName && !loadingRef.current) {
       // 只有用户手动触发可视化且数据库变化时才加载数据
-      console.log('[FullGraph] 数据库变化:', lastLoadedDbRef.current, '->', dbName, '，开始加载数据');
       loadData(dbName);
     } else {
-      console.log('[FullGraph] 跳过加载 - 等待用户手动触发可视化');
     }
   }, [storeGlobalUser.selectedDatabase, storeGlobalUser.hasUserInitiatedVisualization]);
 
@@ -246,8 +226,6 @@ const FullGraphPage = observer(() => {
       return;
     }
 
-    console.log('[FullGraph] 用户手动开始可视化，数据库:', dbName);
-
     // 验证数据库是否在可用列表中
     if (!storeGlobalUser.validateDatabaseExists(dbName)) {
       message.warning('所选数据库不存在，请重新选择');
@@ -267,8 +245,6 @@ const FullGraphPage = observer(() => {
   };
 
   const graphOptions = useMemo(() => {
-    console.log('[FullGraph] 构建图数据，vertices:', vertices);
-    console.log('[FullGraph] hyperedges:', hyperedges);
 
     // 构建节点：vertices 是字符串数组（顶点名称）
     const nodes = vertices.map((v: any, index: number) => {
@@ -292,8 +268,6 @@ const FullGraphPage = observer(() => {
         }
       };
     }).filter((n: any) => n.id !== '');
-
-    console.log('[FullGraph] 节点 ID 列表:', nodes.map(n => n.id).slice(0, 10));
 
     // 构建边（超边可视化）
     const edges: any[] = [];
@@ -325,15 +299,11 @@ const FullGraphPage = observer(() => {
     });
 
     // 添加超边bubble-sets（始终显示，展示完整超图）
-    console.log('[FullGraph] 开始处理超边，数量:', hyperedges.length);
     hyperedges.forEach((he: any, index: number) => {
       const verticesList = he.vertices || [];
-      console.log(`[FullGraph] 超边 ${index}:`, he);
-      console.log(`[FullGraph] 超边 ${index} vertices:`, verticesList);
 
       // 将顶点名称转换为节点 ID
       const nodeIds = verticesList.filter((vName: string) => vName && nodes.find((n: any) => n.id === vName));
-      console.log(`[FullGraph] 超边 ${index} 匹配的节点IDs:`, nodeIds);
 
       if (nodeIds.length > 0) {
         plugins.push({
@@ -345,8 +315,6 @@ const FullGraphPage = observer(() => {
         });
       }
     });
-    console.log('[FullGraph] 最终插件数量:', plugins.length);
-    console.log('[FullGraph] 插件数组:', plugins);
 
     plugins.push({
       type: 'tooltip',
@@ -399,7 +367,6 @@ const FullGraphPage = observer(() => {
       autoFit: { type: 'view' as const },
       plugins,
     };
-    console.log('[FullGraph] 完整 Graphin options:', JSON.stringify(result, null, 2));
     return result;
   }, [vertices, hyperedges, graphMode]);
 

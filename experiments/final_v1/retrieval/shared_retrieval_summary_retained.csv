@@ -1,0 +1,16 @@
+system,relevance_threshold,queries,P@1,Hit@5,MRR,gNDCG@5,shared_idcg
+chem_prompt_graph,grade>=1,58,0.517241,0.724138,0.613921,0.312238,True
+chem_prompt_graph,grade>=2,58,0.275862,0.62069,0.409134,0.312238,True
+chem_prompt_graph,grade>=3,58,0.189655,0.534483,0.333149,0.312238,True
+chem_prompt_hypergraph,grade>=1,58,0.482759,0.62069,0.554565,0.23294,True
+chem_prompt_hypergraph,grade>=2,58,0.224138,0.448276,0.319448,0.23294,True
+chem_prompt_hypergraph,grade>=3,58,0.206897,0.37931,0.276916,0.23294,True
+normalized_final,grade>=1,58,0.5,0.775862,0.624767,0.387291,True
+normalized_final,grade>=2,58,0.327586,0.672414,0.468397,0.387291,True
+normalized_final,grade>=3,58,0.189655,0.568966,0.361555,0.387291,True
+normalized_final_no_rerank,grade>=1,58,0.5,0.775862,0.625246,0.38424,True
+normalized_final_no_rerank,grade>=2,58,0.327586,0.655172,0.468301,0.38424,True
+normalized_final_no_rerank,grade>=3,58,0.172414,0.551724,0.353249,0.38424,True
+original_hypergraph,grade>=1,58,0.344828,0.586207,0.43532,0.17788,True
+original_hypergraph,grade>=2,58,0.189655,0.482759,0.283206,0.17788,True
+original_hypergraph,grade>=3,58,0.137931,0.362069,0.216139,0.17788,True
