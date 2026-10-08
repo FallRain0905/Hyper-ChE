@@ -34,14 +34,17 @@ export const routers = [
   {
     path: '/',
     element: <Landing />,
+    errorElement: <ErrorPage />,
   },
   {
     path: '/why-hypergraph',
     element: <WhyHypergraph />,
+    errorElement: <ErrorPage />,
   },
   {
     path: PUBLIC_DEMO.route,
     element: <TryDemo />,
+    errorElement: <ErrorPage />,
   },
   {
     path: PUBLIC_DEMO.legacyRoute,
