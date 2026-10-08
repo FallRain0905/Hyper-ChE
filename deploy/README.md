@@ -60,6 +60,14 @@ sh deploy/apply-release.sh /opt/hyperche/shared/.env
 状态。它不操作其他 Compose 项目，也不安装/修改宿主 Nginx。
 首次构建需要访问 Python/Node 镜像和依赖源；不包含原始文献或缓存镜像层。
 
+若 Docker Hub 连接超时，可从 Docker 官方在 Amazon ECR 的发布源下载同名
+基础镜像，再标记成本地名称。记录 `docker image inspect` 返回的摘要后，使用
+`HYPERCHE_PULL_BASE_IMAGES=false sh deploy/apply-release.sh` 复用已验证的镜像。
+该选项默认仍为 `true`，不会修改 Docker daemon 或影响其他项目的镜像源。
+官方备用源：`public.ecr.aws/docker/library/python:3.11-slim` 和
+`public.ecr.aws/docker/library/node:20-bookworm-slim`。参见
+[Docker 官方说明](https://www.docker.com/blog/news-from-aws-reinvent-docker-official-images-on-amazon-ecr-public/)。
+
 内部端口为后端 8000、前端 5000、PostgreSQL 5432、Redis 6379，均不向
 宿主公开。只允许宿主网关访问 8088；80/443 继续由原宿主 Nginx 管理。
 

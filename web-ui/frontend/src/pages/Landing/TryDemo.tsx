@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { Send, Square } from 'lucide-react'
@@ -13,19 +13,46 @@ type DemoMessage = QueryResult & { id: string; role: 'user' | 'assistant'; conte
 const newId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
 export default function TryDemo() {
   const [status, setStatus] = useState<PublicDemoStatus | null>(null)
+  const [statusLoading, setStatusLoading] = useState(true)
+  const [statusError, setStatusError] = useState('')
   const [offline, setOffline] = useState<QueryResult | null>(null)
   const [messages, setMessages] = useState<DemoMessage[]>([])
   const [question, setQuestion] = useState('')
   const [mode, setMode] = useState('hyper')
   const [busy, setBusy] = useState(false)
   const controller = useRef<AbortController | null>(null)
-  const ready = status?.ready === true
+  const statusController = useRef<AbortController | null>(null)
+  const ready = !statusLoading && !statusError && status?.ready === true
+  const checkStatus = useCallback(async () => {
+    statusController.current?.abort()
+    const abort = new AbortController()
+    statusController.current = abort
+    setStatusLoading(true)
+    setStatusError('')
+    try {
+      const response = await fetch(`${SERVER_URL}/public/demo/status`, { signal: abort.signal })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `服务状态检查失败（${response.status}），请稍后重新检查。`)
+      if (data.success === false || typeof data.ready !== 'boolean') throw new Error('服务状态返回异常，请重新检查。')
+      if (statusController.current === abort && !abort.signal.aborted) setStatus(data)
+    } catch (error: any) {
+      if (statusController.current === abort && !abort.signal.aborted) {
+        setStatus(null)
+        setStatusError(error?.message || '无法连接公开体验服务，请检查网络后重试。')
+      }
+    } finally {
+      if (statusController.current === abort && !abort.signal.aborted) {
+        setStatusLoading(false)
+        statusController.current = null
+      }
+    }
+  }, [])
   useEffect(() => {
     let alive = true
-    fetch(`${SERVER_URL}/public/demo/status`).then(response => response.json()).then(data => { if (alive) setStatus(data) }).catch(() => { if (alive) setStatus(null) })
+    void checkStatus()
     fetch(`${SERVER_URL}/public/demo/graph?edge_limit=12`).then(response => response.json()).then(data => { if (alive && data.success !== false) setOffline(data) }).catch(() => undefined)
-    return () => { alive = false; controller.current?.abort() }
-  }, [])
+    return () => { alive = false; statusController.current?.abort(); controller.current?.abort() }
+  }, [checkStatus])
   const patch = (id: string, updates: Partial<DemoMessage>) => setMessages(current => current.map(message => message.id === id ? { ...message, ...updates } : message))
   const ask = async (input: string) => {
     const text = input.trim()
@@ -46,7 +73,7 @@ export default function TryDemo() {
   }
   return <div className="research-page" style={{ minHeight: '100dvh' }}><ResearchDock publicPage actions={<Link to="/app/Hyper/chat" className="research-primary">登录工作台</Link>} /><main style={{ maxWidth: 1240, margin: 'auto', padding: '28px 20px' }}>
     <div className="research-eyebrow">Public knowledge base</div><h1 style={{ fontSize: 28, margin: '10px 0' }}>液流电池公开体验</h1><p className="research-muted">固定只读知识库。检索、来源证据与回答来自同一次查询；免费体验受公共额度限制。</p>
-    <div className={`research-status ${ready ? '' : 'research-status-warning'}`} style={{ margin: '18px 0' }}>{status === null ? '正在检查公开知识库和模型渠道…' : ready ? '知识库与模型渠道已就绪，可提交问题。' : status.cache_ready === false || status.cache_exists === false ? '公开知识库暂未就绪，请先查看项目汇报。' : '知识库缓存可浏览；模型渠道尚未配置，在线检索问答暂未开放。'}{!ready && <span> <a href="/report/hyperche-demo.html#platform" target="_blank" rel="noreferrer">查看已归档的真实超图案例</a> · <Link to="/">管理员登录配置渠道</Link></span>}</div>
+    <div className={`research-status ${ready ? '' : 'research-status-warning'}`} style={{ margin: '18px 0' }} role="status" aria-live="polite">{statusLoading ? '正在检查公开知识库和模型渠道…' : statusError ? `状态检查失败：${statusError}` : ready ? '知识库与模型渠道已就绪，可提交问题。' : status?.cache_ready === false || status?.cache_exists === false ? '公开知识库暂未就绪，请先查看项目汇报。' : '知识库缓存可浏览；模型渠道尚未配置，在线检索问答暂未开放。'} <button type="button" className="research-secondary" onClick={() => { void checkStatus() }} disabled={statusLoading || busy} style={{ marginLeft: 8 }}>{statusLoading ? '检查中…' : '重新检查'}</button>{!ready && !statusLoading && <span> <a href="/report/hyperche-demo.html#platform" target="_blank" rel="noreferrer">查看已归档的真实超图案例</a> · <Link to="/">管理员登录配置渠道</Link></span>}</div>
     <div className="research-public-grid"><section className="research-panel research-chat"><div className="research-chat-toolbar"><strong>检索问答</strong><label>模式 <select value={mode} onChange={event => setMode(event.target.value)} disabled={busy}><option value="hyper">HyperChE</option>{status?.supports_modes?.includes('graph') && <option value="graph">成对图 RAG</option>}</select></label><span className="research-muted">最终索引返回 top-5 证据</span></div>
       <div className="research-chat-messages" aria-live="polite" aria-busy={busy}>{!messages.length && <div><h2 style={{ fontSize: 18, marginBottom: 15 }}>示例问题</h2>{PUBLIC_DEMO.suggestedQuestions.slice(0, 4).map(item => <button key={item} disabled={busy} className="research-secondary" style={{ display: 'block', width: '100%', textAlign: 'left', margin: '8px 0', fontSize: 12 }} onClick={() => ready ? ask(item) : setQuestion(item)}>{item}</button>)}</div>}{messages.map(message => <article key={message.id} className={`research-message ${message.role === 'user' ? 'user' : ''}`}><div className="research-message-head"><strong>{message.role === 'user' ? '你' : 'HyperChE'}</strong><span>{message.status === 'retrieving' ? '正在检索' : message.status === 'evidence_ready' ? '证据已就绪' : message.status === 'generating_answer' ? '正在生成回答' : ''}</span></div><div className="research-message-body"><ReactMarkdown>{message.content || (message.status === 'retrieving' ? '正在检索与组织证据…' : message.status === 'evidence_ready' ? '证据已就绪，等待生成回答…' : '')}</ReactMarkdown>{message.role === 'assistant' && <RetrievalEvidence result={message} mode={mode} graphId={`public-query-${message.id}`} />}{message.error && <p className="research-status research-status-warning">{message.error}</p>}</div></article>)}</div>
       <form className="research-composer" onSubmit={event => { event.preventDefault(); ask(question) }}><textarea aria-label="公开体验问题" value={question} onChange={event => setQuestion(event.target.value)} placeholder="输入关于液流电池的问题" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); ask(question) } }} /><div className="research-composer-actions"><span>{ready ? 'Enter 发送 · Shift + Enter 换行' : '模型渠道配置完成后可发送'}</span>{busy ? <button type="button" className="research-secondary" onClick={() => controller.current?.abort()}><Square size={14} />停止</button> : <button className="research-primary" disabled={!ready || !question.trim()}><Send size={14} />发送</button>}</div></form></section>

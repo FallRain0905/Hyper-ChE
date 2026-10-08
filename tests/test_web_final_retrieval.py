@@ -275,6 +275,8 @@ def test_authenticated_final_query_and_graph_are_read_only(backend, final_cache,
     before = {path.name: path.read_bytes() for path in final_cache.iterdir()}
     client = TestClient(backend.app)
     payload = {"question": "energy efficiency", "database": "case1", "only_need_context": True}
+    published = next(item for item in client.get("/databases").json() if item["name"] == "case1")
+    assert published["read_only"] and published["retrieval_profile"] == "f1"
     assert client.post("/hyperrag/query", json=payload).json()["retrieval_meta"]["profile"] == "f1"
     assert "event: retrieval" in client.post("/hyperrag/query/stream", json=payload).text
     assert client.get("/db?database=case1").json()["read_only"]
