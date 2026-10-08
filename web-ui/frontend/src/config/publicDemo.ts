@@ -20,6 +20,11 @@ export const PUBLIC_DEMO = {
 export type PublicDemoStatus = {
   success: boolean
   ready: boolean
+  cache_ready?: boolean
+  models_ready?: boolean
+  embedding_ready?: boolean
+  answer_ready?: boolean
+  supports_modes?: string[]
   database: string
   cache_exists: boolean
   missing_files: string[]

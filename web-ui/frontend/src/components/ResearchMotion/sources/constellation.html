@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HyperChE — constellation backdrop</title>
+<!--
+ThreeUI author code, adapted for HyperChE.
+MIT License
+
+Copyright (c) 2026 Meng To
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-->
+<style>
+html,body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:transparent; }
+body { position:relative; }
+canvas { position:absolute; inset:0; display:block; width:100%; height:100%; pointer-events:none; }
+</style>
+</head>
+<body>
+<canvas id="constellationCanvas" aria-hidden="true"></canvas>
+<script data-hyperche-adaptation>
+
+
+        // Local lifecycle adaptation. Author geometry, color, pulse, link and
+        // pointer constants below retain their verified canonical defaults.
+        let animationFrameId = 0;
+        let parentPaused = false;
+        const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+        function canAnimate() { return !parentPaused && !document.hidden && !reducedMotionQuery.matches; }
+        function cancelCanvasFrame() {
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            animationFrameId = 0;
+        }
+        function scheduleCanvasFrame() {
+            if (!animationFrameId && canAnimate()) animationFrameId = requestAnimationFrame(animateCanvas);
+        }
+
+        // Authored Drifting Nodes & Network Logic (Canvas 2D)
+        const canvas = document.getElementById('constellationCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+        let nodes = [];
+        const LINK = 160; 
+        const MAX_NODES = window.innerWidth < 768 ? 40 : 85;
+        let pointer = { x: -1000, y: -1000 };
+
+        function resize() {
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = Math.max(1, Math.floor(width * dpr));
+            canvas.height = Math.max(1, Math.floor(height * dpr));
+            canvas.style.width = width + 'px';
+            canvas.style.height = height + 'px';
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.imageSmoothingEnabled = false;
+        }
+        
+        window.addEventListener('resize', () => {
+            resize();
+            initNodes();
+            // A stopped/reduced-motion canvas still redraws to its new size.
+            if (!canAnimate()) animateCanvas();
+        });
+        resize();
+
+        function initNodes() {
+            nodes = [];
+            for(let i=0; i<MAX_NODES; i++) {
+                nodes.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    vx: (Math.random() - 0.5) * 0.3,
+                    vy: (Math.random() - 0.5) * 0.3,
+                    radius: Math.random() * 2.4 + 1.8
+                });
+            }
+        }
+        initNodes();
+
+        // Pointer gravity tracker
+        document.addEventListener('mousemove', e => {
+            pointer.x = e.clientX;
+            pointer.y = e.clientY;
+        });
+
+        // Clear pointer on leave
+        document.addEventListener('mouseleave', () => {
+            pointer.x = -1000;
+            pointer.y = -1000;
+        });
+
+        function dist(a, b) {
+            return Math.hypot(a.x - b.x, a.y - b.y);
+        }
+
+        // Render Loop
+        function animateCanvas() {
+            animationFrameId = 0;
+            ctx.clearRect(0, 0, width, height);
+            ctx.lineCap = 'butt';
+            ctx.lineJoin = 'miter';
+            
+            // Draw Links first so nodes sit crisp on top
+            ctx.strokeStyle = '#E6C879';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < nodes.length; i++) {
+                for (let j = i + 1; j < nodes.length; j++) {
+                    const d = dist(nodes[i], nodes[j]);
+                    if (d < LINK) {
+                        ctx.globalAlpha = 0.22 + (1 - d/LINK) * 0.55;
+                        ctx.beginPath();
+                        ctx.moveTo(nodes[i].x, nodes[i].y);
+                        ctx.lineTo(nodes[j].x, nodes[j].y);
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            nodes.forEach(node => {
+                node.x += node.vx;
+                node.y += node.vy;
+                
+                // Bounce off edges
+                if(node.x < 0 || node.x > width) node.vx *= -1;
+                if(node.y < 0 || node.y > height) node.vy *= -1;
+
+                // Gentle Pointer gravity
+                const pd = dist(node, pointer);
+                if(pd < 220) {
+                    node.x -= (node.x - pointer.x) * 0.005;
+                    node.y -= (node.y - pointer.y) * 0.005;
+                }
+                
+                // Draw Node (Pale Gold) — core + soft halo so particles read at retina scale
+                const pulse = 0.78 + Math.sin(Date.now() * 0.001 + node.x) * 0.22;
+                ctx.fillStyle = '#E6C879';
+                ctx.globalAlpha = pulse * 0.28;
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, node.radius * 2.4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = pulse;
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            ctx.globalAlpha = 1;
+            scheduleCanvasFrame();
+        }
+        
+
+        // Always draw once. In reduced-motion mode the scheduler stays stopped.
+        animateCanvas();
+        window.addEventListener('message', event => {
+            if (event.source !== window.parent || !event.data || event.data.type !== 'hyperche-motion') return;
+            if (event.data.action === 'pause') {
+                parentPaused = true;
+                cancelCanvasFrame();
+            } else if (event.data.action === 'resume') {
+                parentPaused = false;
+                scheduleCanvasFrame();
+            }
+        });
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) cancelCanvasFrame();
+            else scheduleCanvasFrame();
+        });
+        const onReducedMotionChange = () => {
+            if (reducedMotionQuery.matches) cancelCanvasFrame();
+            else scheduleCanvasFrame();
+        };
+        if (reducedMotionQuery.addEventListener) reducedMotionQuery.addEventListener('change', onReducedMotionChange);
+        else if (reducedMotionQuery.addListener) reducedMotionQuery.addListener(onReducedMotionChange);
+        window.addEventListener('pagehide', cancelCanvasFrame);
+        window.addEventListener('pageshow', scheduleCanvasFrame);
+        window.parent.postMessage({ type:'hyperche-motion', event:'ready', effect:'constellation' }, '*');
+
+
+
+</script>
+</body>
+</html>

@@ -327,7 +327,7 @@ const GraphPage = () => {
           placeholder={t('graph.select_entity_placeholder')}
           onChange={setKey}
           onPopupScroll={e => {
-            const target = e.target;
+            const target = e.target as HTMLElement;
             if (target.scrollTop + target.offsetHeight >= target.scrollHeight - 10) {
               if (verticesList.length < verticesTotal && !verticesLoading) {
                 loadVertices(verticesPage + 1, true);

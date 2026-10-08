@@ -209,7 +209,7 @@ return;
                 'drag-canvas',
                 'drag-element',
             ],
-            autoFit: 'center',
+            autoFit: 'center' as const,
             layout: {
                 type: 'force',
                 clustering: true,
@@ -257,13 +257,6 @@ return;
                 options={options}
                 id={graphId}
                 style={{ width: '100%', height: '100%' }}
-                error={() => {
-                    return <div>
-                        <div>
-
-                        </div>
-                    </div>
-                }}
             />
         </div>
     );

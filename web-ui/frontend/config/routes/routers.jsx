@@ -1,19 +1,20 @@
+import { lazy } from 'react'
 import NotFoundPage from '@/404'
 import App from '@/App'
 import ErrorPage from '@/ErrorPage'
-import Home from '@/pages/Home'
-import Landing from '@/pages/Landing'
-import WhyHypergraph from '@/pages/Landing/WhyHypergraph'
-import TryDemo from '@/pages/Landing/TryDemo'
-import Files from '@/pages/Files'
-import Graph from '@/pages/Hyper/Graph'
-import FullGraph from '@/pages/Hyper/FullGraph'
-import HyperDB from '@/pages/Hyper/DB'
-import Setting from '@/pages/Setting'
-import Admin from '@/pages/Admin'
-import DocumentConvert from '@/pages/DocumentConvert'
-import PromptStudio from '@/pages/Prompts'
-import Providers from '@/pages/Providers'
+const Home = lazy(() => import('@/pages/Home'))
+const Landing = lazy(() => import('@/pages/Landing'))
+const WhyHypergraph = lazy(() => import('@/pages/Landing/WhyHypergraph'))
+const TryDemo = lazy(() => import('@/pages/Landing/TryDemo'))
+const Files = lazy(() => import('@/pages/Files'))
+const Graph = lazy(() => import('@/pages/Hyper/Graph'))
+const FullGraph = lazy(() => import('@/pages/Hyper/FullGraph'))
+const HyperDB = lazy(() => import('@/pages/Hyper/DB'))
+const Setting = lazy(() => import('@/pages/Setting'))
+const Admin = lazy(() => import('@/pages/Admin'))
+const DocumentConvert = lazy(() => import('@/pages/DocumentConvert'))
+const PromptStudio = lazy(() => import('@/pages/Prompts'))
+const Providers = lazy(() => import('@/pages/Providers'))
 import { PUBLIC_DEMO } from '@/config/publicDemo'
 import {
   DatabaseOutlined,

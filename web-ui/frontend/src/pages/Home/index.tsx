@@ -1,985 +1,139 @@
-import React, { useState, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { observer } from 'mobx-react'
 import ReactMarkdown from 'react-markdown'
-import {
-    MessageCircle,
-    Send,
-    Plus,
-    Database,
-    Settings,
-    User,
-    Bot,
-    Trash2,
-    RotateCcw,
-    Loader2,
-    Zap,
-    Layers,
-    BookOpen,
-    GitCompare,
-    ChevronDown,
-    ChevronRight,
-} from 'lucide-react'
-import { Tag } from 'antd'
-import {
-    Button,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    ScrollArea,
-    Textarea,
-    Separator,
-    Avatar,
-    AvatarFallback,
-    AvatarImage
-} from '../../components/ui'
-import { storeGlobalUser } from '../../store/globalUser'
-import { authStore } from '../../store/auth'
-import { SERVER_URL } from '../../utils'
-import DatabaseSelector from '../../components/DatabaseSelector'
-import RetrievalInfo from '../../components/RetrievalInfo'
-import RetrievalHyperGraph from '../../components/RetrievalHyperGraph'
+import { Link } from 'react-router-dom'
+import { Plus, Send, Square, Trash2, GitCompare } from 'lucide-react'
+import { authStore } from '@/store/auth'
+import { storeGlobalUser } from '@/store/globalUser'
+import { SERVER_URL } from '@/utils'
+import DatabaseSelector from '@/components/DatabaseSelector'
+import RetrievalEvidence from '@/components/RetrievalEvidence'
+import { buildQueryPayload, queryJson, queryStream, type QueryResult } from '@/services/retrieval'
 
-const LazyRetrievalGraph = ({
-    entities = [],
-    hyperedges = [],
-    themes = [],
-    height = '300px',
-    mode = 'hyper',
-    graphId = 'retrieval-graph'
-}) => {
-    const [expanded, setExpanded] = useState(false)
-    const entityCount = entities?.length || 0
-    const hyperedgeCount = hyperedges?.length || 0
-    const themeCount = themes?.length || 0
-    const hasGraphData = entityCount > 0 || hyperedgeCount > 0 || themeCount > 0
+type ChatMessage = QueryResult & { id: string; role: string; content: string; timestamp: string; status?: string; error?: string; compareResults?: Array<QueryResult & { mode: string }> }
+type Conversation = { id: string; title: string; messages: ChatMessage[]; createdAt: string }
+const id = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+const newConversation = (): Conversation => ({ id: id(), title: '新会话', messages: [], createdAt: new Date().toISOString() })
+const allModes = [{ value: 'hyper', label: 'HyperChE' }, { value: 'graph', label: '成对图 RAG' }, { value: 'naive', label: '文本 RAG' }, { value: 'hyper-lite', label: 'Hyper-RAG-Lite' }, { value: 'llm', label: '直接问答' }]
 
-    if (!hasGraphData) {
-        return null
+function Home() {
+  const scope = authStore.user?.id || authStore.user?.email || 'anonymous'
+  const storageKey = `hyperrag_conversations_v3_${scope}`
+  const activeKey = `hyperrag_active_conversation_v3_${scope}`
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [activeId, setActiveId] = useState('')
+  const [initializedScope, setInitializedScope] = useState('')
+  const [question, setQuestion] = useState('')
+  const [mode, setMode] = useState('hyper')
+  const [compare, setCompare] = useState(false)
+  const [secondMode, setSecondMode] = useState('graph')
+  const [enabledModes, setEnabledModes] = useState(['hyper', 'graph', 'naive'])
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState<any>(null)
+  const [databaseStatus, setDatabaseStatus] = useState<any>(null)
+  const selectedDatabase = storeGlobalUser.selectedDatabase
+  const controller = useRef<AbortController | null>(null)
+  const active = conversations.find(item => item.id === activeId)
+  const allowedModes = databaseStatus?.supports_modes || enabledModes
+  const effectiveModes = enabledModes.filter(value => allowedModes.includes(value)).length ? enabledModes.filter(value => allowedModes.includes(value)) : allowedModes
+
+  useEffect(() => {
+    let items: Conversation[] = []
+    try { items = JSON.parse(localStorage.getItem(storageKey) || '[]') } catch { items = [] }
+    if (!Array.isArray(items) || !items.length) items = [newConversation()]
+    // Keep the existing v3 user-scoped storage keys and migrate only message shape.
+    items = items.map(item => ({ ...item, messages: (item.messages || []).map(message => ({ ...message, id: String(message.id), compareResults: message.compareResults && !Array.isArray(message.compareResults) ? Object.values(message.compareResults) : message.compareResults, status: ['generating', 'retrieving', 'evidence_ready', 'generating_answer'].includes(message.status || '') ? 'interrupted' : message.status })) }))
+    setConversations(items)
+    const savedActive = localStorage.getItem(activeKey)
+    setActiveId(items.find(item => item.id === savedActive)?.id || items[0].id)
+    setInitializedScope(scope)
+    const loadModes = () => {
+      try {
+        const configured = JSON.parse(localStorage.getItem('hyperrag_mode_settings') || '{}').availableModes
+        if (Array.isArray(configured) && configured.length) setEnabledModes(configured)
+      } catch { /* Keep compatible default modes. */ }
     }
+    loadModes()
+    window.addEventListener('storage', loadModes)
+    storeGlobalUser.restoreSelectedDatabase()
+    storeGlobalUser.loadDatabases()
+    let alive = true
+    fetch(`${SERVER_URL}/systems/status`).then(response => response.json()).then(data => { if (alive) setStatus(data) }).catch(() => { if (alive) setStatus(null) })
+    return () => { alive = false; window.removeEventListener('storage', loadModes); controller.current?.abort() }
+  }, [scope, storageKey, activeKey])
 
-    return (
-        <div className="mt-4 rounded-md border border-gray-200 bg-white">
-            <button
-                type="button"
-                onClick={() => setExpanded(prev => !prev)}
-                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
-            >
-                <span className="flex items-center gap-2 font-medium">
-                    {expanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                    ) : (
-                        <ChevronRight className="h-4 w-4" />
-                    )}
-                    Retrieval hypergraph visualization
-                </span>
-                <span className="text-xs text-gray-500">
-                    {entityCount} entities | {hyperedgeCount} hyperedges
-                    {themeCount > 0 ? ` | ${themeCount} themes` : ''}
-                </span>
-            </button>
+  useEffect(() => {
+    if (initializedScope !== scope || !conversations.length) return
+    try { localStorage.setItem(storageKey, JSON.stringify(conversations)); localStorage.setItem(activeKey, activeId) } catch { /* Browser storage may be unavailable or full. */ }
+  }, [conversations, activeId, initializedScope, scope, storageKey, activeKey])
 
-            {expanded && (
-                <div className="border-t border-gray-200 p-3">
-                    <RetrievalHyperGraph
-                        entities={entities}
-                        hyperedges={hyperedges}
-                        themes={themes}
-                        height={height}
-                        mode={mode}
-                        graphId={graphId}
-                    />
-                </div>
-            )}
-        </div>
-    )
+  useEffect(() => {
+    if (!effectiveModes.includes(mode)) setMode(effectiveModes[0] || 'hyper')
+    if (!effectiveModes.includes(secondMode)) setSecondMode(effectiveModes[1] || effectiveModes[0] || 'graph')
+    if (effectiveModes.length < 2) setCompare(false)
+  }, [effectiveModes.join('|'), mode, secondMode])
+
+  useEffect(() => {
+    let alive = true
+    setDatabaseStatus(null)
+    if (selectedDatabase) fetch(`${SERVER_URL}/database/status?database=${encodeURIComponent(selectedDatabase)}`).then(response => response.json()).then(data => { if (alive) setDatabaseStatus(data) }).catch(() => undefined)
+    return () => { alive = false }
+  }, [selectedDatabase])
+
+  const patchMessage = (conversationId: string, messageId: string, patch: Partial<ChatMessage>) => setConversations(current => current.map(item => item.id === conversationId ? { ...item, messages: item.messages.map(message => message.id === messageId ? { ...message, ...patch } : message) } : item))
+  const create = () => { const item = newConversation(); setConversations(current => [item, ...current]); setActiveId(item.id) }
+  const remove = (conversationId: string) => {
+    const remaining = conversations.filter(item => item.id !== conversationId)
+    const next = remaining.length ? remaining : [newConversation()]
+    setConversations(next)
+    if (activeId === conversationId) setActiveId(next[0].id)
+  }
+  const modelsReady = databaseStatus?.models_ready ?? status?.models_ready ?? status?.hyperrag?.models_ready
+  const missingChannels = modelsReady === false
+  const submit = async () => {
+    const text = question.trim()
+    if (!text || busy || !active || missingChannels) return
+    const conversationId = active.id
+    const messageId = id()
+    const now = new Date().toISOString()
+    const assistant: ChatMessage = { id: messageId, role: compare ? 'compare' : mode, content: '', timestamp: now, status: 'retrieving' }
+    setConversations(current => current.map(item => item.id === conversationId ? { ...item, title: item.messages.length ? item.title : text.slice(0, 24), messages: [...item.messages, { id: id(), role: 'user', content: text, timestamp: now }, assistant] } : item))
+    setQuestion('')
+    setBusy(true)
+    const abort = new AbortController()
+    controller.current = abort
+    try {
+      const database = storeGlobalUser.selectedDatabase
+      if (compare) {
+        const modes = [mode, secondMode]
+        const results = await Promise.allSettled(modes.map(value => queryJson(buildQueryPayload(text, value, database), false, abort.signal)))
+        patchMessage(conversationId, messageId, { status: 'complete', content: '对比结果', compareResults: results.map((result, index) => result.status === 'fulfilled' ? { ...result.value, mode: modes[index] } : { mode: modes[index], success: false, message: String(result.reason?.message || '查询失败') }) })
+      } else if (mode === 'hyper') {
+        const result = await queryStream(buildQueryPayload(text, mode, database), {
+          onRetrieval: evidence => patchMessage(conversationId, messageId, { ...evidence, status: 'evidence_ready' }),
+          onToken: content => patchMessage(conversationId, messageId, { content, status: 'generating_answer' }),
+        }, false, abort.signal)
+        patchMessage(conversationId, messageId, { ...result, content: result.response || '本轮没有生成回答。', status: 'complete' })
+      } else {
+        const result = await queryJson(buildQueryPayload(text, mode, database), false, abort.signal)
+        patchMessage(conversationId, messageId, { ...result, content: result.response || '本轮没有生成回答。', status: 'complete' })
+      }
+    } catch (error: any) {
+      patchMessage(conversationId, messageId, { status: abort.signal.aborted ? 'cancelled' : 'error', error: abort.signal.aborted ? '已停止生成，本轮已收到的内容与证据保留。' : error?.message || '查询失败，请检查渠道配置后重试。' })
+    } finally { setBusy(false); if (controller.current === abort) controller.current = null }
+  }
+  const label = (value: string) => allModes.find(item => item.value === value)?.label || value
+  return <div className="research-workspace">
+    <aside className="research-panel research-conversations"><button className="research-secondary" onClick={create}><Plus size={15} />新会话</button><div className="research-conversation-list">{conversations.map(item => <div key={item.id} className={`research-conversation-row ${item.id === activeId ? 'active' : ''}`}><button onClick={() => setActiveId(item.id)} title={item.title}>{item.title}</button><button aria-label={`删除会话 ${item.title}`} onClick={() => remove(item.id)} style={{ padding: 7 }}><Trash2 size={13} /></button></div>)}</div><div className="research-muted" style={{ fontSize: 11 }}>会话保存在当前浏览器，按登录用户区分。</div><button className="research-secondary" disabled={busy} onClick={() => { const item = newConversation(); setConversations([item]); setActiveId(item.id) }}>清空会话</button></aside>
+    <section className="research-panel research-chat">
+      <div className="research-chat-toolbar"><span>知识库</span><DatabaseSelector mode="select" showRefresh size="small" style={{ minWidth: 140 }} /><label>模式 <select value={mode} onChange={event => setMode(event.target.value)} disabled={busy}>{allModes.filter(item => effectiveModes.includes(item.value)).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label style={{ display: 'flex', gap: 5, alignItems: 'center' }}><input type="checkbox" checked={compare} onChange={event => setCompare(event.target.checked)} disabled={busy || effectiveModes.length < 2} /><GitCompare size={14} />对比</label>{compare && <select aria-label="第二个对比模式" value={secondMode} onChange={event => setSecondMode(event.target.value)} disabled={busy}>{allModes.filter(item => effectiveModes.includes(item.value)).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select>}<span className="research-muted">最终索引自动使用混合召回与结构重排 · 5 个证据片段</span></div>
+      {missingChannels && <div className="research-status research-status-warning" style={{ margin: 14 }}>模型渠道尚未配置；可以浏览已有知识库及图谱。{authStore.isAdmin ? <Link to="/app/admin"> 前往管理员后台配置公共渠道</Link> : <span> 请联系管理员，或在 <Link to="/app/providers">API 渠道</Link> 添加个人配置。</span>}</div>}
+      <div className="research-chat-messages" aria-live="polite" aria-busy={busy}>
+        {!active?.messages.length && <div style={{ padding: '44px 10px', maxWidth: 580, margin: 'auto' }}><div className="research-eyebrow">Research workspace</div><h1 style={{ fontSize: 28, margin: '12px 0' }}>用问题查找实验条件与原始证据</h1><p className="research-muted">选择知识库，输入化工或材料问题。回答、来源片段和检索超图来自同一次查询；旧知识库自动保持兼容。</p><a className="research-secondary" href="/report/hyperche-demo.html#platform" target="_blank" rel="noreferrer">查看已归档的真实超图案例</a></div>}
+        {active?.messages.map(message => <article className={`research-message ${message.role === 'user' ? 'user' : ''}`} key={message.id}><div className="research-message-head"><strong>{message.role === 'user' ? '你' : message.role === 'compare' ? '模式对比' : label(message.role)}</strong><span>{message.status === 'retrieving' ? '正在检索' : message.status === 'evidence_ready' ? '证据已就绪，等待生成' : message.status === 'generating_answer' ? '正在生成回答' : message.status === 'interrupted' ? '上次请求已中断' : new Date(message.timestamp).toLocaleTimeString()}</span></div><div className="research-message-body">{message.compareResults ? <div className="research-comparison">{message.compareResults.map((result, index) => <div key={`${result.mode}-${index}`}><h3>{label(result.mode)}</h3><ReactMarkdown>{result.response || result.message || ''}</ReactMarkdown><RetrievalEvidence result={result} mode={result.mode} graphId={`compare-${message.id}-${index}`} /></div>)}</div> : <><ReactMarkdown>{message.content || (message.status === 'retrieving' ? '正在检索与组织证据…' : message.status === 'evidence_ready' ? '本轮证据已就绪，正在等待回答…' : '')}</ReactMarkdown>{message.role !== 'user' && <RetrievalEvidence result={message} mode={message.role} graphId={`retrieval-${message.id}`} />}</>}{message.error && <div className="research-status research-status-warning" style={{ marginTop: 12 }}>{message.error}</div>}</div></article>)}
+      </div>
+      <form className="research-composer" onSubmit={event => { event.preventDefault(); submit() }}><textarea aria-label="输入问题" value={question} onChange={event => setQuestion(event.target.value)} placeholder="例如：比较不同电解液条件下的库仑效率，并定位实验条件与来源。" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit() } }} /><div className="research-composer-actions"><span>Enter 发送 · Shift + Enter 换行</span>{busy ? <button type="button" className="research-secondary" onClick={() => controller.current?.abort()}><Square size={14} />停止</button> : <button className="research-primary" disabled={!question.trim() || missingChannels}><Send size={14} />发送</button>}</div></form>
+    </section>
+  </div>
 }
-
-const HyperRAGHome = () => {
-    // State
-    const [conversations, setConversations] = useState([])
-    const [activeConversationId, setActiveConversationId] = useState('')
-    const [inputValue, setInputValue] = useState('')
-    const [queryMode, setQueryMode] = useState('hyper')
-    const [isLoading, setIsLoading] = useState(false)
-    const [availableModes, setAvailableModes] = useState(['naive', 'graph', 'hyper'])
-
-    // 新增：RAG系统状态管理
-    const [systemsStatus, setSystemsStatus] = useState(null)
-
-    // 新增对比模式相关状态
-    const [isCompareMode, setIsCompareMode] = useState(false)
-    const [compareMode1, setCompareMode1] = useState('hyper')
-    const [compareMode2, setCompareMode2] = useState('naive')
-
-    // Storage keys
-    const storageScope = authStore.user?.id || authStore.user?.email || 'anonymous'
-    const STORAGE_KEYS = {
-        CONVERSATIONS: `hyperrag_conversations_v3_${storageScope}`,
-        ACTIVE_ID: `hyperrag_active_conversation_v3_${storageScope}`
-    }
-
-    // 定义所有可用的模式配置
-    const allModes = [
-        { value: 'llm', label: 'LLM', icon: Bot, color: 'bg-yellow-500', system: 'hyperrag' },
-        { value: 'naive', label: 'RAG', icon: BookOpen, color: 'bg-blue-500', system: 'hyperrag' },
-        { value: 'graph', label: 'Graph-RAG', icon: Bot, color: 'bg-orange-500', system: 'hyperrag' },
-        { value: 'hyper', label: 'Hyper-RAG', icon: Zap, color: 'bg-purple-500', system: 'hyperrag' },
-        { value: 'hyper-lite', label: 'Hyper-RAG-Lite', icon: Layers, color: 'bg-green-500', system: 'hyperrag' }
-    ]
-
-    // 从localStorage加载Mode配置
-    const loadModeSettings = () => {
-        try {
-            const modeSettings = localStorage.getItem('hyperrag_mode_settings')
-
-            if (modeSettings) {
-                const parsed = JSON.parse(modeSettings)
-
-                if (parsed.availableModes && Array.isArray(parsed.availableModes) && parsed.availableModes.length > 0) {
-                    setAvailableModes(parsed.availableModes)
-                    // 如果当前选择的mode不在可用列表中，选择第一个可用的mode
-                    if (!parsed.availableModes.includes(queryMode)) {
-                        setQueryMode(parsed.availableModes[0])
-                    }
-                } else {
-                    // 如果没有配置或配置为空，使用默认配置
-                    setAvailableModes(['naive', 'graph', 'hyper'])
-                }
-            } else {
-                // 出错时使用默认配置
-                setAvailableModes(['naive', 'graph', 'hyper'])
-            }
-        } catch (error) {
-            console.error('Failed to load mode settings:', error)
-            // 出错时使用默认配置
-            setAvailableModes(['naive', 'graph', 'hyper'])
-        }
-    }
-
-    // 监听localStorage变化
-    const handleStorageChange = (e) => {
-        if (e.key === 'hyperrag_mode_settings') {
-            loadModeSettings()
-        }
-    }
-
-    // 获取当前启用的模式列表
-    const enabledModes = allModes.filter(mode => availableModes.includes(mode.value))
-
-    // 获取模式标签的函数
-    const getModeLabel = (roleValue) => {
-        if (roleValue === 'user') {
-return 'You'
-}
-        const mode = allModes.find(m => m.value === roleValue)
-        return mode ? mode.label : roleValue
-    }
-
-    // Utility functions
-    const saveToStorage = () => {
-        localStorage.setItem(STORAGE_KEYS.CONVERSATIONS, JSON.stringify(conversations))
-        localStorage.setItem(STORAGE_KEYS.ACTIVE_ID, activeConversationId)
-    }
-
-    const loadFromStorage = () => {
-        try {
-            const savedConversations = localStorage.getItem(STORAGE_KEYS.CONVERSATIONS)
-            const savedActiveId = localStorage.getItem(STORAGE_KEYS.ACTIVE_ID)
-
-            if (savedConversations) {
-                const parsed = JSON.parse(savedConversations)
-                if (!Array.isArray(parsed) || parsed.length === 0) {
-                    const defaultConv = {
-                        id: 'default',
-                        title: 'New Conversation',
-                        messages: [],
-                        createdAt: new Date()
-                    }
-                    setConversations([defaultConv])
-                    setActiveConversationId('default')
-                    return
-                }
-                setConversations(parsed)
-
-                if (savedActiveId && parsed.find((c) => c.id === savedActiveId)) {
-                    setActiveConversationId(savedActiveId)
-                } else if (parsed.length > 0) {
-                    setActiveConversationId(parsed[0].id)
-                }
-            } else {
-                // Create default conversation
-                const defaultConv = {
-                    id: 'default',
-                    title: 'Chat 1',
-                    messages: [],
-                    createdAt: new Date()
-                }
-                setConversations([defaultConv])
-                setActiveConversationId('default')
-            }
-        } catch (error) {
-            console.error('Failed to load from storage:', error)
-            const fallbackConv = {
-                id: 'default',
-                title: 'New Conversation',
-                messages: [],
-                createdAt: new Date()
-            }
-            setConversations([fallbackConv])
-            setActiveConversationId('default')
-        }
-    }
-
-    const createNewConversation = () => {
-        const newConv = {
-            id: Date.now().toString(),
-            title: `Chat ${new Date().toLocaleTimeString()}`,
-            messages: [],
-            createdAt: new Date()
-        }
-        setConversations(prev => [newConv, ...prev])
-        setActiveConversationId(newConv.id)
-    }
-
-    const deleteConversation = (id) => {
-        setConversations(prev => prev.filter(c => c.id !== id))
-        if (activeConversationId === id) {
-            const remaining = conversations.filter(c => c.id !== id)
-            if (remaining.length > 0) {
-                setActiveConversationId(remaining[0].id)
-            } else {
-                createNewConversation()
-            }
-        }
-    }
-
-    const clearAllChats = () => {
-        setConversations([])
-        createNewConversation()
-    }
-
-    const activeConversation = conversations.find(c => c.id === activeConversationId)
-
-    const addMessage = (content, role, extraData = null) => {
-        const newMessage = {
-            id: Date.now(),
-            content,
-            role,
-            timestamp: new Date(),
-            // 添加检索信息字段
-            entities: extraData?.entities || [],
-            hyperedges: extraData?.hyperedges || [],
-            text_units: extraData?.text_units || [],
-            // 新增对比模式字段
-            isCompare: extraData?.isCompare || false,
-            compareResults: extraData?.compareResults || null
-        }
-
-        setConversations(prev =>
-            prev.map(conv =>
-                conv.id === activeConversationId
-                    ? { ...conv, messages: [...conv.messages, newMessage] }
-                    : conv
-            )
-        )
-    }
-
-    const updateLastMessage = (content, extraData = null) => {
-        setConversations(prev =>
-            prev.map(conv =>
-                conv.id === activeConversationId
-                    ? {
-                        ...conv,
-                        messages: conv.messages.map((msg, index) =>
-                            index === conv.messages.length - 1
-                                ? {
-                                    ...msg,
-                                    content,
-                                    // 如果有新的检索信息，更新它们
-                                    entities: extraData?.entities || msg.entities || [],
-                                    hyperedges: extraData?.hyperedges || msg.hyperedges || [],
-                                    text_units: extraData?.text_units || msg.text_units || [],
-                                    // 更新对比结果
-                                    isCompare: extraData?.isCompare !== undefined ? extraData.isCompare : msg.isCompare,
-                                    compareResults: extraData?.compareResults || msg.compareResults
-                                }
-                                : msg
-                        )
-                    }
-                    : conv
-            )
-        )
-    }
-
-    // 单模式查询函数
-    const querySingleMode = async (question, mode) => {
-        const response = await fetch(`${SERVER_URL}/hyperrag/query`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                question: question,
-                mode: mode,
-                top_k: 60,
-                max_token_for_text_unit: 1600,
-                max_token_for_entity_context: 300,
-                max_token_for_relation_context: 1600,
-                only_need_context: false,
-                response_type: 'Multiple Paragraphs',
-                database: storeGlobalUser.selectedDatabase
-            }),
-        })
-
-        if (!response.ok) {
-            throw new Error(`Network error: ${response.status}`)
-        }
-
-        const data = await response.json()
-
-        return {
-            ...data,
-            themes: data.themes || [],
-            rag_system: data.rag_system || 'hyperrag',  // 使用的RAG系统
-        }
-    }
-
-    const handleSubmit = async () => {
-        if (!inputValue.trim() || isLoading) {
-return
-}
-
-        const userMessage = inputValue.trim()
-        setInputValue('')
-        setIsLoading(true)
-
-        // Add user message
-        addMessage(userMessage, 'user')
-
-        if (isCompareMode) {
-            // 对比模式：同时查询两个模式
-            addMessage('正在对比分析中...', 'compare', { isCompare: true })
-
-            try {
-                const [result1, result2] = await Promise.all([
-                    querySingleMode(userMessage, compareMode1),
-                    querySingleMode(userMessage, compareMode2)
-                ])
-
-                const modeNames = {
-                    'hyper': 'Hyper-RAG',
-                    'hyper-lite': 'Hyper-RAG-Lite',
-                    'graph': 'Graph-RAG',
-                    'naive': 'RAG',
-                    'llm': 'LLM',
-                }
-
-                const compareResults = {
-                    mode1: {
-                        name: modeNames[compareMode1] || compareMode1,
-                        mode: compareMode1,
-                        response: result1.success ? (result1.response || 'No response content') : `Error: ${result1.message}`,
-                        entities: result1.entities || [],
-                        hyperedges: result1.hyperedges || [],
-                        text_units: result1.text_units || [],
-                        success: result1.success
-                    },
-                    mode2: {
-                        name: modeNames[compareMode2] || compareMode2,
-                        mode: compareMode2,
-                        response: result2.success ? (result2.response || 'No response content') : `Error: ${result2.message}`,
-                        entities: result2.entities || [],
-                        hyperedges: result2.hyperedges || [],
-                        text_units: result2.text_units || [],
-                        success: result2.success
-                    }
-                }
-
-                updateLastMessage('对比分析完成', {
-                    isCompare: true,
-                    compareResults: compareResults
-                })
-
-            } catch (error) {
-                console.error('Error in compare mode:', error)
-                updateLastMessage(`对比分析出错: ${error instanceof Error ? error.message : 'Unknown error'}`, {
-                    isCompare: true
-                })
-            }
-        } else {
-            // 单模式查询（原有逻辑）
-            addMessage('正在思考中...', queryMode)
-
-            try {
-                const data = await querySingleMode(userMessage, queryMode)
-
-                if (data.success) {
-                    const modeNames = {
-                        // HyperRAG 模式
-                        'hyper': 'Hyper-RAG',
-                        'hyper-lite': 'Hyper-RAG-Lite',
-                        'graph': 'Graph-RAG',
-                        'naive': 'RAG',
-                        'llm': 'LLM'
-                    }
-                    const modeName = modeNames[queryMode] || queryMode
-                    const systemName = 'HyperRAG'
-
-                    let responseContent = data.response || 'No response content'
-                    responseContent += `\n\n---\n*${systemName} - ${modeName}*`
-
-                    updateLastMessage(responseContent, {
-                        entities: data.entities || [],
-                        hyperedges: data.hyperedges || [],
-                        text_units: data.text_units || [],
-                        themes: data.themes || [],
-                        rag_system: data.rag_system || 'hyperrag'
-                    })
-                } else {
-                    throw new Error(data.message || 'Query failed')
-                }
-            } catch (error) {
-                console.error('Error sending message:', error)
-                updateLastMessage(`Sorry, an error occurred: ${error instanceof Error ? error.message : 'Unknown error'}`)
-            }
-        }
-
-        setIsLoading(false)
-    }
-
-    const handleKeyPress = (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault()
-            handleSubmit()
-        }
-    }
-
-    // Effects
-    useEffect(() => {
-        storeGlobalUser.restoreSelectedDatabase()
-        storeGlobalUser.loadDatabases()
-        loadFromStorage()
-        loadModeSettings()
-
-        // 获取系统状态
-        fetch(`${SERVER_URL}/systems/status`)
-            .then(response => response.json())
-            .then(data => {
-                setSystemsStatus(data)
-            })
-            .catch(error => {
-                console.error('Failed to load systems status:', error)
-            })
-
-        // 添加storage事件监听器
-        window.addEventListener('storage', handleStorageChange)
-
-        return () => {
-            window.removeEventListener('storage', handleStorageChange)
-        }
-    }, [storageScope])
-
-    useEffect(() => {
-        if (conversations.length > 0) {
-            saveToStorage()
-        }
-    }, [conversations, activeConversationId, storageScope])
-
-    // 当availableModes变化时，确保当前选择的mode在可用列表中
-    useEffect(() => {
-        if (availableModes.length > 0 && !availableModes.includes(queryMode)) {
-            setQueryMode(availableModes[0])
-        }
-    }, [availableModes, queryMode])
-
-    // 当对比模式切换时，确保选择的模式在可用列表中
-    useEffect(() => {
-        if (availableModes.length > 0) {
-            if (!availableModes.includes(compareMode1)) {
-                setCompareMode1(availableModes[0])
-            }
-            if (!availableModes.includes(compareMode2)) {
-                setCompareMode2(availableModes[Math.min(1, availableModes.length - 1)])
-            }
-        }
-    }, [availableModes, compareMode1, compareMode2])
-
-    return (
-        <div className="relative flex h-screen bg-transparent p-3 sm:p-4">
-            {/* Sidebar */}
-            <div className="hyperche-card mr-3 flex w-56 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white/80 shadow-sm backdrop-blur-xl">
-
-                {/* Mode Selector */}
-                <div className="flex items-center space-x-1 p-4 text-base">
-                    <div className="flex w-full flex-col space-y-1 rounded-2xl bg-slate-50 p-2">
-                        <div className="flex items-center space-x-2 mb-3">
-                            <Settings className="w-5 h-5 shrink-0 text-gray-500" />
-                            <span className="font-medium text-gray-700 flex-1">Mode: </span>
-                            {/* 对比模式开关 */}
-                            <div className=" p-2 bg-white rounded-md">
-                                <label className="flex items-center cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={isCompareMode}
-                                        onChange={(e) => setIsCompareMode(e.target.checked)}
-                                        className="rounded"
-                                    />
-                                    <span className="text-sm font-medium text-gray-700 ml-1">对比</span>
-                                    <GitCompare className="w-4 h-4 text-blue-500" />
-                                </label>
-                            </div>
-                        </div>
-
-                        {isCompareMode ? (
-                            /* 对比模式：显示两个模式选择器 */
-                            <div className="space-y-3">
-                                <div>
-                                    <span className="text-xs text-gray-500 mb-1 block">Mode 1:</span>
-                                    <div className="space-y-1">
-                                        {enabledModes.map((mode) => {
-                                            const IconComponent = mode.icon
-                                            return (
-                                                <button
-                                                    key={`mode1-${mode.value}`}
-                                                    onClick={() => setCompareMode1(mode.value)}
-                                                    className={`text-base flex items-center space-x-2 px-3 py-1.5 rounded-md font-medium transition-all duration-200 cursor-pointer w-full ${compareMode1 === mode.value
-                                                        ? `${mode.color} text-white shadow-md`
-                                                        : 'text-gray-600 hover:bg-gray-200'
-                                                        }`}
-                                                >
-                                                    <IconComponent className="w-3 h-3 shrink-0" />
-                                                    <span>{mode.label}</span>
-                                                </button>
-                                            )
-                                        })}
-                                    </div>
-                                </div>
-                                <div>
-                                    <span className="text-xs text-gray-500 mb-1 block">Mode 2:</span>
-                                    <div className="space-y-1">
-                                        {enabledModes.map((mode) => {
-                                            const IconComponent = mode.icon
-                                            return (
-                                                <button
-                                                    key={`mode2-${mode.value}`}
-                                                    onClick={() => setCompareMode2(mode.value)}
-                                                    className={`text-base flex items-center space-x-2 px-3 py-1.5 rounded-md font-medium transition-all duration-200 cursor-pointer w-full ${compareMode2 === mode.value
-                                                        ? `${mode.color} text-white shadow-md`
-                                                        : 'text-gray-600 hover:bg-gray-200'
-                                                        }`}
-                                                >
-                                                    <IconComponent className="w-3 h-3 shrink-0" />
-                                                    <span>{mode.label}</span>
-                                                </button>
-                                            )
-                                        })}
-                                    </div>
-                                </div>
-                            </div>
-                        ) : (
-                            /* 单模式：显示原有的模式选择器 */
-                            enabledModes.map((mode) => {
-                                const IconComponent = mode.icon
-                                return (
-                                    <button
-                                        key={mode.value}
-                                        onClick={() => setQueryMode(mode.value)}
-                                        className={`text-base flex items-center space-x-2 px-4 py-2 rounded-md font-medium transition-all duration-200 cursor-pointer ${queryMode === mode.value
-                                            ? `${mode.color} text-white shadow-md`
-                                            : 'text-gray-600 hover:bg-gray-200'
-                                            }`}
-                                    >
-                                        <IconComponent className="w-4 h-4 shrink-0" />
-                                        <span>{mode.label}</span>
-                                    </button>
-                                )
-                            })
-                        )}
-                    </div>
-                </div>
-
-                {/* 系统状态指示器 */}
-                <div className="mx-3 mt-4 p-3 bg-white rounded-lg border border-gray-200">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-2">
-                            <Zap className="w-4 h-4 text-blue-500" />
-                            <span className="text-sm font-medium text-gray-700">
-                                当前使用：HyperRAG 系统
-                            </span>
-                        </div>
-                        {systemsStatus?.hyperrag && (
-                            <Tag color="blue" className="text-xs">
-                                {systemsStatus.hyperrag.instances} 实例
-                            </Tag>
-                        )}
-                    </div>
-                </div>
-
-                {/* Header */}
-                <Separator className="my-3" />
-                <div className="p-4 border-b border-gray-200">
-                    <Button
-                        onClick={createNewConversation}
-                        className="w-full"
-                        variant="outline"
-                    >
-                        <Plus className="w-4 h-4 mr-2" />
-                        New Conversation
-                    </Button>
-                </div>
-
-                {/* Conversations List */}
-                <ScrollArea className="flex-1 p-2">
-                    <div className="space-y-2">
-                        {conversations.map((conv) => (
-                            <div
-                                key={conv.id}
-                                className={`group p-1 rounded-lg cursor-pointer transition-colors ${activeConversationId === conv.id
-                                    ? 'bg-blue-50 border border-blue-200'
-                                    : 'hover:bg-gray-50'
-                                    }`}
-                                onClick={() => setActiveConversationId(conv.id)}
-                            >
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center space-x-2 flex-1 min-w-0">
-                                        <MessageCircle className="w-4 h-4 text-gray-500" />
-                                        <span className="text-sm font-medium text-gray-900 truncate">
-                                            {conv.title}
-                                        </span>
-                                    </div>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="opacity-0 group-hover:opacity-100 h-6 w-6"
-                                        onClick={(e) => {
-                                            e.stopPropagation()
-                                            deleteConversation(conv.id)
-                                        }}
-                                    >
-                                        <Trash2 className="w-3 h-3" />
-                                    </Button>
-                                </div>
-
-                            </div>
-                        ))}
-                    </div>
-                </ScrollArea>
-
-                {/* Controls */}
-                <div className="p-4 border-t border-gray-200 space-y-4">
-                    <Button
-                        variant="outline"
-                        onClick={clearAllChats}
-                        className="w-full"
-                    >
-                        <RotateCcw className="w-4 h-4 mr-2" />
-                        Clear All Chats
-                    </Button>
-                </div>
-
-            </div>
-
-            {/* Main Content */}
-            <div className="min-w-0 flex-1 flex flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white/75 shadow-sm backdrop-blur-xl">
-                {/* Top Bar */}
-                <div className="border-b border-slate-200/80 bg-white/75 p-4 backdrop-blur-xl">
-                    <div className="flex items-center justify-between w-full">
-                        <div className="flex items-center space-x-4">
-                            <Database className="w-5 h-5 text-gray-500" />
-                            <span className="font-medium text-gray-700">Database:</span>
-                            <DatabaseSelector
-                                mode="select"
-                                showRefresh={true}
-                                placeholder="选择数据库"
-                                style={{}}
-                                size="middle"
-                                disabled={false}
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                {/* Chat Area */}
-                <div className="flex-1 flex flex-col">
-                    {/* Messages */}
-                    <ScrollArea className="h-[calc(100vh-225px)] bg-transparent p-4 pb-0 sm:p-6">
-                        {activeConversation?.messages.length === 0 ? (
-                            <div className="flex flex-1 items-center justify-center pt-20">
-                                <div className="text-center hyperche-reveal">
-                                    <div className="hyperche-pulse mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-[2rem] border border-blue-100 bg-blue-50 text-blue-600"><Bot className="h-9 w-9" /></div>
-                                    <h3 className="text-lg font-medium text-gray-900 mb-2">
-                                        开始使用 HyperChE
-                                    </h3>
-                                    <p className="text-gray-500 max-w-md">
-                                        选择检索模式与知识库，输入你的科研问题开始检索。
-                                    </p>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="mx-auto max-w-5xl space-y-6">
-                                {activeConversation?.messages.map((message) => (
-                                    <div key={message.id + message.content} className="flex space-x-4">
-                                        <Avatar>
-                                            {message.role === 'user' ? (
-                                                <AvatarFallback>
-                                                    <User className="w-5 h-5" />
-                                                </AvatarFallback>
-                                            ) : (
-                                                <AvatarFallback>
-                                                    {message.isCompare ? (
-                                                        <GitCompare className="w-5 h-5" />
-                                                    ) : (
-                                                        <Bot className="w-5 h-5" />
-                                                    )}
-                                                </AvatarFallback>
-                                            )}
-                                        </Avatar>
-
-                                        <div className="flex-1 space-y-2">
-                                            <div className="flex items-center space-x-2">
-                                                <span className="font-medium text-gray-900">
-                                                    {message.isCompare ? '对比分析' : getModeLabel(message.role)}
-                                                </span>
-                                                {/* 系统标识标签 */}
-                                                {message.rag_system === 'hyperrag' && (
-                                                    <Tag color="blue" className="ml-2">HyperRAG</Tag>
-                                                )}
-                                                <span className="text-xs text-gray-500">
-                                                    {new Date(message.timestamp).toLocaleTimeString()}
-                                                </span>
-                                            </div>
-
-                                            {message.isCompare && message.compareResults ? (
-                                                /* 对比模式的消息展示 */
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    {/* 模式1结果 */}
-                                                    <div className="flex flex-col bg-blue-50 border border-blue-200 rounded-lg p-4">
-                                                        <div className="flex items-center space-x-2 mb-3">
-                                                            <div className="flex items-center space-x-2">
-                                                                {(() => {
-                                                                    const mode = allModes.find(m => m.value === message.compareResults.mode1.mode)
-                                                                    const IconComponent = mode?.icon || Bot
-                                                                    return <IconComponent className="w-4 h-4" />
-                                                                })()}
-                                                                <span className="font-medium text-blue-800">
-                                                                    {message.compareResults.mode1.name}
-                                                                </span>
-                                                            </div>
-                                                            {!message.compareResults.mode1.success && (
-                                                                <span className="text-xs text-red-500">Failed</span>
-                                                            )}
-                                                        </div>
-
-                                                        <div className="flex-1 flex flex-col">
-                                                            <div className="flex-1 prose prose-sm">
-                                                                <ReactMarkdown
-                                                                    components={{
-                                                                        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                                                                        code: ({ children, className }) => (
-                                                                            <code className={`${className} bg-blue-100 px-1 rounded`}>
-                                                                                {children}
-                                                                            </code>
-                                                                        ),
-                                                                        pre: ({ children }) => (
-                                                                            <pre className="bg-blue-100 p-3 rounded-md overflow-x-auto">
-                                                                                {children}
-                                                                            </pre>
-                                                                        ),
-                                                                    }}
-                                                                >
-                                                                    {message.compareResults.mode1.response}
-                                                                </ReactMarkdown>
-                                                            </div>
-
-                                                            {message.compareResults.mode1.success && (
-                                                                <div className='overflow-auto pl-2'>
-                                                                    <RetrievalInfo
-                                                                        entities={message.compareResults.mode1.entities || []}
-                                                                        hyperedges={message.compareResults.mode1.hyperedges || []}
-                                                                        textUnits={message.compareResults.mode1.text_units || []}
-                                                                        mode={message.compareResults.mode1.mode}
-                                                                    />
-
-                                                                    {((message.compareResults.mode1.entities && message.compareResults.mode1.entities.length > 0) ||
-                                                                        (message.compareResults.mode1.hyperedges && message.compareResults.mode1.hyperedges.length > 0)) && (
-                                                                            <LazyRetrievalGraph
-                                                                                entities={message.compareResults.mode1.entities || []}
-                                                                                hyperedges={message.compareResults.mode1.hyperedges || []}
-                                                                                height="300px"
-                                                                                mode={message.compareResults.mode1.mode}
-                                                                                graphId={`compare-graph-1-${message.id}`}
-                                                                            />
-                                                                        )}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-
-                                                    {/* 模式2结果 */}
-                                                    <div className="flex flex-col bg-green-50 border border-green-200 rounded-lg p-4">
-                                                        <div className="flex items-center space-x-2 mb-3">
-                                                            <div className="flex items-center space-x-2">
-                                                                {(() => {
-                                                                    const mode = allModes.find(m => m.value === message.compareResults.mode2.mode)
-                                                                    const IconComponent = mode?.icon || Bot
-                                                                    return <IconComponent className="w-4 h-4" />
-                                                                })()}
-                                                                <span className="font-medium text-green-800">
-                                                                    {message.compareResults.mode2.name}
-                                                                </span>
-                                                            </div>
-                                                            {!message.compareResults.mode2.success && (
-                                                                <span className="text-xs text-red-500">Failed</span>
-                                                            )}
-                                                        </div>
-
-                                                        <div className="flex-1 flex flex-col">
-                                                            <div className="flex-1 prose prose-sm">
-                                                                <ReactMarkdown
-                                                                    components={{
-                                                                        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                                                                        code: ({ children, className }) => (
-                                                                            <code className={`${className} bg-green-100 px-1 rounded`}>
-                                                                                {children}
-                                                                            </code>
-                                                                        ),
-                                                                        pre: ({ children }) => (
-                                                                            <pre className="bg-green-100 p-3 rounded-md overflow-x-auto">
-                                                                                {children}
-                                                                            </pre>
-                                                                        ),
-                                                                    }}
-                                                                >
-                                                                    {message.compareResults.mode2.response}
-                                                                </ReactMarkdown>
-                                                            </div>
-
-                                                            {message.compareResults.mode2.success && (
-                                                                <div className='overflow-auto pl-2'>
-                                                                    <RetrievalInfo
-                                                                        entities={message.compareResults.mode2.entities || []}
-                                                                        hyperedges={message.compareResults.mode2.hyperedges || []}
-                                                                        textUnits={message.compareResults.mode2.text_units || []}
-                                                                        mode={message.compareResults.mode2.mode}
-                                                                    />
-
-                                                                    {((message.compareResults.mode2.entities && message.compareResults.mode2.entities.length > 0) ||
-                                                                        (message.compareResults.mode2.hyperedges && message.compareResults.mode2.hyperedges.length > 0)) && (
-                                                                            <LazyRetrievalGraph
-                                                                                entities={message.compareResults.mode2.entities || []}
-                                                                                hyperedges={message.compareResults.mode2.hyperedges || []}
-                                                                                height="300px"
-                                                                                mode={message.compareResults.mode2.mode}
-                                                                                graphId={`compare-graph-2-${message.id}`}
-                                                                            />
-                                                                        )}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                /* 单模式的消息展示（原有逻辑） */
-                                                <div className={`rounded-lg p-4 ${message.role === 'user'
-                                                    ? 'bg-blue-50 border border-blue-200'
-                                                    : 'bg-gray-50 border border-gray-200'
-                                                    }`}>
-                                                    {message.role !== 'user' ? (
-                                                        <div className='flex'>
-                                                            <div className="flex-1 prose prose-sm z-0">
-                                                                <ReactMarkdown
-                                                                    components={{
-                                                                        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                                                                        code: ({ children, className }) => (
-                                                                            <code className={`${className} bg-gray-100 px-1 rounded`}>
-                                                                                {children}
-                                                                            </code>
-                                                                        ),
-                                                                        pre: ({ children }) => (
-                                                                            <pre className="bg-gray-100 p-3 rounded-md overflow-x-auto">
-                                                                                {children}
-                                                                            </pre>
-                                                                        ),
-                                                                    }}
-                                                                >
-                                                                    {message.content}
-                                                                </ReactMarkdown>
-                                                            </div>
-                                                            <div className='flex-[0.7] overflow-auto pl-2 z-10'>
-                                                                {/* 显示检索信息 */}
-                                                                <RetrievalInfo
-                                                                    entities={message.entities || []}
-                                                                    hyperedges={message.hyperedges || []}
-                                                                    textUnits={message.text_units || []}
-                                                                    themes={message.themes || []}  // 添加主题信息
-                                                                    mode={message.role}
-                                                                />
-
-                                                                {/* 超图可视化展示 */}
-                                                                {((message.entities && message.entities.length > 0) ||
-                                                                    (message.hyperedges && message.hyperedges.length > 0) ||
-                                                                    (message.themes && message.themes.length > 0)) && (
-                                                                        <LazyRetrievalGraph
-                                                                            entities={message.entities || []}
-                                                                            hyperedges={message.hyperedges || []}
-                                                                            themes={message.themes || []}
-                                                                            height="400px"
-                                                                            mode={message.role}
-                                                                            graphId={`retrieval-graph-${message.id}`}
-                                                                        />
-                                                                    )}
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        <p className="text-gray-900 whitespace-pre-wrap m-0">
-                                                            {message.content}
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </ScrollArea>
-
-                    {/* Input Area */}
-                    <div className="border-t border-slate-200/80 bg-white/75 p-3 backdrop-blur-xl">
-                        <div className="max-w-4xl mx-auto">
-                            <div className="flex space-x-4 items-center">
-                                <Textarea
-                                    value={inputValue}
-                                    onChange={(e) => setInputValue(e.target.value)}
-                                    onKeyPress={handleKeyPress}
-                                    placeholder={isCompareMode
-                                        ? `对比 ${getModeLabel(compareMode1)} 和 ${getModeLabel(compareMode2)} 的回答...`
-                                        : "Ask me anything about your knowledge base..."
-                                    }
-                                    className="flex-1 h-7 resize-none"
-                                    disabled={isLoading}
-                                />
-                                <Button
-                                    onClick={handleSubmit}
-                                    disabled={!inputValue.trim() || isLoading}
-                                    size="lg"
-                                    className="px-6"
-                                >
-                                    {isLoading ? (
-                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                    ) : (
-                                        <Send className="w-4 h-4" />
-                                    )}
-                                </Button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    )
-}
-
-export default observer(HyperRAGHome)
+export default observer(Home)

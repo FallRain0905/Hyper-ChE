@@ -5,6 +5,7 @@ import { router } from '../config/routes'
 
 import Loading from './components/loading'
 import './styles/tailwind.css'
+import './styles/research.css'
 import './i18n'
 import { SERVER_URL } from './utils'
 
@@ -19,5 +20,7 @@ window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
 }
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
-  <RouterProvider router={router} fallbackElement={<Loading />} />
+  <React.Suspense fallback={<Loading />}>
+    <RouterProvider router={router} fallbackElement={<Loading />} />
+  </React.Suspense>
 )

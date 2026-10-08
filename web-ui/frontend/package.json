@@ -8,6 +8,8 @@
     "start:mock": "vite --mode mock",
     "start:production": "vite --mode production",
     "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test:retrieval": "node --test scripts/retrieval-client.test.cjs",
     "preview": "vite preview",
     "lint:script": "eslint --ext .ts,.tsx --fix  ./",
     "lint:style": "stylelint --fix  **/*.{css,less,scss}"

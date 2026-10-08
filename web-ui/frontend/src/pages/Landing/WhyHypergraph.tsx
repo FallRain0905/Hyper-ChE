@@ -1,3 +1,4 @@
+import ResearchDock from '@/components/ResearchDock'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Beaker, GitBranch, Network, Route } from 'lucide-react'
 
@@ -27,18 +28,8 @@ const ExampleCard = ({ title, question, graph, hypergraph }: { title: string; qu
 )
 
 const WhyHypergraph = () => (
-  <div className="min-h-screen bg-[#F8FAFC] text-slate-950">
-    <header className="border-b border-slate-200 bg-white">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-        <Link to="/" className="flex items-center gap-3 text-sm font-medium text-slate-700 hover:text-teal-700">
-          <ArrowLeft size={16} />
-          返回首页
-        </Link>
-        <Link to="/app/Hyper/chat" className="rounded-lg bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-800">
-          进入工作台
-        </Link>
-      </div>
-    </header>
+  <div className="research-app min-h-screen" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
+    <ResearchDock publicPage />
 
     <main className="mx-auto max-w-6xl px-6 py-12">
       <div className="mb-10 max-w-3xl">

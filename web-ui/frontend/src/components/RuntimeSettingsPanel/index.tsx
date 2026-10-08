@@ -21,7 +21,7 @@ const defaults: RuntimeSettings = {
   indexProfile: 'dual_concat',
   enableEntityNormalization: true,
   enableMeasurementInstances: true,
-  enableEfuRepair: true,
+  enableEfuRepair: false,
   enableHybridRerank: true,
 }
 
@@ -71,7 +71,7 @@ export default function RuntimeSettingsPanel() {
     { key: 'enableEntityNormalization', title: '实体归一化', desc: '合并同义实体与规范化名称' },
     { key: 'enableMeasurementInstances', title: '测量实例', desc: '保留实验数值及测量上下文' },
     { key: 'enableEfuRepair', title: 'EFU Repair', desc: '启用抽取结果修复流程' },
-    { key: 'enableHybridRerank', title: '混合重排', desc: '融合语义与超图结构结果' },
+    { key: 'enableHybridRerank', title: '结构重排', desc: '最终索引查询使用同一候选池的结构排序' },
   ]
 
   return (
