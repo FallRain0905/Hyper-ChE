@@ -59,7 +59,7 @@ deploy/                    Docker 部署说明
 
 F0/F1 共用 hybrid RRF top-50 候选池，只切换重排。F1 相比 F0 的 Hit@5 增加 1.72 个百分点，CFR 均为 64/150。因此主要改善来自最终表示与候选组织，重排提供有限的顺序优化。B1/B2 的检索入口和候选预算不同，不能作为严格的单变量结构消融；见 [B1/B2 诊断](experiments/final_v1/reports/B1_B2_retrieval_protocol_diagnosis.md)。当前没有报告统计显著性。
 
-QA 是补充结果：F1 的 40 道题使用 `kimi-k2.6`，top-k=5、1,500 字符证据预算、temperature=1.0、top-p=0.95、seed=20260811。F1 使用阿里 DashScope，历史运行使用 Moonshot，不能声称服务条件完全一致。历史多组汇总尚不完整，F0 未运行 QA；见 [QA 协议](experiments/final_v1/qa/qa_final_protocol.json)。
+QA 是补充结果：F1 的 40 道题使用 `kimi-k2.6`，top-k=5、temperature=1.0、top-p=0.95、seed=20260811。归档参数名为 `evidence_budget_chars=1500`，但当前评测实现实际按空白分隔片段计数，预算为 1,500 个片段，并非严格 1,500 字符；该实现事实须保留在结果解释中。F1 使用阿里 DashScope，历史运行使用 Moonshot，不能声称服务条件完全一致。历史多组汇总尚不完整，F0 未运行 QA；见 [QA 协议](experiments/final_v1/qa/qa_final_protocol.json)。线上 Web QA 的模型、生成参数和上下文预算由运行配置决定，不自动等同于这份冻结的 40QA 评测；论文结果不因 Web 更新而重算。
 
 ## 安装与本地运行
 
@@ -106,10 +106,13 @@ npm run start:production
 ```powershell
 Copy-Item .env.hyperche.example .env
 # 编辑 .env 中的管理员、数据库密码和应用密钥
-docker compose -f docker-compose.hyperche.yml --env-file .env up -d --build
+# HYPERCHE_FINAL_CACHE_HOST_DIR 指向私下准备的最终缓存目录
+docker compose -p hyperche -f docker-compose.hyperche.yml --env-file .env up -d --build --wait
 ```
 
-部署和数据持久化见 [deploy/README.md](deploy/README.md)。镜像包含源码和配置，原始文献及向量缓存需自行构建或挂载。
+默认容器网关只监听 `127.0.0.1:8088`，生产域名为 `https://hyperche.fallrain0905.top`，汇报页位于 `/report/hyperche-demo.html`。宿主 Nginx 独立站点提供 HTTPS、SSE 与 WebSocket；现有中转站点不受替换。部署、健康检查、私有配置、数据持久化与回滚见 [deploy/README.md](deploy/README.md)。镜像包含源码和配置，原始文献及向量缓存私下准备，不进入 Git 或镜像。
+
+生产示例名仍为 `case1`，实际使用只读 `final_v1` 缓存；响应和页面披露缓存版本、模型与检索配置。尚未配置模型时显示待配置状态，页面及离线汇报可用，真实模型问答需由管理员配置兼容通道后启用。匿名示例调用通过 Redis 限制频率、每日额度和并发；用户上传构建的数据保存在独立可写知识库中。
 
 ## 结果复现与新实验
 

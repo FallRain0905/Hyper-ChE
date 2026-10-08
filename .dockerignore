@@ -1,6 +1,10 @@
 ﻿.git
 .git/**
 .gitignore
+**/node_modules/
+**/.venv/
+**/venv/
+**/__pycache__/
 
 # Local research and build artifacts
 outputs/
@@ -10,7 +14,22 @@ web-ui/frontend/.npm-cache/
 web-ui/frontend/dist/
 
 # Runtime secrets and mutable data
+.env
+.env.*
+**/.env
+**/.env.*
+*.accdb
+**/*.accdb
+*.mdb
+**/*.mdb
+**/*.secrets-backup
+**/*.bak
+**/*.key
+**/*.pem
+my_config.py
 web-ui/backend/settings.json
+web-ui/backend/settings.json*
+web-ui/backend/runtime/
 web-ui/backend/uploads/
 web-ui/backend/knowledge_bases/
 web-ui/backend/logs/

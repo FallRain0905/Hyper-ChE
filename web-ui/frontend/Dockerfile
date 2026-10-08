@@ -3,8 +3,7 @@ FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --legacy-peer-deps --no-audit --no-fund
-RUN npm install @rollup/rollup-linux-x64-gnu@4.59.0 --no-save --legacy-peer-deps --no-audit --no-fund
+RUN npm ci --include=optional --legacy-peer-deps --no-audit --no-fund
 
 COPY . .
 

@@ -1,3 +1,5 @@
+name: hyperche
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -5,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-hyperche}
       POSTGRES_USER: ${POSTGRES_USER:-hyperche}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hyperche_change_me}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the private env file}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,8 +22,14 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   backend:
+    image: hyperche/backend:${HYPERCHE_RELEASE:-local}
     build:
       context: .
       dockerfile: web-ui/backend/Dockerfile
@@ -30,14 +38,14 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://hyperche:${POSTGRES_PASSWORD:-hyperche_change_me}@postgres:5432/${POSTGRES_DB:-hyperche}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hyperche}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the private env file}@postgres:5432/${POSTGRES_DB:-hyperche}
       REDIS_URL: redis://redis:6379/0
-      JWT_SECRET: ${JWT_SECRET:-change-me-jwt-secret}
-      APP_SECRET_KEY: ${APP_SECRET_KEY:-change-me-app-secret}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:8080}
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      JWT_SECRET: ${JWT_SECRET:?Set a stable JWT_SECRET in the private env file}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?Set a stable APP_SECRET_KEY in the private env file}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://hyperche.fallrain0905.top}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
       TRIAL_DOC_LIMIT: ${TRIAL_DOC_LIMIT:-3}
       TRIAL_LLM_CALL_LIMIT: ${TRIAL_LLM_CALL_LIMIT:-50}
       TRIAL_EMBEDDING_CALL_LIMIT: ${TRIAL_EMBEDDING_CALL_LIMIT:-200}
@@ -48,30 +56,63 @@ services:
       HYPERCHE_SETTINGS_FILE: /app/config/settings.json
       HYPERCHE_PROMPT_DOMAINS_DIR: /app/runtime/prompt_domains
       HYPERCHE_PUBLIC_DEMO_DATABASE: ${HYPERCHE_PUBLIC_DEMO_DATABASE:-case1}
+      HYPERCHE_FINAL_CACHE_DIR: /app/readonly_caches/final_v1
+      HYPERCHE_FINAL_CACHE_DATABASE: ${HYPERCHE_FINAL_CACHE_DATABASE:-case1}
+      HYPERCHE_PUBLIC_IP_PER_MINUTE: ${HYPERCHE_PUBLIC_IP_PER_MINUTE:-2}
+      HYPERCHE_PUBLIC_IP_PER_DAY: ${HYPERCHE_PUBLIC_IP_PER_DAY:-20}
+      HYPERCHE_PUBLIC_GLOBAL_PER_DAY: ${HYPERCHE_PUBLIC_GLOBAL_PER_DAY:-100}
+      HYPERCHE_PUBLIC_IP_CONCURRENCY: ${HYPERCHE_PUBLIC_IP_CONCURRENCY:-1}
+      HYPERCHE_PUBLIC_GLOBAL_CONCURRENCY: ${HYPERCHE_PUBLIC_GLOBAL_CONCURRENCY:-2}
+      HYPERCHE_TRUSTED_PROXY_CIDRS: ${HYPERCHE_TRUSTED_PROXY_CIDRS:-127.0.0.1/32,::1/128,172.16.0.0/12}
+      FORWARDED_ALLOW_IPS: ${HYPERCHE_TRUSTED_PROXY_CIDRS:-127.0.0.1/32,::1/128,172.16.0.0/12}
     volumes:
       - backend_config:/app/config
       - backend_uploads:/app/uploads
       - backend_hyperrag_cache:/app/hyperrag_cache
       - backend_cograg_cache:/app/cograg_cache
       - backend_logs:/app/logs
+      - backend_knowledge_bases:/app/knowledge_bases
+      - backend_runtime:/app/runtime
+      - type: bind
+        source: ${HYPERCHE_FINAL_CACHE_HOST_DIR:-/opt/hyperche/shared/final_cache}
+        target: /app/readonly_caches/final_v1
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
 
   frontend:
+    image: hyperche/frontend:${HYPERCHE_RELEASE:-local}
     build:
       context: ./web-ui/frontend
       args:
         VITE_SERVER_URL: /api
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:5000/', r => { r.resume(); process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
     ports:
-      - "${HTTP_PORT:-80}:80"
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8088}:80"
     volumes:
       - ./deploy/nginx.hyperche.conf:/etc/nginx/conf.d/default.conf:ro
 
@@ -83,3 +124,5 @@ volumes:
   backend_cograg_cache:
   backend_logs:
   backend_config:
+  backend_knowledge_bases:
+  backend_runtime:
