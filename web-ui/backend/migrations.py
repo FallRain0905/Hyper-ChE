@@ -43,7 +43,13 @@ SEED_MARKER = "builtin-domains"
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    # The checkout keeps this module under web-ui/backend; the production image
+    # flattens it into /app alongside hyperrag. Resolve both layouts by content.
+    module_path = Path(__file__).resolve()
+    for candidate in module_path.parents:
+        if (candidate / "hyperrag" / "domains").is_dir():
+            return candidate
+    return module_path.parent
 
 
 def _domains_dir() -> Path:

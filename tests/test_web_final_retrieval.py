@@ -302,6 +302,15 @@ def test_models_status_uses_personal_channels_when_platform_empty(backend, monke
     assert not backend.query_model_status(final=True, user_id=None)["models_ready"]
 
 
+def test_builtin_prompt_path_resolves_flat_container_and_nested_checkout(backend, monkeypatch, tmp_path):
+    import migrations
+    root = tmp_path / "app"
+    (root / "hyperrag/domains").mkdir(parents=True)
+    for module_path in (root / "migrations.py", root / "web-ui/backend/migrations.py"):
+        monkeypatch.setattr(migrations, "__file__", str(module_path))
+        assert migrations._domains_dir() == root / "hyperrag/domains"
+
+
 @pytest.mark.parametrize("streaming,after_token", [(False, False), (True, False), (True, True)])
 def test_provider_cancellation_never_fails_over(backend, monkeypatch, tmp_path, streaming, after_token):
     settings = tmp_path / "cancel-settings.json"
