@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import Any
+import os
 
 PUBLIC_DEMO_ID = "flow-battery"
 PUBLIC_DEMO_NAME = "液流电池公开知识库"
@@ -30,6 +31,12 @@ def _is_lfs_pointer(path: Path) -> bool:
 
 def inspect_public_demo_cache(cache_root: str | Path, database: str) -> dict[str, Any]:
     """Return a safe, API-ready health report for the configured demo cache."""
+    final_path = final_cache_path(cache_root, database)
+    if final_path is not None:
+        from hyperche.retrieval.runtime import inspect_final_cache
+        status = inspect_final_cache(final_path)
+        return {**status, "ready": status["cache_ready"], "database": database,
+                "cache_exists": final_path.is_dir(), "optional_missing_files": [], "retrieval_profile": "f1"}
     database_dir = Path(cache_root) / database
     missing_files: list[str] = []
     lfs_pointer_files: list[str] = []
@@ -53,7 +60,26 @@ def inspect_public_demo_cache(cache_root: str | Path, database: str) -> dict[str
         "missing_files": missing_files,
         "lfs_pointer_files": lfs_pointer_files,
         "optional_missing_files": optional_missing_files,
+        "cache_ready": database_dir.is_dir() and not missing_files and not lfs_pointer_files,
+        "retrieval_profile": "legacy", "read_only": False,
     }
+
+
+def final_cache_path(cache_root: str | Path, database: str) -> Path | None:
+    """Bind the explicit read-only mount, or detect a server-published final KB.
+
+    A mode setting alone never upgrades a user-built/legacy database to F1.
+    Presence of final metadata means it must validate before it may be queried.
+    """
+    name = str(database or "").removesuffix(".hgdb")
+    configured = os.getenv("HYPERCHE_FINAL_CACHE_DIR", "").strip()
+    alias = os.getenv("HYPERCHE_FINAL_CACHE_DATABASE", "hyper_final_posthoc_v1").strip()
+    if configured and name == alias:
+        return Path(configured)
+    candidate = Path(cache_root) / name
+    if (candidate / "final_validation.json").is_file():
+        return candidate
+    return None
 
 
 def public_demo_metadata(database: str) -> dict[str, str]:

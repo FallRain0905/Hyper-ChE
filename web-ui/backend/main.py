@@ -226,6 +226,7 @@ from file_manager import file_manager
 from kb_manager import KnowledgeBaseManager
 from public_demo import (
     DEFAULT_PUBLIC_DEMO_DATABASE,
+    final_cache_path,
     inspect_public_demo_cache,
     public_demo_metadata,
 )
@@ -246,9 +247,11 @@ import numpy as np
 import importlib.util
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Literal
 from io import StringIO
 from datetime import datetime
+from contextlib import AsyncExitStack
+from copy import copy
 
 # 濠电姷鏁告慨鐑藉极閹间礁纾块柟瀵稿Х缁€濠囨煃瑜滈崜姘跺Φ閸曨垰鍗抽柛鈩冾殔椤忣亪鏌?HyperRAG 闂傚倸鍊搁崐鐑芥嚄閸洖纾块柣銏㈩焾閻ょ偓绻濋棃娑卞剬闁逞屽墾缁犳挸鐣锋總绋课ㄩ柕澹懎骞€闂佽崵鍠愮划宀€鎹㈠鈧畷娲焵椤掍降浜滈柟鐑樺灥閳ь剙缍婂鎶藉煛閸涱喚鍘卞┑鈽嗗灣婵潙煤閵堝鍎?
 # 闂傚倸鍊搁崐椋庣矆娓氣偓瀹曘儳鈧綆鍠楅崕鎴犳喐閻楀牆绗掔痪鎯ф健濮婃椽顢楅埀顒傜矓閻㈢纾跨€广儱娲ㄧ壕钘壝归敐鍫殐闁绘帊绮欓弻宥囩磼濡儵鎷婚梺閫炲苯澧紒鐘茬Ч瀹曟洟鏌嗗鍛枃闁硅壈鎻徊鐐垔婵傚憡鐓涢悘鐐额嚙閸旀粓鏌涙繝鍕毈闁哄矉缍佹慨鈧柕鍫濇闁款參鏌ｉ姀鈺佺仩闁绘牕銈稿璇测槈濡攱鐎婚棅顐㈡处濡繐螞閿曞倹鈷戦弶鐐村椤︼妇绱掓径搴＄厫缂佸倹甯￠弫鍐磼濞戞妾┑鐘灱濞夋稒绺介弮鍫濈闁绘垼濮ら埛鎺懨归敐鍛暈闁哥喓鍋熼惀顏堝级鐠恒剱褏鈧娲滈幊鎾绘偩閻戣棄鐐婇柍鍝勫暟閺嗐儵姊绘担渚劸闁活剙銈稿畷鎴︽倷閻戞ê鈧灝鈹戦悩宕囶暡闁绘挻鐟╁娲敇閵娧呮殸濠电偛鎳庣粔褰掑蓟閿濆應妲堟繛鍡樺姇绾炬娊姊洪崫鍕効缂佽鲸娲樼粋鎺楁晜閻愵剙鐝伴梺鍦帛鐢帡锝炲顑芥斀闁绘﹩鍠栭悘杈ㄣ亜椤愩埄妯€闁轰礁鍟存慨鈧柣妯虹仛濞堥箖姊洪棃娑辨Ф闁稿骸顭烽幊?hyperrag 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁撻悩鍐蹭罕闂佸搫娲㈤崹鍦不閻樼粯鐓欓梺顓ㄧ畱閸樻挳鏌＄€ｎ偅顥堥柡宀€鍠愬蹇斻偅閸愨晩鈧秹姊虹粙鍧楊€楁繛鎾棑濡叉劙骞橀幇浣告倯闂佸憡渚楅崹宥堫樄闁哄备鍓濋幏鍛村传閵夋劑鍊曢湁闁绘瑥鎳愰悾鐢碘偓瑙勬礃閸旀瑩骞冮姀鈽嗘Ч閹肩话銈庡敼闂傚倸鍊搁崐鐑芥嚄閸洏鈧焦绻濋崒妤佺亙濠电偞鍨剁划宀劼烽崒鐐粹拻濞撴埃鍋撻柍褜鍓涢崑娑㈡嚐椤栨稒娅犳い鏍ㄧ矌绾惧吋銇勯弮鍥т汗闁绘帒鎽滈埀顒冾潐濞测晝寰婃ィ鍐ㄎч柨婵嗩槸缁€鍐煃鏉炵増顦烽柛鎴滅矙濮婄粯鎷呴崨濠傛殘闂佺懓鎽滈崗姗€骞冮悙鐑樻櫆闁告挆鍛婵犲痉鏉库偓鏇㈠疮椤栫偛绐楅柟鎵閻撶喐淇婇妶鍌氫壕闂佺粯顨呴敃锔界珶閺囥垺鍋ㄩ柛娑橈功閸樻捇鎮峰鍕煉鐎规洘绮岄～婵囨綇閵娿儱绨ラ梻浣侯焾閺堫剛绮欓幒妤€鐭楅煫鍥ㄧ⊕閻撶喖鏌熼柇锕€澧柟顖氱墢缁辨帡鍩€?sys.path
@@ -266,6 +269,12 @@ try:
 except ImportError as e:
     print(f"HyperRAG not available: {e}")
     HYPERRAG_AVAILABLE = False
+
+from hyperche.retrieval.runtime import (
+    CacheCompatibilityError, FINAL_DIMENSION, FINAL_MODEL, final_cache_registry,
+    graph_page, graph_snapshot, inspect_final_cache, json_safe, retrieve_final, vertex_record,
+)
+from public_limits import public_query_slot
 
 # 濠电姷鏁告慨鐑藉极閹间礁纾块柟瀵稿Х缁€濠囨煃瑜滈崜姘跺Φ閸曨垰鍗抽柛鈩冾殔椤忣亪鏌涘▎蹇曠缂佺粯绻勯崰濠冨緞瀹€濠傛暪g-RAG闂傚倸鍊峰ù鍥敋瑜嶉湁闁绘垼妫勯弸渚€鏌熼梻瀵割槮闁稿被鍔庨幉鎼佸棘鐠恒劍娈?
 # 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁嶉崟顐ｇ€抽悗骞垮劚椤︻垶宕归崒婧惧亾鐟欏嫭绀€婵炲眰鍔庣划濠氬籍閸喓鍘遍悗鍏夊亾闁逞屽墴瀹曟垵鈽夐姀鈥崇彅闂佺粯鏌ㄩ崥瀣偂韫囨搩鐔嗛柤鍝ユ暩閵嗘帡鏌ｉ敐鍫ュ摵闁靛洤瀚版俊鐑芥晜閸撗冾槱yper-RAG闂傚倸鍊搁崐椋庣矆娓氣偓楠炴牠顢曢妶鍥╃厠闂佸搫顦伴崺濠囨嚀閸ф鐓曟俊銈呭暕缁辫櫕绻涘顔荤盎缂佺媭鍨堕幃姗€鎮欐０婵嗘暯濠殿喛顫夐〃濠傤潖濞差亜浼犻柛鏇ㄥ墮缁愭盯姊虹粙娆惧剳濠殿喚鍏橀崺鈧い鎺嶈兌椤ｆ煡鏌ｉ悤鍌氼洭闁瑰箍鍨归埥澶愬閳╁啯鐝抽梻浣稿閸嬫帡宕戦崟顐熸灁妞ゆ挾鍠撶弧鈧┑鐐茬墕閻忔繈寮搁妶澶嬬厱閻庯絻鍔岄埀顒佹礋閹儳鐣￠柇锔藉兊闂佸吋鎮傚褔宕滈鐔虹瘈缁剧増锚婢ф煡鎮?path闂傚倸鍊搁崐鐑芥倿閿旈敮鍋撶粭娑樻噽閻瑩鏌熺€电浠ч梻鍕閺岋繝宕橀敐鍛缂傚倷鑳剁划顖炴儎椤栨氨鏆﹂柤纰卞墮缁躲倖銇?rag/cograg闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁撻悩鍐蹭画闂侀潧鐗嗗ú鈺傛叏閸愯褰掓偂鎼达絾鎲奸梺绋款儑婵敻骞堥妸銉庣喖骞愭惔锝冣偓鎰磽娴ｆ彃浜?
@@ -913,6 +922,11 @@ def require_database_access(database_name: str | None, user: dict) -> str | None
     return clean_name
 
 
+def require_writable_database(database_name: str | None) -> None:
+    if database_name and final_cache_path(hyperrag_working_dir, database_name) is not None:
+        raise HTTPException(status_code=403, detail="The published final knowledge base is read-only")
+
+
 def database_display_name(database_name: str, user: dict) -> str:
     prefix = _user_db_prefix(user)
     if database_name and database_name.startswith(prefix):
@@ -1248,6 +1262,10 @@ async def db(database: str = None, user: dict = Depends(require_current_user)):
     """
     try:
         database = require_database_access(database, user)
+        directory = _query_cache_directory(database)
+        if directory is not None:
+            index, _ = await asyncio.to_thread(final_cache_registry.get, directory)
+            return graph_snapshot(index, edge_limit=30)
         data = get_hypergraph(database)
         return data
     except Exception as e:
@@ -1260,6 +1278,10 @@ async def get_vertices_function(database: str = None, page: int = None, page_siz
     """
     try:
         database = require_database_access(database, user)
+        directory = _query_cache_directory(database)
+        if directory is not None:
+            index, _ = await asyncio.to_thread(final_cache_registry.get, directory)
+            return graph_page(index, kind="vertices", page=page, page_size=page_size)
         data = getFrequentVertices(database, page, page_size)
         return data
     except Exception as e:
@@ -1272,6 +1294,10 @@ async def get_hypergraph_function(database: str = None, page: int = None, page_s
     """
     try:
         database = require_database_access(database, user)
+        directory = _query_cache_directory(database)
+        if directory is not None:
+            index, _ = await asyncio.to_thread(final_cache_registry.get, directory)
+            return graph_page(index, kind="edges", page=page, page_size=page_size)
         data = get_hyperedges(database, page, page_size)
         return data
     except Exception as e:
@@ -1286,6 +1312,10 @@ async def get_hyperedge(hyperedge_id: str, database: str = None, user: dict = De
         hyperedge_id = hyperedge_id.replace("%20", " ")
         vertices = hyperedge_id.split("|*|")
         database = require_database_access(database, user)
+        directory = _query_cache_directory(database)
+        if directory is not None:
+            index, _ = await asyncio.to_thread(final_cache_registry.get, directory)
+            return json_safe(index.edges.get(tuple(sorted(vertices)), {}))
         data = get_hyperedge_detail(vertices, database)
         return data
     except Exception as e:
@@ -1299,6 +1329,10 @@ async def get_vertex(vertex_id: str, database: str = None, user: dict = Depends(
     vertex_id = vertex_id.replace("%20", " ")
     try:
         database = require_database_access(database, user)
+        directory = _query_cache_directory(database)
+        if directory is not None:
+            index, _ = await asyncio.to_thread(final_cache_registry.get, directory)
+            return vertex_record(vertex_id, index.vertices[vertex_id]) if vertex_id in index.vertices else {}
         data = get_vertice(vertex_id, database)
         return data
     except Exception as e:
@@ -1312,6 +1346,10 @@ async def get_vertex_neighbor(vertex_id: str, database: str = None, user: dict =
     vertex_id = vertex_id.replace("%20", " ")
     try:
         database = require_database_access(database, user)
+        directory = _query_cache_directory(database)
+        if directory is not None:
+            index, _ = await asyncio.to_thread(final_cache_registry.get, directory)
+            return graph_snapshot(index, edge_limit=100, vertex_id=vertex_id)
         data = get_vertice_neighbor(vertex_id, database)
         return data
     except Exception as e:
@@ -1327,6 +1365,10 @@ async def get_hyperedge_neighbor(hyperedge_id: str, database: str = None, user: 
     print(hyperedge_id)
     try:
         database = require_database_access(database, user)
+        directory = _query_cache_directory(database)
+        if directory is not None:
+            index, _ = await asyncio.to_thread(final_cache_registry.get, directory)
+            return graph_snapshot(index, edge_limit=100, members=hyperedge_id.split("|#|"))
         data = get_hyperedge_neighbor_server(hyperedge_id, database)
         return data
     except Exception as e:
@@ -1365,6 +1407,7 @@ async def create_vertex(vertex: VertexModel, user: dict = Depends(require_curren
     """
     try:
         vertex.database = require_database_access(vertex.database, user)
+        require_writable_database(vertex.database)
         result = add_vertex(vertex.vertex_id, {
             "entity_name": vertex.entity_name,
             "entity_type": vertex.entity_type,
@@ -1382,6 +1425,7 @@ async def create_hyperedge(hyperedge: HyperedgeModel, user: dict = Depends(requi
     """
     try:
         hyperedge.database = require_database_access(hyperedge.database, user)
+        require_writable_database(hyperedge.database)
         result = add_hyperedge(hyperedge.vertices, {
             "keywords": hyperedge.keywords,
             "summary": hyperedge.summary
@@ -1398,6 +1442,7 @@ async def update_vertex_endpoint(vertex_id: str, vertex: VertexUpdateModel, user
     try:
         vertex_id = vertex_id.replace("%20", " ")
         vertex.database = require_database_access(vertex.database, user)
+        require_writable_database(vertex.database)
         result = update_vertex(vertex_id, {
             "entity_name": vertex.entity_name,
             "entity_type": vertex.entity_type,
@@ -1417,6 +1462,7 @@ async def update_hyperedge_endpoint(hyperedge_id: str, hyperedge: HyperedgeUpdat
         hyperedge_id = hyperedge_id.replace("%20", " ")
         vertices = hyperedge_id.split("|*|")
         hyperedge.database = require_database_access(hyperedge.database, user)
+        require_writable_database(hyperedge.database)
         result = update_hyperedge(vertices, {
             "keywords": hyperedge.keywords,
             "summary": hyperedge.summary
@@ -1433,6 +1479,7 @@ async def delete_vertex_endpoint(vertex_id: str, database: str = None, user: dic
     try:
         vertex_id = vertex_id.replace("%20", " ")
         database = require_database_access(database, user)
+        require_writable_database(database)
         result = delete_vertex(vertex_id, database)
         return {"success": True, "message": "Vertex deleted successfully"}
     except Exception as e:
@@ -1447,6 +1494,7 @@ async def delete_hyperedge_endpoint(hyperedge_id: str, database: str = None, use
         hyperedge_id = hyperedge_id.replace("%20", " ")
         vertices = hyperedge_id.split("|*|")
         database = require_database_access(database, user)
+        require_writable_database(database)
         result = delete_hyperedge(vertices, database)
         return {"success": True, "message": "Hyperedge deleted successfully"}
     except Exception as e:
@@ -1862,6 +1910,12 @@ async def get_databases(user: dict = Depends(require_current_user)):
 
         # 婵犵數濮烽弫鎼佸磻閻樿绠垫い蹇撴缁€濠囨煃瑜滈崜姘辨崲濞戞瑥绶為悗锝庡亞椤︿即鎮楀▓鍨珮闁稿锕ㄥΛ鐔哥節闂堟稑鈧鎮楃粚鏈糿ager闂傚倸鍊搁崐椋庣矆娓氣偓瀹曘儳鈧綆鍠栫壕鍧楁煙閹増顥夐幖鏉戯躬閺屻倝鎳濋幍顔肩墯婵炲瓨绮岀紞濠囧蓟濞戙垹唯妞ゆ梻鍘ч～鈺呮⒑閸濆嫷鍎庣紒鑸靛哺瀵鏁愰崨鍌涙閸┾偓妞ゆ帒瀚崑瀣煕閳╁啰鎳呴柣顓炵墦閺屻劑寮撮悙娴嬪亾閸濄儳涓嶇憸鐗堝笚閸婂灚绻涢幋鐑嗕紗闁瑰濮抽悞濠冦亜閹惧崬鐏柣鎾存礃閵囧嫰顢橀悢椋庝化缂備降鍔嬬划娆撳蓟?
         database_files = db_manager.list_databases()
+        alias = os.getenv("HYPERCHE_FINAL_CACHE_DATABASE", "hyper_final_posthoc_v1")
+        directory = _query_cache_directory(alias)
+        if directory is not None and inspect_final_cache(directory)["cache_ready"]:
+            database_files = [item for item in database_files if item.get("name") != alias]
+            database_files.append({"name": alias, "description": "HyperChE 已验证最终知识库",
+                "system": "hyperrag", "valid": True, "read_only": True, "retrieval_profile": "f1"})
 
         for db_info in database_files:
             # db_info 闂傚倸鍊搁崐鐑芥嚄閸撲礁鍨濇い鏍ㄧ矊閸ㄦ繄鈧箍鍎遍幏瀣偄閸℃ü绻嗘い鏍ㄧ矊閻ㄦ垿鏌ら悧鍫濐嚋闁靛洤瀚粻娑㈠箻鐠轰警鏆梻浣告啞閻熴儵鏁冮鍫濊摕闁挎繂顦悡鈧┑鐐叉缁绘垿骞栭幇顔剧＜闁逞屽墴瀹曟帡鎮欑€电骞堟繝鐢靛仦閸ㄥ爼鏁冮锕€绀夐柣鏂款殠閻斿棝鎮峰▎蹇擃仼濠殿喖顦甸弻宥堫檨闁告挻宀搁、娆撳冀椤撶偟鐛ラ梺鍝勭▉閻撳牆鈻撴禒瀣彄闁搞儯鍔嶇粈鍐┿亜椤愶絾绀冪紒缁樼箞濡啫鈽夐崡鐐插缂傚倷璁查崑鎾垛偓鍏夊亾闁告洦鍓涢崢鍗炩攽閻愭潙鐏ョ€规洦鍓熼悰顔嘉旈崨顔惧幈?'name', 'description', 'system' 闂傚倸鍊峰ù鍥敋瑜忛埀顒佺▓閺呮繄鍒掑▎鎾崇婵＄偛鐨烽崑?
@@ -2608,7 +2662,9 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
                 )
                 main_logger.info("Log message")
                 return response
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except asyncio.CancelledError:
+                raise
+            except asyncio.TimeoutError:
                 error_msg = f"LLM call cancelled/timed out after total_timeout={timeout:.1f}s, key={key_index}/{key_total}"
                 errors.append(error_msg)
                 main_logger.warning(error_msg)
@@ -2724,7 +2780,8 @@ def validate_embedding_dimension(working_dir: str | Path, configured_dim: int | 
         )
 
 
-async def get_hyperrag_embedding_func(texts: list[str]) -> np.ndarray:
+async def get_hyperrag_embedding_func(texts: list[str], *, dimensions: int | None = None,
+                                     expected_model: str | None = None) -> np.ndarray:
     """
     HyperRAG 婵犵數濮烽弫鎼佸磻閻愬搫鍨傞柛顐ｆ礀缁犳澘鈹戦悩瀹犲缂佺姵婢樿灃闁挎繂鎳庨弳娆撴煛鐎ｂ晝绐旈柡灞炬礋瀹曠厧鈹戦幇顓壯囨⒑缁嬪潡顎楃紒澶婄秺瀵鈽夐姀鐘插祮闂侀潧顭堥崕鎵姳娴犲鈷戦梻鍫熺〒婢с垽鏌℃担鍓茬吋鐎殿喛顕ч埥澶婎煥閸涱垱婢戦梺璇插嚱缂嶅棙绂嶅鍕弿閹兼番鍔嶉埛鎴︽煙閼测晛浠滈柍褜鍓氱换鍐矉瀹ュ洦宕夊〒姘煎灠濞堛劌顪冮妶鍡楀闁稿﹥鐗犲鍐差煥閸曗晙绨婚梺鍝勫€搁悘婵嬪煕閺冣偓閵囧嫰鏁傜拠鍙夌彎闂佸搫鐭夌紞浣规叏閳ь剟鏌嶆潪鎷屽厡濞寸厧鐗忕槐鎾存媴閸濆嫅锝夋煙閻熺増鎼愰柣锝囧厴楠炲酣鎸婃径澶岀倞闂備線娼ч¨鈧紒鐘冲灴閹灚瀵肩€涙ǚ鎷洪梺鍛婄箓鐎氼厼顔忓┑瀣厱闁绘ê鍟挎慨澶愭煠閸濆嫬鑸规い顐ｇ箞閹虫粓鎮介棃娑樼疄?
     """
@@ -2744,6 +2801,8 @@ async def get_hyperrag_embedding_func(texts: list[str]) -> np.ndarray:
             embedding_model, api_key, base_url, profile_source = resolve_embedding_target(
                 settings, current_user_id
             )
+            if expected_model is not None and embedding_model != expected_model:
+                raise CacheCompatibilityError("Embedding model does not match this final knowledge base")
             if profile_source == "platform":
                 consume_platform_quota(current_user_id, "embedding", 1)
             pool_name = f"embedding:user:{current_user_id}" if profile_source == "user" else "embedding"
@@ -2767,9 +2826,15 @@ async def get_hyperrag_embedding_func(texts: list[str]) -> np.ndarray:
                         model=embedding_model,
                         api_key=candidate_key,
                         base_url=base_url,
+                        dimensions=dimensions,
                     )
+                    if dimensions is not None and (embeddings.shape != (len(texts), dimensions) or
+                            not np.isfinite(embeddings).all()):
+                        raise CacheCompatibilityError("Embedding response dimensions do not match the final knowledge base")
                     main_logger.info("Log message")
                     return embeddings
+                except (asyncio.CancelledError, CacheCompatibilityError):
+                    raise
                 except Exception as e:
                     last_error = e
                     error_msg = extract_detailed_exception_message(e)
@@ -2782,6 +2847,10 @@ async def get_hyperrag_embedding_func(texts: list[str]) -> np.ndarray:
 
             if last_error:
                 raise last_error
+
+        except (asyncio.CancelledError, CacheCompatibilityError):
+
+            raise
 
         except Exception as e:
             text_lengths = [len(text) for text in texts]
@@ -3063,7 +3132,9 @@ async def get_hyperrag_llm_func(prompt, system_prompt=None, history_messages=[],
                     f"duration={duration:.1f}s, response_chars={len(response)}, status=success"
                 )
                 return response
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except asyncio.CancelledError:
+                raise
+            except asyncio.TimeoutError:
                 duration = time.monotonic() - started_at
                 error_msg = (
                     f"LLM call cancelled/timed out after timeout={timeout:.1f}s, "
@@ -3206,7 +3277,9 @@ async def get_hyperrag_llm_stream_func(prompt, system_prompt=None, history_messa
                     f"duration={duration:.1f}s, response_chars={response_chars}, status=success"
                 )
                 return
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except asyncio.CancelledError:
+                raise
+            except asyncio.TimeoutError:
                 duration = time.monotonic() - started_at
                 error_msg = (
                     f"LLM stream cancelled/timed out after timeout={timeout:.1f}s, "
@@ -3446,6 +3519,7 @@ def resolve_bound_prompt_domain(settings: dict, current_user_id: str | None) -> 
 
 
 def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_overlap: int = None):
+    require_writable_database(database)
     """
     闂傚倸鍊搁崐椋庣矆娓氣偓瀹曘儳鈧綆鍠栫壕鍧楁煙閹増顥夐幖鏉戯躬閺屻倝鎳濋幍顔肩墯婵炲瓨绮岀紞濠囧蓟濞戙垹唯妞ゆ梻鍘ч～鈺冪磽娴ｅ搫顎撶紓宥勭窔瀵鍨惧畷鍥ㄦ濡炪倖姊婚崢褔寮抽悢璁垮綊鎮埀顒勫矗閸愵喖绠栨俊銈呮噺閸婄兘鏌ｉ悢绋款棎闁稿鎸歌灃闁告侗鍘鹃敍鐔兼⒑闂堟稓澧曟繛鑼█瀹曟垿骞樼拠鎻掔€銈嗗姧缁插灝鈻撻妶澶嬧拺闂侇偆鍋涢懟顖涙櫠閸欏浜滄い鎰╁焺濡叉椽鏌涢悩璇у伐妞ゆ挸鍚嬪鍕節閸愵厾鍙戦梻鍌欒兌缁垰顫忔繝姘偍鐟滃繒鍒掓繝姘殤妞ゆ帒鍊婚敍婊堟⒑闂堟单鍫ュ疾濞嗘挸绠熷Δ锝呭暞閻?HyperRAG 闂傚倸鍊峰ù鍥敋瑜庨〃銉х矙閸柭も偓鍧楁⒑椤掆偓缁夊澹曠紒妯圭箚妞ゆ牗鑹鹃幃鎴炪亜?
     """
@@ -3717,7 +3791,9 @@ class DocumentModel(BaseModel):
     database: str = None  # 濠电姷鏁告慨鐑藉极閹间礁纾块柟瀵稿Х缁€濠囨煃瑜滈崜姘跺Φ閸曨垰鍗抽柛鈩冾殔椤忣亪鏌涘▎蹇曠闁哄矉缍侀獮鍥敆娴ｇ懓鍓甸梻浣告惈椤戝嫮娆㈠璺鸿摕闁挎繂鎲橀弮鍫濈劦妞ゆ帒瀚崑瀣煕閳╁啰鎳呴柣顓炵墦閺屻劑寮撮悙娴嬪亾閸濄儳涓嶇憸鐗堝笚閸婂灚绻涢幋鐑嗕紗闁瑰濮抽悞濠冦亜閹捐泛袥闁稿鎸搁埢鎾诲垂椤旂晫褰梻浣告啞閹搁箖宕版惔顭戞晪?
 
 class QueryModel(BaseModel):
-    question: str
+    question: str = Field(min_length=1, max_length=4000)
+    retrieval_profile: Literal["auto", "f1", "f0", "legacy"] = "auto"
+    evidence_top_k: int = Field(default=5, ge=1, le=20)
     mode: str = "hyper"  # 闂傚倸鍊搁崐宄懊归崶顒€违闁逞屽墴閺屾稓鈧綆鍋呭畷宀勬煙? hyper, hyper-lite, naive, graph, llm, cog, cog-hybrid, cog-entity, cog-theme
     top_k: int = 60
     max_token_for_text_unit: int = 1600
@@ -3740,8 +3816,42 @@ def normalize_query_result(result: Any) -> dict:
             "themes": result.get("themes", []),
             "hyperedges": result.get("hyperedges", []),
             "text_units": result.get("text_units", []),
+            "retrieval_meta": result.get("retrieval_meta", {}),
         }
     return {"response": safe_str(result), "entities": [], "themes": [], "hyperedges": [], "text_units": []}
+
+
+def query_model_status(*, final: bool, user_id: str | None = None) -> dict:
+    """Inspect configured channels without issuing preflight model requests."""
+    settings = load_effective_settings() if user_id else {}
+    if not settings:
+        try:
+            with open(SETTINGS_FILE, encoding="utf-8") as handle:
+                settings = json.load(handle)
+        except (OSError, ValueError):
+            settings = {}
+    model, key, base_url, _ = resolve_embedding_target(settings, user_id)
+    dimension = configured_embedding_dim(settings, user_id)
+    embedding_ready = bool(model and key and base_url)
+    if final:
+        embedding_ready = embedding_ready and model == FINAL_MODEL and dimension == FINAL_DIMENSION
+    answer_providers = providers.resolve_role_providers("answer", current_user_id=user_id)
+    if not user_id:
+        answer_providers = [item for item in answer_providers if item.get("scope") != "user"]
+    if not answer_providers:
+        personal = auth_store.get_enabled_providers(user_id, "llm") if user_id else []
+        answer_providers = [{**item, "apiKeys": item.get("apiKeys") or split_api_keys(item.get("apiKey"))}
+                            for item in personal] or normalize_llm_providers(settings)
+    answer_ready = any(item.get("modelName") and item.get("baseUrl") and
+                       any(item.get("apiKeys") or []) for item in answer_providers)
+    return {"embedding_ready": bool(embedding_ready), "answer_ready": bool(answer_ready),
+            "models_ready": bool(embedding_ready and answer_ready),
+            "required_embedding_model": FINAL_MODEL if final else None,
+            "required_embedding_dim": FINAL_DIMENSION if final else None,
+            "configured_embedding_model": model, "configured_embedding_dim": dimension,
+            "configured_answer_models": list(dict.fromkeys(str(item.get("modelName"))
+                for item in answer_providers if item.get("modelName"))),
+            "configuration_required": not (embedding_ready and answer_ready)}
 
 
 def get_public_demo_status() -> dict:
@@ -3750,6 +3860,10 @@ def get_public_demo_status() -> dict:
         os.getenv("HYPERCHE_PUBLIC_DEMO_DATABASE", DEFAULT_PUBLIC_DEMO_DATABASE)
     )
     status = inspect_public_demo_cache(hyperrag_working_dir, configured)
+    models = query_model_status(final=status.get("retrieval_profile") == "f1")
+    status.update(models)
+    status["ready"] = status["cache_ready"] and status["models_ready"]
+    status["supports_modes"] = ["hyper"] if status.get("retrieval_profile") == "f1" else ["hyper", "graph", "naive"]
     status.update({"success": True, "demo": public_demo_metadata(configured)})
     return status
 
@@ -3757,7 +3871,7 @@ def get_public_demo_status() -> dict:
 def resolve_public_demo_database() -> tuple[str | None, dict | None]:
     """Resolve the single read-only liquid-flow-battery demo database."""
     status = get_public_demo_status()
-    if not status["ready"]:
+    if not status["cache_ready"]:
         return None, None
 
     configured = status["database"]
@@ -3781,10 +3895,126 @@ def build_rag_query_response(query: QueryModel, result: Any, database: str, rag_
         "rag_system": rag_system,
         "question": query.question,
         "database": database or "default",
+        "retrieval_meta": normalized.get("retrieval_meta", {}),
     }
     if normalized["themes"]:
         payload["themes"] = normalized["themes"]
     return payload
+
+
+def _query_cache_directory(database: str) -> Path | None:
+    return final_cache_path(hyperrag_working_dir, database)
+
+
+def _check_query_ready(query: QueryModel, database: str, user_id: str | None) -> bool:
+    if not query.question.strip():
+        raise HTTPException(status_code=400, detail="请输入问题。")
+    directory = _query_cache_directory(database)
+    is_final = directory is not None
+    if is_final:
+        status = inspect_final_cache(directory)
+        if not status["cache_ready"]:
+            raise HTTPException(status_code=503, detail="最终知识库缓存未完整安装或验证未通过。")
+        if query.retrieval_profile == "legacy" or query.mode != "hyper":
+            raise HTTPException(status_code=400, detail="该只读最终知识库支持 HyperChE 检索模式。")
+    elif query.retrieval_profile in ("f0", "f1"):
+        raise HTTPException(status_code=400, detail="当前知识库没有最终缓存签名，使用自动或原版检索。")
+    elif query.mode not in ("hyper", "hyper-lite", "graph", "naive", "llm"):
+        raise HTTPException(status_code=400, detail="Unsupported query mode")
+    models = query_model_status(final=is_final, user_id=user_id)
+    need_answer = not query.only_need_context or (not is_final and query.mode in ("hyper", "hyper-lite", "graph"))
+    need_embedding = query.mode != "llm"
+    if (need_embedding and not models["embedding_ready"]) or (need_answer and not models["answer_ready"]):
+        raise HTTPException(status_code=503, detail="请先在设置中配置匹配知识库的 embedding 和回答模型渠道。")
+    return is_final
+
+
+async def _prepare_query(query: QueryModel, database: str) -> dict:
+    directory = _query_cache_directory(database)
+    if directory is not None:
+        return await retrieve_final(query.question, directory, get_hyperrag_embedding_func,
+                                    evidence_top_k=query.evidence_top_k,
+                                    enable_rerank=query.retrieval_profile != "f0")
+    if not HYPERRAG_AVAILABLE:
+        raise HTTPException(status_code=503, detail="HyperRAG is not available")
+    from hyperrag.prompt import PROMPTS
+    if query.mode == "llm":
+        result = {"response": "", "entities": [], "hyperedges": [], "text_units": []}
+    else:
+        rag = get_or_create_hyperrag(database)
+        param = QueryParam(mode=query.mode, top_k=query.top_k,
+            max_token_for_text_unit=query.max_token_for_text_unit,
+            max_token_for_entity_context=query.max_token_for_entity_context,
+            max_token_for_relation_context=query.max_token_for_relation_context,
+            only_need_context=True, response_type=query.response_type, return_type="json")
+        raw = await rag.aquery(query.question, param)
+        result = dict(raw) if isinstance(raw, dict) else normalize_query_result(raw)
+    context = str(result.get("response") or result.get("context") or "")
+    has_context = bool(context) and context != PROMPTS["fail_response"]
+    define = ""
+    if result.get("entity_keywords") or result.get("relation_keywords"):
+        define = PROMPTS["rag_define"].format(ll_keywords=result.get("entity_keywords", ""),
+                                               hl_keywords=result.get("relation_keywords", ""))
+    if query.mode == "naive":
+        system = PROMPTS["naive_rag_response"].format(content_data=context, response_type=query.response_type)
+    else:
+        system = PROMPTS["rag_response"].format(context_data=context, response_type=query.response_type)
+    result.update(context=context, has_context=has_context or query.mode == "llm",
+                  answer_prompt=query.question + define, answer_system_prompt=system,
+                  retrieval_meta={"profile": "legacy", "method": "upstream_" + query.mode,
+                                  "top_k": query.top_k, "read_only": False,
+                                  "generation_matches_paper_protocol": False})
+    return result
+
+
+async def _execute_query_json(query: QueryModel, database: str) -> dict:
+    prepared = await _prepare_query(query, database)
+    if query.only_need_context:
+        prepared["response"] = prepared["context"]
+    elif not prepared["has_context"]:
+        prepared["response"] = "当前检索证据不足以支持这个问题，请调整问题或检查知识库。"
+    else:
+        prepared["response"] = await get_hyperrag_llm_func(prepared["answer_prompt"],
+            system_prompt=prepared["answer_system_prompt"], role="answer")
+    return build_rag_query_response(query, prepared, database)
+
+
+def _sse(event: str, data: dict) -> str:
+    return "event: " + event + "\ndata: " + json.dumps(json_safe(data), ensure_ascii=False) + "\n\n"
+
+
+async def _query_events(query: QueryModel, database: str, request: Request, *, public: bool = False):
+    token = CURRENT_USER_ID.set(None) if public else None
+    try:
+        yield _sse("meta", {"success": True, "database": database, "mode": query.mode, "demo": public})
+        prepared = await _prepare_query(query, database)
+        # This is the exact context used for the answer; no second graph request.
+        yield _sse("retrieval", build_rag_query_response(query, prepared, database))
+        if query.only_need_context:
+            yield _sse("done", {"success": True, "response": prepared["context"], "context_only": True})
+            return
+        if not prepared["has_context"]:
+            yield _sse("token", {"text": "当前检索证据不足以支持这个问题，请调整问题或检查知识库。"})
+        else:
+            async for text in get_hyperrag_llm_stream_func(prepared["answer_prompt"],
+                    system_prompt=prepared["answer_system_prompt"], role="answer"):
+                if await request.is_disconnected():
+                    return
+                yield _sse("token", {"text": text})
+        yield _sse("done", {"success": True})
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        detail = log_detailed_exception(main_logger, "Query stream failed", exc)
+        yield _sse("error", {"message": extract_user_friendly_error(detail), "error_type": type(exc).__name__})
+    finally:
+        if token is not None:
+            CURRENT_USER_ID.reset(token)
+
+
+def _stream_response(events):
+    return StreamingResponse(events, media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.post("/hyperrag/insert")
@@ -3820,6 +4050,10 @@ async def insert_document(doc: DocumentModel, user: dict = Depends(require_curre
 
 @app.post("/hyperrag/query")
 async def query_hyperrag(query: QueryModel, user: dict = Depends(require_current_user)):
+    if query.mode not in ("cog", "cog-hybrid", "cog-entity", "cog-theme"):
+        database = require_database_access(query.database, user) if query.database else namespace_database_name("default", user)
+        _check_query_ready(query, database, user.get("id"))
+        return await _execute_query_json(query, database)
     """
     缂傚倸鍊搁崐鎼佸磹閹间礁纾归柣鎴ｅГ閸ゅ嫰鏌涢锝嗙缂佹劖顨堥埀顒€绠嶉崕鍗灻洪妸鈺佺婵鍩栭悡娆戠磽娴ｉ潧鐏╅柡瀣枛閺屾稒鎯旈敍鍕懷囨煛鐏炲墽娲寸€殿喗鎸虫俊鎼佸Ψ閵夘喗楠勯梻鍌欑閹诧繝鎮烽姀銈呯；闁瑰墽绮埛鎴︽煠婵劕鈧洖鐡繝鐢靛仜閻即宕归挊澶屾殾閻熸瑥瀚弧鈧┑顔斤供閸橀箖宕㈡禒瀣拺鐟滅増甯掓禍浼存煕閻樻剚娈滄い銏℃閹垽鎼归崷顓ㄧ床闂佸搫顦悧鍕礉鎼达絿涓嶉柣鎰暯閸嬫挸鈻撻崹顔界亖闂佸憡鏌ㄩ柊锝夊春閳ь剚銇勯幒鍡椾壕闂佽绻戝畝鎼佺嵁濡ゅ懏鍊块柣鐐电┅rRAG闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁嶉崟顐㈢亰閻庡厜鍋撻柛鏇ㄥ墮娴犻亶姊虹悰鈥充壕闂?RAG濠电姷鏁告慨鐑姐€傞挊澹╋綁宕ㄩ弶鎴濈€銈呯箰閻楀棝鎮為崹顐犱簻闁瑰搫妫楁禍鍓х磼閸撗嗘闁告ɑ鍎抽埥澶愭偨缁嬭法鍔?
     """
@@ -3913,110 +4147,77 @@ async def public_demo_status():
 
 
 @app.post("/public/demo/query")
-async def public_demo_query(query: QueryModel):
-    """Read-only public demo query endpoint backed by the example chemical KB."""
-    try:
-        if query.mode not in ["hyper", "graph", "naive"]:
-            query.mode = "hyper"
-        if not HYPERRAG_AVAILABLE:
-            return {"success": False, "message": "HyperRAG is not available"}
+async def public_demo_query(request: Request, query: QueryModel):
+    """Public query, using platform model channels and one retrieval."""
+    database, kb = resolve_public_demo_database()
+    if not database:
+        raise HTTPException(status_code=503, detail="公开知识库缓存未完整安装。")
+    if _query_cache_directory(database) is None and query.mode not in ("hyper", "graph", "naive"):
+        query.mode = "hyper"
+    _check_query_ready(query, database, None)
+    async with public_query_slot(request):
+        token = CURRENT_USER_ID.set(None)
+        try:
+            payload = await _execute_query_json(query, database)
+            payload.update(demo=True, kb_name=kb.get("name"), domain=kb.get("domain"))
+            return payload
+        finally:
+            CURRENT_USER_ID.reset(token)
 
-        database, kb = resolve_public_demo_database()
-        if not database:
-            return {
-                "success": False,
-                "message": "液流电池公开实例缓存未安装完整。请下载 Git LFS 中的 web-ui/backend/hyperrag_cache/case1 文件。",
-            }
-
-        rag = get_or_create_hyperrag(database)
-        if kb and kb.get("domain"):
-            rag.domain = kb.get("domain")
-
-        param = QueryParam(
-            mode=query.mode,
-            top_k=query.top_k,
-            max_token_for_text_unit=query.max_token_for_text_unit,
-            max_token_for_entity_context=query.max_token_for_entity_context,
-            max_token_for_relation_context=query.max_token_for_relation_context,
-            only_need_context=query.only_need_context,
-            response_type=query.response_type,
-            return_type='json'
-        )
-        result = await rag.aquery(query.question, param)
-        payload = build_rag_query_response(query, result, database, "hyperrag")
-        payload["demo"] = True
-        payload["kb_name"] = kb.get("name") if kb else "液流电池公开知识库"
-        payload["domain"] = getattr(rag, "domain", None)
-        return payload
-
-    except Exception as e:
-        main_logger.error(f"Public demo query failed: {safe_str(e)}")
-        return {"success": False, "message": f"Public demo query failed: {safe_str(e)}"}
 
 @app.post("/public/demo/query/stream")
-async def public_demo_query_stream(query: QueryModel):
-    """Read-only public demo query endpoint with SSE streaming for Hyper-RAG answers."""
-    async def event_stream():
+async def public_demo_query_stream(request: Request, query: QueryModel):
+    """Acquire the public quota before SSE headers; hold it for the whole stream."""
+    database, _ = resolve_public_demo_database()
+    if not database:
+        raise HTTPException(status_code=503, detail="公开知识库缓存未完整安装。")
+    _check_query_ready(query, database, None)
+    stack = AsyncExitStack()
+    lease = await stack.enter_async_context(public_query_slot(request))
+    async def events():
+        lease.bind_owner()
         try:
-            if query.mode not in ["hyper", "naive", "llm"]:
-                yield f"event: error\ndata: {json.dumps({'message': 'Streaming currently supports hyper, naive, and llm modes only.'}, ensure_ascii=False)}\n\n"
-                return
-            if not HYPERRAG_AVAILABLE:
-                yield f"event: error\ndata: {json.dumps({'message': 'HyperRAG is not available'}, ensure_ascii=False)}\n\n"
-                return
+            async for event in _query_events(query, database, request, public=True):
+                yield event
+        finally:
+            await stack.aclose()
+    return _stream_response(events())
 
-            database, kb = resolve_public_demo_database()
-            if not database:
-                yield f"event: error\ndata: {json.dumps({'message': '液流电池公开实例缓存未安装完整。请先执行 git lfs pull。'}, ensure_ascii=False)}\n\n"
-                return
 
-            rag = get_or_create_hyperrag(database)
-            if kb and kb.get("domain"):
-                rag.domain = kb.get("domain")
 
-            meta = {
-                "success": True,
-                "demo": True,
-                "database": database,
-                "kb_name": kb.get("name") if kb else "液流电池公开知识库",
-                "domain": getattr(rag, "domain", None),
-                "mode": query.mode,
-            }
-            yield f"event: meta\ndata: {json.dumps(meta, ensure_ascii=False)}\n\n"
 
-            param = QueryParam(
-                mode=query.mode,
-                top_k=query.top_k,
-                max_token_for_text_unit=query.max_token_for_text_unit,
-                max_token_for_entity_context=query.max_token_for_entity_context,
-                max_token_for_relation_context=query.max_token_for_relation_context,
-                only_need_context=False,
-                response_type=query.response_type,
-                return_type='text'
-            )
-            async for token in rag.astream_query(query.question, param):
-                yield f"event: token\ndata: {json.dumps({'text': token}, ensure_ascii=False)}\n\n"
 
-            yield f"event: done\ndata: {json.dumps({'success': True}, ensure_ascii=False)}\n\n"
-        except asyncio.CancelledError:
-            main_logger.info("Public demo stream cancelled by client")
-            raise
-        except Exception as e:
-            main_logger.error(f"Public demo stream failed: {safe_str(e)}")
-            yield f"event: error\ndata: {json.dumps({'message': f'Public demo stream failed: {safe_str(e)}'}, ensure_ascii=False)}\n\n"
+@app.post("/hyperrag/query/stream")
+async def query_hyperrag_stream(request: Request, query: QueryModel, user: dict = Depends(require_current_user)):
+    database = require_database_access(query.database, user) if query.database else namespace_database_name("default", user)
+    _check_query_ready(query, database, user.get("id"))
+    return _stream_response(_query_events(query, database, request))
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
+
+@app.get("/public/demo/graph")
+async def public_demo_graph(edge_limit: int = 12):
+    """Browse genuine cache data without any embedding or generation call."""
+    database, _ = resolve_public_demo_database()
+    if not database:
+        raise HTTPException(status_code=503, detail="公开知识库缓存未完整安装。")
+    directory = _query_cache_directory(database)
+    if directory is None:
+        return get_hypergraph(database)
+    index, _ = await asyncio.to_thread(final_cache_registry.get, directory)
+    snapshot = graph_snapshot(index, edge_limit=min(50, max(1, edge_limit)))
+    snapshot["entities"] = list(snapshot["vertices"].values())
+    snapshot["hyperedges"] = [dict(edge, id=key, entity_set=key.split("|#|")) for key, edge in snapshot["edges"].items()]
+    snapshot.update(offline=True, database=database, case_label="离线缓存案例（非本轮查询）")
+    return snapshot
 
 
 @app.get("/hyperrag/status")
 async def get_hyperrag_status(database: str = None):
+    if database and _query_cache_directory(database) is not None:
+        cache = inspect_final_cache(_query_cache_directory(database))
+        models = query_model_status(final=True, user_id=CURRENT_USER_ID.get())
+        return {"available": True, "database": database, **cache, **models,
+                "ready": cache["cache_ready"] and models["models_ready"], "supports_modes": ["hyper"], "retrieval_profile": "f1"}
     """
     闂傚倸鍊搁崐椋庣矆娓氣偓瀹曘儳鈧綆鍠栫壕鍧楁煙閹増顥夐幖鏉戯躬閺屻倝鎳濋幍顔肩墯婵炲瓨绮岀紞濠囧蓟濞戙垹唯妞ゆ梻鍘ч～鈺冪磽娴ｅ搫小闁告濞婂璇测槈閵忕姈銊╂煙鐎涙绠栭柛锝囧劋閹便劑鏁愰崨鏉戝及濠殿喖锕﹂崕銈咁焽椤忓牆绠悘鐐舵鐢垰鈹戦悩顐ｅ闁告洖鐏氶悾鍫曟⒑娴兼瑧鍒伴柣蹇斿哺楠炲繘宕ㄩ娑樻瀭闂佸憡娲﹂崑鍕繆閹惰姤鈷掑ù锝囩摂濞兼劗鈧娲橀敃銏犵暦濞差亜鍐€妞ゆ挾鍠庢禒?HyperRAG 闂傚倸鍊峰ù鍥敋瑜庨〃銉х矙閸柭も偓鍧楁⒑椤掆偓缁夊澹曠紒妯圭箚妞ゆ牗鑹鹃幃鎴炪亜閹邦亞鐭欓柡灞炬礃瀵板嫰宕卞Ο鑽ゅ絾闂備胶顭堥鍡涘礉濞嗘挸钃熼柕鍫濐槸娴肩娀鏌曟径妯烘灍婵絽鐭傚?
     """
@@ -4117,7 +4318,7 @@ async def get_cograg_status(database: str = None):
         return {"success": False, "message": f"Failed to get Cog-RAG status: {safe_str(e)}"}
 
 @app.get("/systems/status")
-async def get_systems_status():
+async def get_systems_status(user: dict | None = Depends(get_current_user)):
     """
     闂傚倸鍊搁崐椋庣矆娓氣偓瀹曘儳鈧綆鍠栫壕鍧楁煙閹増顥夐幖鏉戯躬閺屻倝鎳濋幍顔肩墯婵炲瓨绮岀紞濠囧蓟濞戙垹唯妞ゆ梻鍘ч～鈺冪磽娴ｅ搫袨闁稿海鏁诲璇差吋閸偅顎囬梻浣告啞閹搁箖宕版惔顭戞晪闁挎繂顦崹鍌涖亜閹扳晛鈧鎮炬禒瀣拺闁告繂瀚弳鐔兼煟閹炬椿妫戠紒杈ㄦ崌瀹曟帒鈻庨幋锝囩崶闂備焦鎮堕崝鎴濐焽瑜旈幃楣冩倻閼恒儱浠洪梻鍌氱墛缁嬫垿鎮樻繝鍌楁斀闁绘劕寮堕埢鏇灻瑰鍕疄鐎规洘娲栭鍏煎緞鐎ｎ剙骞堥梻浣告惈濞层垽宕濆畝鍕祦闁哄稁鍋嗙粻鏃堟煙鏉堥箖妾柍?
     """
@@ -4133,6 +4334,7 @@ async def get_systems_status():
                 "instances": len(cograg_instances),
                 "working_dir": cograg_working_dir
             },
+            **query_model_status(final=False, user_id=user.get("id") if user else None),
             "current_system": "hyperrag"  # 婵犵數濮甸鏍窗濡ゅ啯鏆滄俊銈呭暟閻瑩鏌熼悜妯镐粶闁逞屽墾缁犳挸鐣锋總绋款潊闁靛浚婢佺槐鍙変繆閻愵亜鈧牠鎮уΔ鍐╁床闁稿瞼鍋涚憴锕傛煕閿旇骞樼痪?
         }
         return status
@@ -4330,6 +4532,7 @@ async def delete_file(file_id: str, clean_database: bool = False, user: dict = D
 @app.post("/database/clear")
 async def clear_database(database: str = "default", user: dict = Depends(require_current_user)):
     database = require_database_access(database, user) or namespace_database_name("default", user)
+    require_writable_database(database)
     """
     濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰惈缁犱即鏌熼梻瀵割槮缂佺姷濞€閺岀喖鎮ч崼鐔哄嚒闂佺粯鎸婚敃銏ゅ蓟閳ユ剚鍚嬮幖绮光偓宕囶啇缂傚倷鑳舵慨鎶藉础閹惰棄钃熸繛鎴欏灩鍞梺鐟扮摠缁诲啴宕抽悜妯诲弿闁挎繂鎳橀崣鍕叏婵犲嫬鍔嬫繛纰变邯楠炲繒浠﹂挊澶婅厫婵犵數濮幏鍐礋閸偆鏆ラ梻浣风串缁蹭粙鎮樺璺虹闁告侗鍨遍崰鍡涙煕閺囥劌浜滃┑鈩冨▕濮婄粯鎷呯粵瀣秷閻庤娲橀敃銏犵暦濞差亜鍐€妞ゆ挾鍠庢禒濂告⒒娓氬洤澧紒澶屾暬閹€斥枎閹寸姵锛忛梺缁橆殔閻擃偊顢旈崨顖ｆ锤婵°倧绲介崯顖炲煕閹达附鐓曟繝闈涙椤忣偄顭胯濞叉﹢濡甸崟顖涙櫆闁割煈鍠栫粊顕€鎮楀▓鍨灍濠电偛锕獮鍐閵堝棗浜楅柟鑹版彧缂嶅棝宕?
 
@@ -4391,6 +4594,14 @@ async def clear_database(database: str = "default", user: dict = Depends(require
 
 @app.get("/database/status")
 async def get_database_status(database: str = "default", user: dict = Depends(require_current_user)):
+    selected = require_database_access(database, user) or namespace_database_name("default", user)
+    directory = _query_cache_directory(selected)
+    if directory is not None:
+        cache = inspect_final_cache(directory)
+        models = query_model_status(final=True, user_id=user.get("id"))
+        return {"success": True, "database": selected, **cache, **models,
+                "ready": cache["cache_ready"] and models["models_ready"],
+                "retrieval_profile": "f1", "supports_modes": ["hyper"], "final_cache_valid": cache["cache_ready"]}
     database = require_database_access(database, user) or namespace_database_name("default", user)
     """
     闂傚倸鍊搁崐椋庣矆娓氣偓瀹曘儳鈧綆鍠栫壕鍧楁煙閹増顥夐幖鏉戯躬閺屻倝鎳濋幍顔肩墯婵炲瓨绮岀紞濠囧蓟濞戙垹唯妞ゆ梻鍘ч～鈺呮⒑閸濆嫷鍎庣紒鑸靛哺瀵鏁愰崨鍌涙閸┾偓妞ゆ帒瀚崑瀣煕閳╁啰鎳呴柣顓炵墦閺屻劑寮撮悙娴嬪亾閸濄儳涓嶇憸鐗堝笚閸婂灚绻涢幋鐑嗕紗闁瑰濮抽悞濠囨⒒閸喓鈻撻柡鈧懞銉ｄ簻闁哄啫娲よ闂佺锕ラ崝鏍€冮妷鈺傚€烽柍杞版婢规洘绻濋悽闈涗哗闁规椿浜炵槐鐐哄焵椤掍胶绠鹃柟鎹愭珪鐠愶繝鏌熼獮鍨伈鐎规洖宕埥澶娾枎閹存繂绠?
