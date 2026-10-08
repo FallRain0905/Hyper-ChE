@@ -15,3 +15,30 @@ button,input,select,textarea{font:inherit}button:disabled{cursor:not-allowed}a,b
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:0s!important;animation-duration:.001ms!important;animation-iteration-count:1!important}}
 .research-dock-actions a.research-primary{color:#fff}
 .research-public-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:18px}.research-public-grid>aside{min-width:0}.research-public-grid .research-chat-messages{max-height:650px}@media(max-width:1000px){.research-public-grid{grid-template-columns:minmax(0,1fr)}}
+
+/* Research headings use a readable Chinese serif stack; body copy stays sans. */
+.research-page :is(h1,h2,h3),.research-workspace :is(h1,h2,h3),.research-landing :is(h1,h2,h3),.research-app main :is(h1,h2,h3){font-family:'Noto Serif SC','Noto Serif CJK SC','Songti SC',SimSun,Georgia,serif}
+body{font-family:Inter,'Segoe UI','PingFang SC','Microsoft YaHei','Noto Sans SC','Noto Sans CJK SC',sans-serif}
+.research-mobile-conversation-bar,.research-mobile-drawer-head,.research-mobile-view-tabs,.research-mobile-evidence-panel{display:none}
+.research-conversations[hidden],.research-chat-messages[hidden],.research-mobile-evidence-panel[hidden]{display:none!important}
+.research-open-evidence{margin-top:10px;font-size:12px}
+@media(max-width:760px){
+  .research-mobile-conversation-bar{display:flex;align-items:center;gap:12px;min-width:0}
+  .research-mobile-conversation-bar>strong{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:13px}
+  .research-mobile-conversation-bar>button{flex-shrink:0;min-height:44px}
+  .research-conversation-backdrop{position:fixed;inset:0;z-index:100;background:rgba(21,35,27,.42);border:0;padding:0}
+  .research-workspace>.research-conversations{position:fixed;inset:0 auto 0 0;z-index:101;width:min(88vw,320px);height:100dvh;max-height:100dvh;box-sizing:border-box;padding:18px;border-radius:0 14px 14px 0;overflow:hidden;box-shadow:12px 0 36px rgba(16,29,22,.16)}
+  .research-workspace>.research-conversations .research-conversation-list{max-height:none;min-height:0;overscroll-behavior:contain}
+  .research-mobile-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
+  .research-mobile-drawer-head>button{min-width:44px;min-height:44px;padding:8px}
+  .research-workspace>.research-conversations>.research-secondary,.research-workspace>.research-conversations .research-conversation-row>button{min-height:44px}
+  .research-mobile-view-tabs{display:flex;border-bottom:1px solid var(--rule);padding:6px 12px;gap:6px}
+  .research-mobile-view-tabs>button{flex:1;min-height:44px;border-radius:8px;color:var(--muted);font-size:13px}
+  .research-mobile-view-tabs>button[aria-selected=true]{background:var(--green-soft);color:var(--green);font-weight:600}
+  .research-mobile-evidence-panel{display:block;flex:1;min-width:0;min-height:280px;padding:16px;overflow:auto;overflow-wrap:anywhere}
+  .research-mobile-evidence-toolbar{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap;margin-bottom:14px;font-size:12px}
+  .research-mobile-evidence-toolbar label{display:flex;align-items:center;gap:8px;max-width:100%}
+  .research-mobile-evidence-toolbar select{min-width:0;max-width:210px;background:var(--panel);border:1px solid var(--rule);border-radius:7px;padding:8px}
+  .research-mobile-evidence-panel .research-evidence{border-top:0;margin-top:0;padding-top:0}
+  .research-evidence-local-note{margin-top:16px;font-size:11px;line-height:1.8}
+}

@@ -317,9 +317,12 @@ const RetrievalHyperGraph = ({
         palette: { field: 'cluster' },
         style: {
           size: mode === 'graph' ? 20 : 25,
-          labelText: d => displayLabels?.[String(d.id)] || String(d.display_name || d.canonical_name || d.id).replace(/^[^:]+:/, '').replace(/_/g, ' '),
+          labelText: d => {
+            const label = displayLabels?.[String(d.id)] || String(d.display_name || d.canonical_name || d.id).replace(/^[^:]+:/, '').replace(/_/g, ' ')
+            return label.length > 24 ? `${label.slice(0, 23)}…` : label
+          },
           labelFontFamily: 'Segoe UI, Microsoft YaHei, sans-serif',
-          labelFontSize: 13,
+          labelFontSize: (data: any) => Number(data.style?.labelFontSize || 13),
           labelBackground: true,
           labelBackgroundFill: '#fffefa',
           labelPadding: 2,
