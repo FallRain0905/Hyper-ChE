@@ -110,7 +110,7 @@ Copy-Item .env.hyperche.example .env
 docker compose -p hyperche -f docker-compose.hyperche.yml --env-file .env up -d --build --wait
 ```
 
-默认容器网关只监听 `127.0.0.1:8088`，生产域名为 `https://hyperche.fallrain0905.top`，汇报页位于 `/report/hyperche-demo.html`。宿主 Nginx 独立站点提供 HTTPS、SSE 与 WebSocket；现有中转站点不受替换。部署、健康检查、私有配置、数据持久化与回滚见 [deploy/README.md](deploy/README.md)。镜像包含源码和配置，原始文献及向量缓存私下准备，不进入 Git 或镜像。
+默认容器网关只监听 `127.0.0.1:8088`，生产域名为 `https://cupzhouth.top`，汇报页位于 `/report/hyperche-demo.html`。宿主 Nginx 独立站点提供 HTTPS、SSE 与 WebSocket；现有中转站点不受替换。部署、健康检查、私有配置、数据持久化与回滚见 [deploy/README.md](deploy/README.md)。镜像包含源码和配置，原始文献及向量缓存私下准备，不进入 Git 或镜像。
 
 生产示例名仍为 `case1`，实际使用只读 `final_v1` 缓存；响应和页面披露缓存版本、模型与检索配置。尚未配置模型时显示待配置状态，页面及离线汇报可用，真实模型问答需由管理员配置兼容通道后启用。匿名示例调用通过 Redis 限制频率、每日额度和并发；用户上传构建的数据保存在独立可写知识库中。
 

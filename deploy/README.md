@@ -1,7 +1,7 @@
 # HyperChE 部署
 
-生产入口为 `https://hyperche.fallrain0905.top`，汇报入口为
-`https://hyperche.fallrain0905.top/report/hyperche-demo.html`。部署到已有业务的
+生产入口为 `https://cupzhouth.top`，汇报入口为
+`https://cupzhouth.top/report/hyperche-demo.html`。部署到已有业务的
 服务器时，使用独立 Compose 项目 `hyperche`；容器网关只监听
 `127.0.0.1:8088`，由宿主 Nginx 转发。现有中转服务及其站点配置保持独立。
 
@@ -18,8 +18,13 @@
 
 复制 `.env.hyperche.example` 到私有 `.env`，填入随机数据库密码、管理员密码、
 `JWT_SECRET`、`APP_SECRET_KEY`。不要将服务器登录密码或模型 API key 放入
-仓库。初始管理员邮箱为 `admin@hyperche.fallrain0905.top`，管理员密码每次
+仓库。初始管理员邮箱为 `admin@cupzhouth.top`，管理员密码每次
 新安装单独生成；更改 bootstrap 环境变量不会重设已有用户密码。
+
+域名迁移保持现有管理员账号及密码。2026-10-08 已有部署的登录邮箱仍为
+`admin@hyperche.fallrain0905.top`；`admin@cupzhouth.top` 是新安装示例值。
+私有 `.env` 的现有管理员邮箱和应用密钥保持原值，仅将 `CORS_ORIGINS`
+更新为 `https://cupzhouth.top`。
 
 既有安装必须保留 `JWT_SECRET` 和 `APP_SECRET_KEY`，后者用于通道凭证加密。
 模型与密钥池在管理员界面配置，未配置时只提供页面、缓存查看与汇报演示，
@@ -79,19 +84,19 @@ Redis 不可用时公开模型调用不得绕过额度检查。
 
 ## 3. 域名与 HTTPS
 
-将 `hyperche.fallrain0905.top` 的 A 记录指向部署服务器 `154.219.99.75`。
+将 `cupzhouth.top` 的 A 记录指向部署服务器 `154.219.99.75`。
 DNS 生效后，用独立 HTTP 站点完成 ACME 验证：
 
 ```bash
 sh deploy/install-host-nginx.sh http
 certbot certonly --webroot -w /var/www/hyperche-acme \
-  -d hyperche.fallrain0905.top --deploy-hook "systemctl reload nginx"
+  -d cupzhouth.top --deploy-hook "systemctl reload nginx"
 sh deploy/install-host-nginx.sh https
 ```
 
-安装脚本仅写 `hyperche.fallrain0905.top.conf`，不编辑现有 API 站点。
+安装脚本仅写 `cupzhouth.top.conf`，不编辑现有 API 站点。
 它先检查 Nginx 配置，再 reload；验证失败恢复 HyperChE 原配置。
-HTTPS 模板使用证书目录 `/etc/letsencrypt/live/hyperche.fallrain0905.top/`，
+HTTPS 模板使用证书目录 `/etc/letsencrypt/live/cupzhouth.top/`，
 保留 ACME 路径并将其余 HTTP 请求重定向到 HTTPS。
 
 两个代理层均关闭 SSE 缓冲、允许 WebSocket Upgrade，并保留源 HTTPS

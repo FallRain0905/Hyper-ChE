@@ -44,7 +44,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:?Set a stable JWT_SECRET in the private env file}
       APP_SECRET_KEY: ${APP_SECRET_KEY:?Set a stable APP_SECRET_KEY in the private env file}
-      CORS_ORIGINS: ${CORS_ORIGINS:-https://hyperche.fallrain0905.top}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://cupzhouth.top}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       TRIAL_DOC_LIMIT: ${TRIAL_DOC_LIMIT:-3}
       TRIAL_LLM_CALL_LIMIT: ${TRIAL_LLM_CALL_LIMIT:-50}

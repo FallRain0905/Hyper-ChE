@@ -7,14 +7,14 @@ if [ "$(id -u)" != 0 ]; then
 fi
 mode=${1:-https}
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-target=/etc/nginx/sites-available/hyperche.fallrain0905.top.conf
-enabled=/etc/nginx/sites-enabled/hyperche.fallrain0905.top.conf
+target=/etc/nginx/sites-available/cupzhouth.top.conf
+enabled=/etc/nginx/sites-enabled/cupzhouth.top.conf
 case "$mode" in
     http) source="$repo_dir/deploy/nginx.host.http.conf" ;;
     https)
         source="$repo_dir/deploy/nginx.host.https.conf"
         for cert_file in fullchain.pem privkey.pem; do
-            if [ ! -s "/etc/letsencrypt/live/hyperche.fallrain0905.top/$cert_file" ]; then
+            if [ ! -s "/etc/letsencrypt/live/cupzhouth.top/$cert_file" ]; then
                 echo "Obtain the HyperChE TLS certificate before installing HTTPS." >&2
                 exit 1
             fi
