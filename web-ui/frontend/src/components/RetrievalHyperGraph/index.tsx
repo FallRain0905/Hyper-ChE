@@ -69,6 +69,14 @@ const RetrievalHyperGraph = ({
   const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
   const liveGraph = useRef<G6Graph | null>(null)
+  const refreshLabels = useCallback((graph: G6Graph) => {
+    try {
+      const zoom = graph.getZoom()
+      if (!(zoom > 0)) return
+      graph.updateNodeData(graph.getNodeData().map(node => ({ id: node.id, style: { labelFontSize: Math.min(44, 13 / zoom) } })))
+      graph.draw().catch(() => undefined)
+    } catch { /* The viewport can be absent during initialization or disposal. */ }
+  }, [])
   const [ready, setReady] = useState(false)
   const [selected, setSelected] = useState('')
   const [selectedEdge, setSelectedEdge] = useState('')
@@ -86,18 +94,18 @@ const RetrievalHyperGraph = ({
         const old = graph.getSize()
         if (Math.abs(old[0] - size[0]) < 2 && Math.abs(old[1] - size[1]) < 2) return
         graph.resize(size[0], size[1])
-        graph.fitView({ when: 'always' }, false).catch(() => undefined)
+        graph.fitView({ when: 'always' }, false).then(() => refreshLabels(graph)).catch(() => undefined)
       })
     }
     const observer = new ResizeObserver(resize)
     observer.observe(host)
     resize()
     return () => { observer.disconnect(); cancelAnimationFrame(frame) }
-  }, [ready])
+  }, [ready, refreshLabels])
   // Graphin initializes once; refs keep host callbacks current across rerenders.
   const hostCallbacks = useRef({ onInit, onReady, onDestroy, onNodeClick })
   hostCallbacks.current = { onInit, onReady, onDestroy, onNodeClick }
-  const boundNodeClick = useRef<{ graph: G6Graph; listener: (event: any) => void } | null>(null)
+  const boundNodeClick = useRef<{ graph: G6Graph; listener: (event: any) => void; transform: () => void } | null>(null)
   const handleInit = useCallback((graph: G6Graph) => {
     const listener = (event: any) => {
       const id = event.target?.id
@@ -105,18 +113,23 @@ const RetrievalHyperGraph = ({
     }
     liveGraph.current = graph
     graph.on('node:click', listener)
-    boundNodeClick.current = { graph, listener }
+    const transform = () => refreshLabels(graph)
+    graph.on('aftertransform', transform)
+    boundNodeClick.current = { graph, listener, transform }
     hostCallbacks.current.onInit?.(graph)
-  }, [])
+  }, [refreshLabels])
   const handleReady = useCallback((graph: G6Graph) => {
     setReady(true)
     graph.setOptions({ padding: [30, 36, 36, 36] })
-    graph.fitView({ when: 'always' }, false).catch(() => undefined)
+    graph.fitView({ when: 'always' }, false).then(() => refreshLabels(graph)).catch(() => undefined)
     hostCallbacks.current.onReady?.(graph)
-  }, [])
+  }, [refreshLabels])
   const handleDestroy = useCallback(() => {
     const bound = boundNodeClick.current
-    if (bound) bound.graph.off('node:click', bound.listener)
+    if (bound) {
+      bound.graph.off('node:click', bound.listener)
+      bound.graph.off('aftertransform', bound.transform)
+    }
     boundNodeClick.current = null
     liveGraph.current = null
     setReady(false)
@@ -304,7 +317,7 @@ const RetrievalHyperGraph = ({
         palette: { field: 'cluster' },
         style: {
           size: mode === 'graph' ? 20 : 25,
-          labelText: d => displayLabels?.[String(d.id)] || String(d.id).replace(/^[^:]+:/, '').replace(/_/g, ' '),
+          labelText: d => displayLabels?.[String(d.id)] || String(d.display_name || d.canonical_name || d.id).replace(/^[^:]+:/, '').replace(/_/g, ' '),
           labelFontFamily: 'Segoe UI, Microsoft YaHei, sans-serif',
           labelFontSize: 13,
           labelBackground: true,
@@ -353,6 +366,12 @@ const RetrievalHyperGraph = ({
     const graph = liveGraph.current
     if (!ready || !graph) return
     graph.updateNodeData(graph.getNodeData().map(node => ({ id: node.id, style: { opacity: highlightMembers.length && !highlightMembers.includes(String(node.id)) ? .25 : 1, lineWidth: String(node.id) === selected ? 3 : 1, stroke: String(node.id) === selected ? '#285a45' : '#fff' } })))
+    const activeKeys = new Set(selectedEdge ? [selectedEdge] : linkedEdges.map(([key]) => key))
+    graph.setPlugins(graph.getPlugins().map(plugin => typeof plugin === 'object' && plugin.type === 'bubble-sets' ? {
+      ...plugin,
+      fillOpacity: !activeKeys.size ? .16 : activeKeys.has(String(plugin.key).replace(/^bubble-sets-/, '')) ? .24 : .025,
+      strokeOpacity: !activeKeys.size ? .5 : activeKeys.has(String(plugin.key).replace(/^bubble-sets-/, '')) ? .85 : .12,
+    } : plugin))
     graph.draw().catch(() => undefined)
   }, [ready, selected, selectedEdge, convertedData])
 
@@ -370,7 +389,7 @@ const RetrievalHyperGraph = ({
         <option value="">全部超边</option>{edgeRecords.map(([key, edge], index) => <option key={key} value={key}>{index + 1}. {String(edge.keywords || edge.description || edge.id || key).slice(0, 90)}</option>)}
       </select></label>
       {selected && <div style={{ marginTop: 10 }}><strong>{selectedEntity?.label || selected}</strong><div className="research-mono">{selected}</div><p>{String(selectedEntity?.description || '')}</p><span className="research-muted">关联 {linkedEdges.length} 条超边；成员已突出显示。</span></div>}
-      {selectedEdgeRecord && <div style={{ marginTop: 10 }}><strong>{String(selectedEdgeRecord.keywords || '超边详情')}</strong><p>{String(selectedEdgeRecord.description || '')}</p><div>成员：{selectedEdgeRecord.memberIds.join('、')}</div>{selectedEdgeRecord.source_span && <div className="research-mono">来源：{typeof selectedEdgeRecord.source_span === 'string' ? selectedEdgeRecord.source_span : JSON.stringify(selectedEdgeRecord.source_span)}</div>}</div>}
+      {selectedEdgeRecord && <div style={{ marginTop: 10 }}><strong>{String(selectedEdgeRecord.keywords || '超边详情')}</strong><p>{String(selectedEdgeRecord.description || '')}</p><div>成员：{selectedEdgeRecord.memberIds.join('、')}</div><div className="research-mono">来源：{(selectedEdgeRecord.source_chunk_ids || [selectedEdgeRecord.source_chunk_id || selectedEdgeRecord.source_id]).filter(Boolean).join(' · ')}</div>{(selectedEdgeRecord.source_spans || [selectedEdgeRecord.source_span]).filter(Boolean).map((span, index) => <pre key={index} style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>{typeof span === 'string' ? span : JSON.stringify(span)}</pre>)}</div>}
       {!selected && !selectedEdge && <p className="research-muted" style={{ marginTop: 8 }}>点击节点查看关系，拖动平移，滚轮缩放。彩色包络表示多实体属于同一条超边。</p>}
     </div>
   </div>
