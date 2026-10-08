@@ -284,6 +284,7 @@ def test_authenticated_final_query_and_graph_are_read_only(backend, final_cache,
     assert client.get("/db/hyperedges?database=case1&page=1&page_size=1").json()["total"] == 2
     status = client.get("/database/status?database=case1").json()
     assert status["cache_ready"] and status["supports_modes"] == ["hyper"]
+    assert status["exists"] and status["size_bytes"] > 0 and status["path"] == str(final_cache)
     assert client.post("/database/clear?database=case1").status_code == 403
     assert {path.name: path.read_bytes() for path in final_cache.iterdir()} == before
 

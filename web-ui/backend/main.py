@@ -4599,7 +4599,10 @@ async def get_database_status(database: str = "default", user: dict = Depends(re
     if directory is not None:
         cache = inspect_final_cache(directory)
         models = query_model_status(final=True, user_id=user.get("id"))
+        size_bytes = sum(path.stat().st_size for path in directory.iterdir() if path.is_file()) if directory.is_dir() else 0
         return {"success": True, "database": selected, **cache, **models,
+                "exists": directory.is_dir(), "has_instance": False,
+                "size_bytes": size_bytes, "size_mb": round(size_bytes / (1024 * 1024), 2), "path": str(directory),
                 "ready": cache["cache_ready"] and models["models_ready"],
                 "retrieval_profile": "f1", "supports_modes": ["hyper"], "final_cache_valid": cache["cache_ready"]}
     database = require_database_access(database, user) or namespace_database_name("default", user)
