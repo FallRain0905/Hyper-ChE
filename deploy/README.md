@@ -1,9 +1,20 @@
 # HyperChE 部署
 
-生产入口为 `https://cupzhouth.top`，汇报入口为
-`https://cupzhouth.top/report/hyperche-demo.html`。部署到已有业务的
+生产首页为 `https://cupzhouth.top/`，使用项目汇报 HTML 统一介绍与离线演示；
+完整 Web UI 保留在 `https://cupzhouth.top/workspace/`。部署到已有业务的
 服务器时，使用独立 Compose 项目 `hyperche`；容器网关只监听
 `127.0.0.1:8088`，由宿主 Nginx 转发。现有中转服务及其站点配置保持独立。
+
+| 入口 | 路径与内容 |
+| --- | --- |
+| 首页 | `/`，项目介绍、流程与真实超图案例 |
+| 登录与工作台 | `/workspace/#/login`，登录后使用完整 Web UI |
+| 公开问答体验 | `/workspace/#/try`，按原模型配置与访客限额执行 |
+| 旧汇报链接 | `/report/hyperche-demo.html`，与首页相同的 HTML |
+| Word 下载 | `/report/` 下页面引用的 Word 文件 |
+| 后端接口 | `/api/`，保留原接口与权限控制 |
+
+HTML 的维护源为 [`web-ui/frontend/public/report/hyperche-demo.html`](../web-ui/frontend/public/report/hyperche-demo.html)。更新此文件后重新构建前端镜像，首页与兼容地址同步更新。原 React 介绍页与单独领域演示页合并到这份 HTML；工作台、公开真实问答及原有五个容器服务继续保留。首页不需要登录，实际模型请求仍由后端统一检索和生成。
 
 ## 1. 私有配置与最终缓存
 
@@ -84,6 +95,9 @@ Redis 不可用时公开模型调用不得绕过额度检查。
 
 ## 3. 域名与 HTTPS
 
+以下是新安装或证书重建步骤。现有 `cupzhouth.top` 域名迁移记录见
+[2026-10-08 域名验收](DOMAIN_MIGRATION_20261008.md)；无需因首页更新重新配置 DNS 或更换账号。
+
 将 `cupzhouth.top` 的 A 记录指向部署服务器 `154.219.99.75`。
 DNS 生效后，用独立 HTTP 站点完成 ACME 验证：
 
@@ -114,6 +128,8 @@ ASGI 请求也识别原始 HTTPS/WSS 协议；不使用信任所有来源的 `*`
 升级前备份 PostgreSQL（`pg_dump`）、命名卷、私有 `.env`、只读缓存校验
 清单和 HyperChE Nginx 配置，记录当前 commit 与镜像标签。发布新 release
 后仍使用 `-p hyperche` 和同一私有环境文件，卷名因此保持稳定。
+首页切换到汇报 HTML 只改变前端入口和内容，仍使用 `docker-compose.hyperche.yml`
+及 `deploy/apply-release.sh`；管理员账号、应用密钥、数据库、Redis 和缓存保留。
 不要删除旧镜像或运行全局 Docker prune。
 
 失败时先回到旧 release 目录，再恢复已有镜像：
@@ -129,7 +145,8 @@ sh deploy/rollback-release.sh PREVIOUS_COMMIT_SHA /opt/hyperche/shared/.env
 
 - Compose 五个服务启动，PostgreSQL、Redis、后端、前端健康。
 - 仅 127.0.0.1:8088 新增监听；原中转入口和容器仍正常。
-- HTTPS 首页、登录、知识库列表、Graphin/G6 超图节点与超边、字体正常。
+- HTTPS 首页显示最新版汇报 HTML；`/report/hyperche-demo.html` 返回相同内容，章节锚点与 Word 下载正常。
+- 首页的工作台入口指向 `/workspace/#/login`，在线体验入口指向 `/workspace/#/try`；登录、知识库列表、Graphin/G6 超图节点与超边、字体正常。
 - `/api/public/demo/status` 明确缓存版本、缓存与模型就绪状态。
 - 已配置通道后，真实检索返回最终缓存证据、来源、排序及实际执行流程；
   SSE 逐段输出、WebSocket 构建进度可用。
@@ -137,3 +154,6 @@ sh deploy/rollback-release.sh PREVIOUS_COMMIT_SHA /opt/hyperche/shared/.env
 - `/report/hyperche-demo.html` 及其中 Word 下载、离线超图演示可用。
 - 重建应用容器后，用户、通道、知识库、提示包及缓存仍在；最终缓存哈希
   未变化。健康检查不消耗任何模型 API 调用。
+
+[首次发布验收](ACCEPTANCE_20261008.md) 保留当时的旧域名与待办，属于历史记录，
+不能用来判断新版首页是否完成发布。每次更新均应记录实际提交与当次验收结果。

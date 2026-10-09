@@ -12,7 +12,18 @@ HyperChE 面向化工文献检索与问答，在 [Hyper-RAG](https://github.com/
 2. **检索**：问题分别检索实体和超边，结合 dense/BM25 与 weighted RRF，扩展关联事实，映射回源文本块，按需进行确定性结构重排。
 3. **问答**：从排名靠前的证据组装上下文，生成带来源引用的答案。
 
-Web 平台提供文献上传、知识库管理、超图可视化、提供商通道及密钥池、用户额度和版本化提示包。当前领域提示支持液流电池和 PFAS 压电催化；下面的论文结果仅来自液流电池基准。
+Web 平台提供文献上传、知识库管理、超图可视化、提供商通道及密钥池、用户额度和版本化提示包。公开首页使用项目汇报 HTML 统一介绍与演示，完整工作台保留独立入口。当前领域提示支持液流电池和 PFAS 压电催化；下面的论文结果仅来自液流电池基准。
+
+## 网站入口
+
+| 页面 | 地址 |
+| --- | --- |
+| 项目介绍与离线演示 | [cupzhouth.top](https://cupzhouth.top/) |
+| Web UI 登录与工作台 | [进入工作台](https://cupzhouth.top/workspace/#/login) |
+| 公开问答体验 | [在线体验](https://cupzhouth.top/workspace/#/try) |
+| 汇报兼容地址 | [汇报 HTML](https://cupzhouth.top/report/hyperche-demo.html) |
+
+首页与汇报兼容地址使用同一份 [HTML 源文件](web-ui/frontend/public/report/hyperche-demo.html)，保留其中的 Word 下载与真实超图案例。原 React 介绍页和独立领域演示页由这一份汇报统一呈现；登录、问答、知识库、图谱和管理员功能继续位于 `/workspace/`。在线问答是否可用取决于管理员的模型渠道配置，离线介绍与演示不消耗模型调用。
 
 ## 目录与论文资料
 
@@ -110,13 +121,13 @@ Copy-Item .env.hyperche.example .env
 docker compose -p hyperche -f docker-compose.hyperche.yml --env-file .env up -d --build --wait
 ```
 
-默认容器网关只监听 `127.0.0.1:8088`，生产域名为 `https://cupzhouth.top`，汇报页位于 `/report/hyperche-demo.html`。宿主 Nginx 独立站点提供 HTTPS、SSE 与 WebSocket；现有中转站点不受替换。部署、健康检查、私有配置、数据持久化与回滚见 [deploy/README.md](deploy/README.md)。镜像包含源码和配置，原始文献及向量缓存私下准备，不进入 Git 或镜像。
+默认容器网关只监听 `127.0.0.1:8088`。生产站点的 `/` 提供汇报 HTML，`/workspace/` 提供完整 React Web UI，`/api/` 保留原后端接口。首页改版仍使用原有五个服务，不停用数据库、Redis、最终缓存或用户功能。宿主 Nginx 独立站点提供 HTTPS、SSE 与 WebSocket；现有中转站点不受替换。部署、健康检查、私有配置、数据持久化与回滚见 [deploy/README.md](deploy/README.md)。镜像包含源码和配置，原始文献及向量缓存私下准备，不进入 Git 或镜像。
 
 生产示例名仍为 `case1`，实际使用只读 `final_v1` 缓存；响应和页面披露缓存版本、模型与检索配置。尚未配置模型时显示待配置状态，页面及离线汇报可用，真实模型问答需由管理员配置兼容通道后启用。匿名示例调用通过 Redis 限制频率、每日额度和并发；用户上传构建的数据保存在独立可写知识库中。
 
-2026-10-08 的容器发布、检索回归、响应式检查及尚待完成的 DNS/渠道步骤见
-[发布验收记录](deploy/ACCEPTANCE_20261008.md)。生产域名需先完成 A 记录和证书，
-预计 HTTPS 地址不等于已经公开可用。
+2026-10-08 的检索回归、响应式检查与初次发布状态见
+[历史发布验收记录](deploy/ACCEPTANCE_20261008.md)。该记录中的旧域名 DNS 待办属于首次发布时的状态；后续 `cupzhouth.top` 的 HTTPS、登录与下载验证见
+[域名迁移记录](deploy/DOMAIN_MIGRATION_20261008.md)。首页调整沿用现有账号、应用密钥和业务数据；当前版本的发布结果以独立验收为准。
 
 ## 结果复现与新实验
 

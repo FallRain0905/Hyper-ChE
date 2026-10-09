@@ -20,7 +20,7 @@ const ErrorPage = () => {
       <h1 style={{ fontSize: 24 }}>页面暂时无法加载</h1>
       <p className="research-muted" style={{ margin: '16px 0' }}>请检查网络后重新加载页面。已保存的会话仍会保留。</p>
       <button type="button" className="research-primary" onClick={() => window.location.reload()}>重新加载页面</button>
-      <a className="research-secondary" href="/#/" style={{ marginLeft: 8 }}>返回首页</a>
+      <a className="research-secondary" href="/" style={{ marginLeft: 8 }}>返回首页</a>
     </section>
   </main>
 }

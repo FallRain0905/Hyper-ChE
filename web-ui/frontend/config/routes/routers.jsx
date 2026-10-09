@@ -1,10 +1,9 @@
-import { lazy } from 'react'
+import { lazy, useEffect } from 'react'
 import NotFoundPage from '@/404'
 import App from '@/App'
 import ErrorPage from '@/ErrorPage'
 const Home = lazy(() => import('@/pages/Home'))
-const Landing = lazy(() => import('@/pages/Landing'))
-const WhyHypergraph = lazy(() => import('@/pages/Landing/WhyHypergraph'))
+const Login = lazy(() => import('@/pages/Landing'))
 const TryDemo = lazy(() => import('@/pages/Landing/TryDemo'))
 const Files = lazy(() => import('@/pages/Files'))
 const Graph = lazy(() => import('@/pages/Hyper/Graph'))
@@ -30,15 +29,25 @@ import {
 } from '@ant-design/icons'
 import { Navigate } from 'react-router-dom'
 
+// Older shared links now point to the single project introduction at the site root.
+function ProjectIntroduction() {
+  useEffect(() => { window.location.replace('/#fact') }, [])
+  return <a href="/#fact">查看项目介绍</a>
+}
+
 export const routers = [
   {
     path: '/',
-    element: <Landing />,
+    element: <Navigate replace to="/login" />,
+  },
+  {
+    path: '/login',
+    element: <Login />,
     errorElement: <ErrorPage />,
   },
   {
     path: '/why-hypergraph',
-    element: <WhyHypergraph />,
+    element: <ProjectIntroduction />,
     errorElement: <ErrorPage />,
   },
   {

@@ -231,7 +231,7 @@ function Sidebar() {
               </div>
               <button
                 className="w-full rounded-md px-2 py-1.5 text-xs text-slate-500 hover:bg-blue-50 hover:text-blue-700"
-                onClick={() => navigate('/')}
+                onClick={() => window.location.assign('/')}
               >
                 {'返回首页'}
               </button>
@@ -239,7 +239,7 @@ function Sidebar() {
                 className="w-full rounded-md px-2 py-1.5 text-xs text-slate-500 hover:bg-slate-50 hover:text-teal-700"
                 onClick={async () => {
                   await authStore.logout()
-                  navigate('/')
+                  navigate('/login')
                 }}
               >
                 {'\u9000\u51fa\u767b\u5f55'}
