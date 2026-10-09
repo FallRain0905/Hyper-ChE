@@ -552,6 +552,10 @@ def normalize_llm_providers(settings: dict) -> list[dict]:
     return providers
 
 def _pool_record(bucket: str, item_id: str, limit: int) -> dict:
+    # Unified channel profiles may omit per-key concurrency.  Normalize that
+    # optional value before passing it to max()/Semaphore; otherwise a null
+    # profile field raises ``None > 1`` during the first stream request.
+    limit = _coerce_positive_int(limit, 1)
     records = LLM_PROVIDER_POOL_STATE.setdefault(bucket, {})
     record = records.get(item_id)
     if record is None or record.get("limit") != limit:

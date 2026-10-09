@@ -80,7 +80,9 @@ def _profile_to_provider(profile: dict, index: int) -> dict[str, Any] | None:
         "apiKeys": keys,
         "enabled": True,
         "maxAsync": max(1, int(max_async)),
-        "perKeyMaxAsync": max(1, int(per_key)) if per_key else None,
+        # Keep the legacy pool contract numeric even when the profile leaves
+        # per-key concurrency unset.
+        "perKeyMaxAsync": max(1, int(per_key)) if per_key else 1,
         "priority": int(profile.get("priority") or 100),
         "index": index,
         "protocol": channel.get("protocol") or "openai",
