@@ -1,83 +1,172 @@
 .box {
+  --paper: #f5f3ee;
+  --panel: #fffefa;
+  --ink: #202e29;
+  --muted: #6c756e;
+  --rule: #dedfd5;
+  --green: #285a45;
+  --green-soft: #eaf0e8;
+  position: relative;
+  isolation: isolate;
   display: flex;
   justify-content: center;
   align-items: center;
-  width: '100%';
-  min-height: 60vh;
-  height: '100%';
+  width: 100%;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+
+  .texture {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    opacity: .48;
+    background-image: linear-gradient(120deg, transparent 0 49%, rgba(47, 115, 88, .055) 49.2% 49.5%, transparent 49.7%), radial-gradient(circle at 20% 15%, rgba(201, 225, 213, .38), transparent 29%), radial-gradient(circle at 82% 84%, rgba(218, 235, 225, .32), transparent 26%);
+  }
 
   .container {
     position: relative;
-    height: 150px;
-    width: 250px;
-    -webkit-box-reflect: below 1px linear-gradient(transparent, rgb(227, 231, 238));
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+    width: min(100% - 40px, 430px);
+    padding: 38px 38px 34px;
+    border: 1px solid var(--rule);
+    border-radius: 18px;
+    background: rgba(255, 254, 250, .86);
+    box-shadow: 0 24px 70px rgba(25, 60, 50, .09), 0 2px 0 rgba(255, 255, 255, .7) inset;
+    text-align: center;
   }
 
-  .container > span {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    color: rgb(20, 129, 202);
-    text-shadow: 0 0 10px rgb(20, 129, 202), 0 0 30px rgb(20, 129, 202), 0 0 60px rgb(20, 129, 202),
-      0 0 100px rgb(20, 129, 202);
-    font-size: 18px;
-    z-index: 1;
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--ink);
+    font-family: Georgia, 'Noto Serif SC', serif;
+    font-size: 21px;
+    letter-spacing: -.04em;
   }
 
-  .circle {
+  .brand small {
+    display: block;
+    margin-top: 2px;
+    color: var(--muted);
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    font-size: 10px;
+    letter-spacing: .08em;
+  }
+
+  .mark {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    border-radius: 9px;
+    background: var(--green);
+  }
+
+  .mark svg { width: 26px; height: 26px; }
+  .mark path { fill: none; stroke: #f7fbf6; stroke-width: 1.5; }
+  .mark path + path { stroke-width: 2; }
+  .mark circle { fill: #c5e7d0; }
+
+  .visual {
     position: relative;
-    margin: 0 auto;
-    height: 150px;
-    width: 150px;
-    background-color: rgb(219, 50, 168);
-    border-radius: 50%;
-    animation: zhuan 2s linear infinite;
+    width: 168px;
+    height: 142px;
+    margin: 34px 0 22px;
   }
 
-  @keyframes zhuan {
-    0% {
-      transform: rotate(0deg);
-    }
-
-    100% {
-      transform: rotate(360deg);
-    }
-  }
-
-  .circle::after {
-    content: '';
+  .orbit {
     position: absolute;
-    top: 10px;
-    left: 10px;
-    right: 10px;
-    bottom: 10px;
-    background-color: rgb(71, 21, 64);
+    inset: 16px 20px;
+    border: 1px solid rgba(47, 115, 88, .32);
     border-radius: 50%;
+    transform: rotate(-22deg) scaleY(.62);
+    animation: breathe 2.8s ease-in-out infinite;
   }
 
-  .ring {
+  .core {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 75px;
-    height: 150px;
-    background-image: linear-gradient(180deg, rgb(22, 121, 252), transparent 80%);
-    border-radius: 75px 0 0 75px;
+    top: 50%;
+    left: 50%;
+    display: grid;
+    width: 54px;
+    height: 54px;
+    place-items: center;
+    transform: translate(-50%, -50%);
+    border: 1px solid rgba(47, 115, 88, .36);
+    border-radius: 15px;
+    background: var(--green-soft);
+    color: var(--green);
+    font: 15px/1 'Fragment Mono', Consolas, monospace;
+    box-shadow: 0 0 0 8px rgba(220, 236, 226, .55);
   }
 
-  .ring::after {
-    content: '';
+  .node {
     position: absolute;
-    right: -5px;
-    top: -2.5px;
-    width: 15px;
-    height: 15px;
-    background-color: rgb(40, 124, 202);
-    box-shadow: 0 0 5px rgb(40, 151, 202), 0 0 10px rgb(40, 124, 202), 0 0 20px rgb(40, 124, 202),
-      0 0 30px rgb(40, 124, 202), 0 0 40px rgb(40, 124, 202), 0 0 50px rgb(40, 124, 202),
-      0 0 60px rgb(40, 124, 202), 0 0 60px rgb(40, 124, 202);
-    border-radius: 50%;
     z-index: 1;
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--panel);
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 0 4px rgba(47, 115, 88, .12);
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+
+  .nodeA { top: 18px; left: 28px; }
+  .nodeB { top: 11px; right: 25px; animation-delay: .35s; }
+  .nodeC { right: 10px; bottom: 25px; animation-delay: .7s; }
+  .nodeD { bottom: 16px; left: 26px; animation-delay: 1.05s; }
+
+  .edge {
+    position: absolute;
+    top: 39px;
+    left: 37px;
+    width: 100px;
+    height: 54px;
+    border-top: 1px solid rgba(47, 115, 88, .34);
+    border-bottom: 1px solid rgba(47, 115, 88, .2);
+    transform: rotate(19deg) skewY(-18deg);
+  }
+
+  .edgeSecond { transform: rotate(-28deg) skewY(15deg); opacity: .65; }
+
+  .kicker {
+    margin: 0 0 10px;
+    color: var(--green);
+    font: 10px/1.4 'Fragment Mono', Consolas, monospace;
+    letter-spacing: .13em;
+  }
+
+  h1 {
+    margin: 0;
+    font-family: Georgia, 'Noto Serif SC', serif;
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -.04em;
+  }
+
+  .message {
+    margin: 9px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .dots { display: flex; gap: 6px; margin-top: 20px; }
+  .dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--green); animation: dot 1.2s ease-in-out infinite; }
+  .dots i:nth-child(2) { animation-delay: .15s; }
+  .dots i:nth-child(3) { animation-delay: .3s; }
+
+  @keyframes breathe { 0%, 100% { opacity: .55; transform: rotate(-22deg) scaleY(.62) scale(1); } 50% { opacity: 1; transform: rotate(-22deg) scaleY(.62) scale(1.04); } }
+  @keyframes pulse { 0%, 100% { transform: scale(.85); opacity: .72; } 50% { transform: scale(1.15); opacity: 1; } }
+  @keyframes dot { 0%, 100% { opacity: .28; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .orbit, .node, .dots i { animation: none; }
   }
 }
