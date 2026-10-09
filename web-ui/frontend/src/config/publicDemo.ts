@@ -24,6 +24,11 @@ export type PublicDemoStatus = {
   models_ready?: boolean
   embedding_ready?: boolean
   answer_ready?: boolean
+  configuration_reason?: string
+  configured_embedding_model?: string | null
+  configured_embedding_dim?: number | null
+  required_embedding_model?: string | null
+  required_embedding_dim?: number | null
   supports_modes?: string[]
   database: string
   cache_exists: boolean

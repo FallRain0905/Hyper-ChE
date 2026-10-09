@@ -138,6 +138,15 @@ function Home() {
   }
   const modelsReady = databaseStatus?.models_ready ?? status?.models_ready ?? status?.hyperrag?.models_ready
   const missingChannels = modelsReady === false
+  const modelStatus = databaseStatus || status || {}
+  const configurationReason = modelStatus.configuration_reason || status?.hyperrag?.configuration_reason
+  const configurationMessage = configurationReason === 'embedding_model_mismatch'
+    ? `当前 embedding 为 ${modelStatus.configured_embedding_model || '未识别模型'}，最终知识库要求 Qwen/Qwen3-Embedding-4B（${modelStatus.required_embedding_dim || 2560} 维）。`
+    : configurationReason === 'embedding_dimension_mismatch'
+      ? `当前 embedding 维度为 ${modelStatus.configured_embedding_dim || '未识别'}，最终知识库要求 ${modelStatus.required_embedding_dim || 2560} 维。`
+      : configurationReason === 'missing_embedding_channel'
+        ? '尚未配置可用的 embedding 渠道。'
+        : '尚未配置可用的回答渠道。'
   const submit = async () => {
     const text = question.trim()
     if (!text || busy || !active || missingChannels) return
@@ -183,7 +192,7 @@ function Home() {
     </aside>
     <section className="research-panel research-chat">
       <div className="research-chat-toolbar"><span>知识库</span><DatabaseSelector mode="select" showRefresh size="small" style={{ minWidth: 140 }} /><label>模式 <select value={mode} onChange={event => setMode(event.target.value)} disabled={busy}>{allModes.filter(item => effectiveModes.includes(item.value)).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label style={{ display: 'flex', gap: 5, alignItems: 'center' }}><input type="checkbox" checked={compare} onChange={event => setCompare(event.target.checked)} disabled={busy || effectiveModes.length < 2} /><GitCompare size={14} />对比</label>{compare && <select aria-label="第二个对比模式" value={secondMode} onChange={event => setSecondMode(event.target.value)} disabled={busy}>{allModes.filter(item => effectiveModes.includes(item.value)).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select>}<span className="research-muted">最终索引自动使用混合召回与结构重排 · 5 个证据片段</span></div>
-      {missingChannels && <div className="research-status research-status-warning" style={{ margin: 14 }}>模型渠道尚未配置；可以浏览已有知识库及图谱。{authStore.isAdmin ? <Link to="/app/admin"> 前往管理员后台配置公共渠道</Link> : <span> 请联系管理员，或在 <Link to="/app/providers">API 渠道</Link> 添加个人配置。</span>}</div>}
+       {missingChannels && <div className="research-status research-status-warning" style={{ margin: 14 }}>{configurationMessage} 可以浏览已有知识库及图谱。{authStore.isAdmin ? <Link to="/app/admin"> 前往管理员后台配置公共渠道</Link> : <span> 请联系管理员，或在 <Link to="/app/providers">API 渠道</Link> 添加个人配置。</span>}</div>}
       {isMobile && <div className="research-mobile-view-tabs" role="tablist" aria-label="问答视图" onKeyDown={event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
         event.preventDefault()

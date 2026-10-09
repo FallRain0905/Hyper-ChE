@@ -26,6 +26,20 @@ export default function TryDemo() {
   const controller = useRef<AbortController | null>(null)
   const statusController = useRef<AbortController | null>(null)
   const ready = !statusLoading && !statusError && status?.ready === true
+  const configurationMessage = (() => {
+    switch (status?.configuration_reason) {
+      case 'embedding_model_mismatch':
+        return `当前嵌入模型为 ${status.configured_embedding_model || '已配置模型'}，最终知识库要求 ${status.required_embedding_model || '指定的嵌入模型'}。`
+      case 'embedding_dimension_mismatch':
+        return `当前嵌入维度为 ${status.configured_embedding_dim || '未知'}，最终知识库要求 ${status.required_embedding_dim || '指定维度'}。`
+      case 'missing_embedding_channel':
+        return '嵌入模型渠道尚未配置。'
+      case 'missing_answer_channel':
+        return '回答模型渠道尚未配置。'
+      default:
+        return '模型渠道尚未配置。'
+    }
+  })()
   const checkStatus = useCallback(async () => {
     statusController.current?.abort()
     const abort = new AbortController()
@@ -88,7 +102,7 @@ export default function TryDemo() {
   }
   return <div className="research-page" style={{ minHeight: '100dvh' }}><ResearchDock publicPage /><main style={{ maxWidth: 1240, margin: 'auto', padding: '28px 20px' }}>
     <div className="research-eyebrow">Public knowledge base</div><h1 style={{ fontSize: 28, margin: '10px 0' }}>液流电池公开体验</h1><p className="research-muted">固定只读知识库。检索、来源证据与回答来自同一次查询；免费体验受公共额度限制。</p>
-    <div className={`research-status ${ready ? '' : 'research-status-warning'}`} style={{ margin: '18px 0' }} role="status" aria-live="polite">{statusLoading ? '正在检查公开知识库和模型渠道…' : statusError ? `状态检查失败：${statusError}` : ready ? '知识库与模型渠道已就绪，可提交问题。' : status?.cache_ready === false || status?.cache_exists === false ? '公开知识库暂未就绪，请先查看项目汇报。' : '知识库缓存可浏览；模型渠道尚未配置，在线检索问答暂未开放。'} <button type="button" className="research-secondary" onClick={() => { void checkStatus() }} disabled={statusLoading || busy} style={{ marginLeft: 8 }}>{statusLoading ? '检查中…' : '重新检查'}</button>{!ready && !statusLoading && <span> <a href="/#platform">查看已归档的真实超图案例</a> · <Link to="/login">管理员登录配置渠道</Link></span>}</div>
+    <div className={`research-status ${ready ? '' : 'research-status-warning'}`} style={{ margin: '18px 0' }} role="status" aria-live="polite">{statusLoading ? '正在检查公开知识库和模型渠道…' : statusError ? `状态检查失败：${statusError}` : ready ? '知识库与模型渠道已就绪，可提交问题。' : status?.cache_ready === false || status?.cache_exists === false ? '公开知识库暂未就绪，请先查看项目汇报。' : `知识库缓存可浏览；${configurationMessage}在线检索问答暂未开放。`} <button type="button" className="research-secondary" onClick={() => { void checkStatus() }} disabled={statusLoading || busy} style={{ marginLeft: 8 }}>{statusLoading ? '检查中…' : '重新检查'}</button>{!ready && !statusLoading && <span> <a href="/#platform">查看已归档的真实超图案例</a> · <Link to="/login">管理员登录配置渠道</Link></span>}</div>
     <div className="research-public-grid"><section className="research-panel research-chat"><div className="research-chat-toolbar"><strong>检索问答</strong><label>模式 <select value={mode} onChange={event => setMode(event.target.value)} disabled={busy}><option value="hyper">HyperChE</option>{status?.supports_modes?.includes('graph') && <option value="graph">成对图 RAG</option>}</select></label><span className="research-muted">最终索引返回 top-5 证据</span></div>
       <div className="research-chat-messages" aria-live="polite" aria-busy={busy}>{!messages.length && <div><h2 style={{ fontSize: 18, marginBottom: 15 }}>示例问题</h2>{PUBLIC_DEMO.suggestedQuestions.slice(0, 4).map(item => <button key={item} disabled={busy} className="research-secondary" style={{ display: 'block', width: '100%', textAlign: 'left', margin: '8px 0', fontSize: 12 }} onClick={() => ready ? ask(item) : setQuestion(item)}>{item}</button>)}</div>}{messages.map(message => <article key={message.id} className={`research-message ${message.role === 'user' ? 'user' : ''}`}><div className="research-message-head"><strong>{message.role === 'user' ? '你' : 'HyperChE'}</strong><span>{message.status === 'retrieving' ? '正在检索' : message.status === 'evidence_ready' ? '证据已就绪' : message.status === 'generating_answer' ? '正在生成回答' : ''}</span></div><div className="research-message-body"><ReactMarkdown>{message.content || (message.status === 'retrieving' ? '正在检索与组织证据…' : message.status === 'evidence_ready' ? '证据已就绪，等待生成回答…' : '')}</ReactMarkdown>{message.role === 'assistant' && <RetrievalEvidence result={message} mode={mode} graphId={`public-query-${message.id}`} />}{message.error && <p className="research-status research-status-warning">{message.error}</p>}</div></article>)}</div>
       <form className="research-composer" onSubmit={event => { event.preventDefault(); ask(question) }}><textarea aria-label="公开体验问题" value={question} onChange={event => setQuestion(event.target.value)} placeholder="输入关于液流电池的问题" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); ask(question) } }} /><div className="research-composer-actions"><span>{ready ? 'Enter 发送 · Shift + Enter 换行' : '模型渠道配置完成后可发送'}</span>{busy ? <button type="button" className="research-secondary" onClick={() => controller.current?.abort()}><Square size={14} />停止</button> : <button className="research-primary" disabled={!ready || !question.trim()}><Send size={14} />发送</button>}</div></form></section>

@@ -632,7 +632,10 @@ def summarize_llm_provider_pool(settings: dict) -> dict:
             if health.get("disabled"):
                 disabled_keys += 1
                 provider_disabled += 1
-            elif health.get("cooldown_until", 0.0) > now:
+            # Older in-memory health records may contain an explicit null
+            # cooldown. Treat it as inactive instead of comparing None with a
+            # monotonic timestamp during status rendering.
+            elif (health.get("cooldown_until") or 0.0) > now:
                 cooldown_keys += 1
                 provider_cooldown += 1
             else:
@@ -683,7 +686,9 @@ def get_llm_provider_candidates(settings: dict) -> list[dict]:
             health = _key_health_record(candidate)
             if health.get("disabled"):
                 continue
-            if health.get("cooldown_until", 0.0) > now:
+            # Keep provider failover resilient to partially populated health
+            # records left by an earlier release or a failed request.
+            if (health.get("cooldown_until") or 0.0) > now:
                 continue
             candidates.append(candidate)
 
@@ -2062,10 +2067,11 @@ async def test_api_connection(api_test: APITestModel, user: dict = Depends(requi
             
         else:
             # 闂傚倸鍊峰ù鍥敋瑜嶉湁闁绘垼妫勯弸浣糕攽閻樺疇澹橀柣鎺戠仛閵囧嫰骞掑鍫濆帯闂侀潧妫欑敮锟犲蓟閵堝牄浜归柟鐑樻⒒閺嗩偊姊洪崫鍕拱缂佸鐗滅划璇测槈閵忕姷鐫勯梺閫炲苯澧寸€殿喗鎮傚畷鐔碱敇閻樼绱叉俊鐐€栧ú鏍箠鎼淬垺娅犻悗娑欙供濞堜粙鏌ｉ幇顒傛憼鐎规洖鏈〃銉╂倷閸欏鏋犲銈冨灪濡啫鐣烽崡鐑嗘僵閺夊牃鏅╅崬褰掓⒒閸屾艾鈧绮堟笟鈧獮妤€顭ㄩ崼婵堢崶闁硅偐琛ラ崹鎯р槈濮橈絽浜鹃梻鍫熺⊕閸熺偞銇勯锝嗙缂佺粯绻堝Λ鍐ㄢ槈濞嗗浚妲卞┑鐐茬摠閸ゅ酣宕愰弽顐ｅ床婵炴垯鍨圭粻锝夋煟閹邦喗鏆╅柣鎾愁樀濮婃椽宕崟顔碱伃闂佺懓鍟块柊锝夋晲閻愭祴鏀介柛銉ｅ妿缁夊爼姊洪棃娑辩叚闂傚嫬瀚伴、妯兼喆閸曨厾鐦堥梺姹囧灲濞佳勭閿旂晫绠鹃柛蹇氬亹閹冲洦銇勯姀锛勫⒌鐎规洖銈告俊鐑芥晝閳ь剟宕?
-            return {"success": True, "message": "Operation completed"}
+            return {"success": False, "message": "Unsupported model provider"}
             
     except Exception as e:
-        return {"success": True, "message": "Operation completed"}
+        detail = extract_detailed_exception_message(e)
+        return {"success": False, "message": extract_user_friendly_error(detail)}
 
 
 # ---------------------------------------------------------------------------
@@ -3833,8 +3839,18 @@ def query_model_status(*, final: bool, user_id: str | None = None) -> dict:
     model, key, base_url, _ = resolve_embedding_target(settings, user_id)
     dimension = configured_embedding_dim(settings, user_id)
     embedding_ready = bool(model and key and base_url)
-    if final:
-        embedding_ready = embedding_ready and model == FINAL_MODEL and dimension == FINAL_DIMENSION
+    status_reason = "ready"
+    if not embedding_ready:
+        status_reason = "missing_embedding_channel"
+    elif final and model != FINAL_MODEL:
+        # The published final cache is coupled to this exact embedding model.
+        # A configured embedding service is therefore not sufficient when it
+        # targets another model; expose that distinction to the UI.
+        embedding_ready = False
+        status_reason = "embedding_model_mismatch"
+    elif final and dimension != FINAL_DIMENSION:
+        embedding_ready = False
+        status_reason = "embedding_dimension_mismatch"
     answer_providers = providers.resolve_role_providers("answer", current_user_id=user_id)
     if not user_id:
         answer_providers = [item for item in answer_providers if item.get("scope") != "user"]
@@ -3844,6 +3860,8 @@ def query_model_status(*, final: bool, user_id: str | None = None) -> dict:
                             for item in personal] or normalize_llm_providers(settings)
     answer_ready = any(item.get("modelName") and item.get("baseUrl") and
                        any(item.get("apiKeys") or []) for item in answer_providers)
+    if not answer_ready and status_reason == "ready":
+        status_reason = "missing_answer_channel"
     return {"embedding_ready": bool(embedding_ready), "answer_ready": bool(answer_ready),
             "models_ready": bool(embedding_ready and answer_ready),
             "required_embedding_model": FINAL_MODEL if final else None,
@@ -3851,7 +3869,10 @@ def query_model_status(*, final: bool, user_id: str | None = None) -> dict:
             "configured_embedding_model": model, "configured_embedding_dim": dimension,
             "configured_answer_models": list(dict.fromkeys(str(item.get("modelName"))
                 for item in answer_providers if item.get("modelName"))),
-            "configuration_required": not (embedding_ready and answer_ready)}
+            "configuration_required": not (embedding_ready and answer_ready),
+            "configuration_reason": status_reason if embedding_ready and answer_ready else (
+                status_reason if status_reason != "ready" else "missing_answer_channel"
+            )}
 
 
 def get_public_demo_status() -> dict:

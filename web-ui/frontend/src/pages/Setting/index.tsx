@@ -15,7 +15,8 @@ import {
   AutoComplete,
   Checkbox,
   Switch,
-  InputNumber
+  InputNumber,
+  Tag
 } from 'antd'
 import {
   SettingOutlined,
@@ -516,8 +517,13 @@ const Setting: React.FC = () => {
 
       if (response.ok) {
         const result = await response.json()
-        setTestResults({ ...testResults, api: 'success' })
-        message.success(t('settings.api_test_success'))
+        if (result.success) {
+          setTestResults({ ...testResults, api: 'success' })
+          message.success(t('settings.api_test_success'))
+        } else {
+          setTestResults({ ...testResults, api: 'failed' })
+          message.error(result.message || t('settings.api_test_failed'))
+        }
       } else {
         setTestResults({ ...testResults, api: 'failed' })
         message.error(t('settings.api_test_failed'))
@@ -525,6 +531,41 @@ const Setting: React.FC = () => {
     } catch (error: any) {
       setTestResults({ ...testResults, api: 'failed' })
       message.error(t('settings.api_test_failed') + ': ' + error.message)
+    }
+  }
+
+  // 测试嵌入模型连接，并核对返回向量维度
+  const testEmbeddingConnection = async () => {
+    const values = form.getFieldsValue()
+    if (!values.embeddingApiKey || !values.embeddingBaseUrl || !values.embeddingModel) {
+      message.error('请先填写嵌入模型、Base URL 和 API Key')
+      return
+    }
+
+    setTestResults({ ...testResults, embedding: 'testing' })
+    try {
+      const response = await fetch(`${SERVER_URL}/test/embedding`, {
+        method: 'POST',
+        // The endpoint reads the saved settings; credentials stay server-side.
+      })
+      const result = await response.json().catch(() => ({}))
+      if (response.ok && result.success) {
+        const dim = result.details?.embedding_dim
+        const expectedDim = Number(values.embeddingDim)
+        if (dim && expectedDim && dim !== expectedDim) {
+          setTestResults({ ...testResults, embedding: 'failed' })
+          message.error(`连接成功，但返回维度 ${dim} 与配置的 ${expectedDim} 不一致`)
+          return
+        }
+        setTestResults({ ...testResults, embedding: 'success' })
+        message.success(`嵌入连接成功${dim ? `，返回维度 ${dim}` : ''}`)
+      } else {
+        setTestResults({ ...testResults, embedding: 'failed' })
+        message.error(result.message || '嵌入连接失败')
+      }
+    } catch (error: any) {
+      setTestResults({ ...testResults, embedding: 'failed' })
+      message.error('嵌入连接失败: ' + error.message)
     }
   }
 
@@ -1356,6 +1397,21 @@ const Setting: React.FC = () => {
                 </Form.Item>
               </Col>
             </Row>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4, marginBottom: 16 }}>
+              <Button
+                type="default"
+                onClick={testEmbeddingConnection}
+                loading={testResults.embedding === 'testing'}
+              >
+                检测嵌入连接
+              </Button>
+              {testResults.embedding === 'success' && <Tag color="success">连接正常</Tag>}
+              {testResults.embedding === 'failed' && <Tag color="error">连接失败</Tag>}
+              <span style={{ color: '#6b7280', fontSize: 12 }}>
+                使用当前保存的配置发送一条最小请求，并检查返回维度。
+              </span>
+            </div>
 
             <Alert
               message="重要提示"

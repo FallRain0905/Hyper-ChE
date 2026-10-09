@@ -140,7 +140,10 @@ def build_candidates(
             health = key_state.get(key_id) or {}
             if health.get("disabled"):
                 continue
-            if health.get("cooldown_until", 0.0) > moment:
+            # A persisted/legacy health record can explicitly store null.
+            # Null means no cooldown, never a reason to fail candidate
+            # construction with a TypeError.
+            if (health.get("cooldown_until") or 0.0) > moment:
                 continue
             candidates.append(
                 {
