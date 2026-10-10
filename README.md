@@ -125,6 +125,11 @@ docker compose -p hyperche -f docker-compose.hyperche.yml --env-file .env up -d 
 
 生产示例名仍为 `case1`，实际使用只读 `final_v1` 缓存；响应和页面披露缓存版本、模型与检索配置。尚未配置模型时显示待配置状态，页面及离线汇报可用，真实模型问答需由管理员配置兼容通道后启用。匿名示例调用通过 Redis 限制频率、每日额度和并发；用户上传构建的数据保存在独立可写知识库中。
 
+服务器同时保留三个归档实验缓存供工作台对比：`hyper_base`、`hyper_chem_prompt` 和
+`hyper_norm_posthoc_v1`。前两个与最终组使用相同的 Qwen/Qwen3-Embedding-4B、2,560 维
+查询模型；后者是归一化中间缓存，含历史混合嵌入签名，只提供元数据和查看提示，不参与
+当前在线检索。工作台对比可选择两个知识库；论文指标仍以冻结查询和共享 qrels 的离线评估为准。
+
 2026-10-08 的检索回归、响应式检查与初次发布状态见
 [历史发布验收记录](deploy/ACCEPTANCE_20261008.md)。该记录中的旧域名 DNS 待办属于首次发布时的状态；后续 `cupzhouth.top` 的 HTTPS、登录与下载验证见
 [域名迁移记录](deploy/DOMAIN_MIGRATION_20261008.md)。首页调整沿用现有账号、应用密钥和业务数据；当前版本的发布结果以独立验收为准。

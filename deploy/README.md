@@ -63,6 +63,25 @@ HTML 的维护源为 [`web-ui/frontend/public/report/hyperche-demo.html`](../web
 原始实验缓存保持只读，公开演示不得重建、修复或追加写入它。
 Compose 禁止自动创建缺失种子目录，路径错误会直接阻止启动。
 
+### 归档基线缓存与对比
+
+服务器的可写缓存卷还可放置经过清点的归档实验缓存。当前对比入口使用：
+
+```text
+hyper_base             原始超图，Qwen/Qwen3-Embedding-4B，2,560 维
+hyper_chem_prompt      化学提示超图，Qwen/Qwen3-Embedding-4B，2,560 维
+hyper_norm_posthoc_v1  归一化中间缓存，仅保留查看；其签名混用历史嵌入模型
+```
+
+归档目录包含 `web_cache_profile.json`，服务按各自 `run_config.json` 恢复
+prompt、归一化、EFU、索引视图和 rerank 开关，并以只读方式查询，避免运行时改写
+实验元数据。`hyper_norm_posthoc_v1` 不会被当前 Qwen 查询向量误用；正式在线对比
+应使用最终 `case1` 与 `hyper_base` 或 `hyper_chem_prompt`，且结果会在响应的
+`retrieval_meta` 中标注缓存名称和实验配置。
+
+工作台的“对比”支持选择两个知识库和各自模式，适合比较最终组与同模型基线。
+它不是论文指标计算器；论文结果仍以归档的固定查询、共享 qrels 和统一评估脚本为准。
+
 ## 2. 启动独立容器项目
 
 服务器要求 Linux x86_64、Docker Engine 与支持 `--wait` 的 Compose。

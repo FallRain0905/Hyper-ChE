@@ -934,6 +934,8 @@ def require_database_access(database_name: str | None, user: dict) -> str | None
 def require_writable_database(database_name: str | None) -> None:
     if database_name and final_cache_path(hyperrag_working_dir, database_name) is not None:
         raise HTTPException(status_code=403, detail="The published final knowledge base is read-only")
+    if database_name and is_archived_cache(database_name):
+        raise HTTPException(status_code=403, detail="Archived experiment caches are read-only")
 
 
 def database_display_name(database_name: str, user: dict) -> str:
@@ -2752,6 +2754,95 @@ def configured_embedding_dim(settings: dict, current_user_id: str | None = None)
         return None
 
 
+def load_existing_cache_config(database: str | None = None,
+                               directory: str | Path | None = None) -> dict:
+    """Load an archived cache run signature without mutating the cache."""
+    if directory is None:
+        if not database:
+            return {}
+        clean_name = file_manager.sanitize_database_name(str(database))
+        directory = Path(hyperrag_working_dir) / clean_name
+    path = Path(directory) / "run_config.json"
+    try:
+        if not path.is_file():
+            return {}
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) and payload else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def is_archived_cache(database: str) -> bool:
+    name = file_manager.sanitize_database_name(str(database))
+    return (Path(hyperrag_working_dir) / name / "web_cache_profile.json").is_file()
+
+
+def cache_config_metadata(cache_config: dict | None) -> dict:
+    """Return safe cache provenance fields for status and retrieval metadata."""
+    config = cache_config if isinstance(cache_config, dict) else {}
+    nested_embedding = config.get("embedding") if isinstance(config.get("embedding"), dict) else {}
+    nested_model = str(nested_embedding.get("model") or "").strip() or None
+    declared_model = str(config.get("embedding_model") or "").strip() or nested_model
+    nested_dim = nested_embedding.get("embedding_dim")
+    declared_dim = config.get("embedding_dim") or nested_dim
+    try:
+        declared_dim = int(declared_dim) if declared_dim is not None else None
+    except (TypeError, ValueError):
+        declared_dim = None
+    mixed = bool(config.get("embedding_model") and nested_model and
+                 str(config.get("embedding_model")).strip() != nested_model)
+    return {
+        "experiment_mode": config.get("experiment_mode"),
+        "query_mode": config.get("query_mode"),
+        "prompt_profile": config.get("prompt_profile"),
+        "domain": config.get("effective_domain") or config.get("domain"),
+        "index_profile": config.get("index_profile"),
+        "enable_entity_normalization": config.get("enable_entity_normalization"),
+        "enable_measurement_instances": config.get("enable_measurement_instances"),
+        "enable_efu_repair": config.get("enable_efu_repair"),
+        "enable_hybrid_rerank": config.get("enable_hybrid_rerank"),
+        "embedding_model": declared_model,
+        "embedding_dim": declared_dim,
+        "nested_embedding_model": nested_model,
+        "mixed_embedding_signature": mixed,
+        "normalization_version": config.get("normalization_version"),
+    }
+
+
+def cache_runtime_settings(settings: dict, cache_config: dict | None) -> dict:
+    """Overlay only cache-owned experiment fields onto global settings."""
+    if not cache_config:
+        return dict(settings)
+    result = dict(settings)
+    mapping = {
+        "experiment_mode": "experimentMode",
+        "prompt_profile": "promptProfile",
+        "domain": "hyperrag_domain",
+        "enable_entity_normalization": "enableEntityNormalization",
+        "enable_measurement_instances": "enableMeasurementInstances",
+        "enable_efu_repair": "enableEfuRepair",
+        "enable_hybrid_rerank": "enableHybridRerank",
+        "index_profile": "indexProfile",
+    }
+    for source, target in mapping.items():
+        if source in cache_config and cache_config.get(source) is not None:
+            result[target] = cache_config[source]
+            result[source] = cache_config[source]
+    if cache_config.get("effective_domain"):
+        result["hyperrag_domain"] = cache_config["effective_domain"]
+    # An administrator's prompt pack cannot replace the prompts of an archive.
+    for key in ("prompt_pack_id", "promptPackId", "prompt_version_id", "promptVersionId"):
+        result.pop(key, None)
+    nested_embedding = cache_config.get("embedding") if isinstance(cache_config.get("embedding"), dict) else {}
+    model = cache_config.get("embedding_model") or nested_embedding.get("model")
+    dimension = cache_config.get("embedding_dim") or nested_embedding.get("embedding_dim")
+    if model:
+        result["embeddingModel"] = model
+    if dimension is not None:
+        result["embeddingDim"] = dimension
+    return result
+
+
 def vector_store_dimensions(working_dir: str | Path) -> dict[str, int]:
     """Read the ``embedding_dim`` recorded in each vdb_*.json under a cache dir."""
     result: dict[str, int] = {}
@@ -3528,8 +3619,10 @@ def resolve_bound_prompt_domain(settings: dict, current_user_id: str | None) -> 
     return result
 
 
-def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_overlap: int = None):
-    require_writable_database(database)
+def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_overlap: int = None,
+                          *, for_query: bool = False):
+    if not for_query:
+        require_writable_database(database)
     """
     闂傚倸鍊搁崐椋庣矆娓氣偓瀹曘儳鈧綆鍠栫壕鍧楁煙閹増顥夐幖鏉戯躬閺屻倝鎳濋幍顔肩墯婵炲瓨绮岀紞濠囧蓟濞戙垹唯妞ゆ梻鍘ч～鈺冪磽娴ｅ搫顎撶紓宥勭窔瀵鍨惧畷鍥ㄦ濡炪倖姊婚崢褔寮抽悢璁垮綊鎮埀顒勫矗閸愵喖绠栨俊銈呮噺閸婄兘鏌ｉ悢绋款棎闁稿鎸歌灃闁告侗鍘鹃敍鐔兼⒑闂堟稓澧曟繛鑼█瀹曟垿骞樼拠鎻掔€銈嗗姧缁插灝鈻撻妶澶嬧拺闂侇偆鍋涢懟顖涙櫠閸欏浜滄い鎰╁焺濡叉椽鏌涢悩璇у伐妞ゆ挸鍚嬪鍕節閸愵厾鍙戦梻鍌欒兌缁垰顫忔繝姘偍鐟滃繒鍒掓繝姘殤妞ゆ帒鍊婚敍婊堟⒑闂堟单鍫ュ疾濞嗘挸绠熷Δ锝呭暞閻?HyperRAG 闂傚倸鍊峰ù鍥敋瑜庨〃銉х矙閸柭も偓鍧楁⒑椤掆偓缁夊澹曠紒妯圭箚妞ゆ牗鑹鹃幃鎴炪亜?
     """
@@ -3558,12 +3651,21 @@ def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_o
         # HyperRAG 闂傚倷娴囬褍顫濋敃鍌︾稏濠㈣埖鍔曠粻鏍煕椤愶絾绀€缁炬儳娼￠弻鐔封枔閸喗鐏撶紓浣插亾濠电姴娲﹂悡娑㈡煕閹扳晛濡垮褎鐩弻娑欐償閳╁啯宕崇紓浣介哺閹告悂顢樻總绋垮窛妞ゆ牕鎲為崶銊у幍濡炪倖鐗楅懝楣冾敂椤愶附鐓冪憸婊堝礈濮樿京鐭欓柟鐑橆殕閺咁亜鈹戦悩顔肩伇婵炲绋撶划鏃堝箻椤旂晫鐣抽梻鍌欑劍鐎笛呮崲閸岀偞鍋嬪┑鐘插閸忔粓鏌涢锝嗙闁?hyperrag_cache 婵犵數濮烽弫鎼佸磻閻愬搫鍨傞柛顐ｆ礀缁犱即鏌熼梻瀵歌窗闁轰礁瀚伴弻娑㈠Ψ閹存柨浜鹃梺鍝勵儐濡啴寮婚悢鍛婄秶闁告挆鍛闂備礁鎼鍕濮樿泛钃熼柨婵嗘啒閺冨牆鐒垫い鎺戝閸嬪鏌涢埄鍐噮闁活厼鐗撻弻銊╁即閻愭祴鍋撻崫銉т笉鐟滅増甯楅崐鍨箾閹寸儐浼嗛柟瀵稿С閻掑﹤霉閻撳海鎽犻柣鎾寸洴閹鏁愭惔婵堢泿闂佸搫妫涢崑鐔烘閹烘纾兼繛鎴烆焽椤戝倿姊洪崷顓熷殌閻庢矮鍗抽悰顔界瑹閳ь剟鐛幒鎴悑闁搞儯鍔庤棟
         db_working_dir = os.path.join(hyperrag_working_dir, db_dir_name)
         Path(db_working_dir).mkdir(parents=True, exist_ok=True)
-        
-        settings = load_effective_settings()
+
+        # Existing caches carry the experiment signature that produced their
+        # indexes.  Use it for runtime flags and prompt/domain selection;
+        # newly created databases continue to use the active global settings.
+        cache_config = load_existing_cache_config(directory=db_working_dir)
+        existing_cache = bool(cache_config)
+        archived_cache = is_archived_cache(database)
+        settings = cache_runtime_settings(load_effective_settings(), cache_config)
+        cache_metadata = cache_config_metadata(cache_config)
 
         # The embedding dimension comes from the active model profile; the
         # legacy settings field is only a fallback.
-        embedding_dim = configured_embedding_dim(settings, CURRENT_USER_ID.get())
+        embedding_dim = cache_metadata.get("embedding_dim") if existing_cache else None
+        if embedding_dim is None:
+            embedding_dim = configured_embedding_dim(settings, CURRENT_USER_ID.get())
         if not embedding_dim:
             embedding_dim = settings.get("embeddingDim")
         validate_embedding_dimension(db_working_dir, embedding_dim)
@@ -3614,7 +3716,8 @@ def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_o
 
         # A bound prompt pack overrides the plain domain name so the knowledge
         # base is built with exactly the prompts the user published.
-        prompt_binding = resolve_bound_prompt_domain(settings, CURRENT_USER_ID.get())
+        prompt_binding = (resolve_bound_prompt_domain(settings, CURRENT_USER_ID.get())
+                          if not existing_cache else {"source": "cache"})
         if prompt_binding["source"] == "prompt_pack":
             current_domain = prompt_binding["domain"]
             experiment_config["prompt_pack_id"] = prompt_binding["pack_id"]
@@ -3643,6 +3746,11 @@ def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_o
                 main_logger.warning("Log message")
 
         # 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁嶉崟顒佹濠德板€曢崯顖氱暦閺屻儲鐓曠€光偓閳ь剟宕戦悙鐑樺亗?HyperRAG 闂傚倸鍊峰ù鍥敋瑜庨〃銉х矙閸柭も偓鍧楁⒑椤掆偓缁夊澹曠紒妯圭箚妞ゆ牗鑹鹃幃鎴炪亜?
+        async def cache_embedding(texts):
+            return await get_hyperrag_embedding_func(
+                texts, expected_model=cache_metadata.get("embedding_model"),
+                dimensions=embedding_dim if existing_cache else None)
+
         hyperrag_kwargs = {
             "working_dir": db_working_dir,
             "llm_model_func": get_hyperrag_llm_func,
@@ -3651,9 +3759,13 @@ def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_o
             "embedding_func": EmbeddingFunc(
                 embedding_dim=embedding_dim,  # text-embedding-3-small 闂傚倸鍊搁崐鐑芥倿閿曞倹鍎戠憸鐗堝笒缁€澶屸偓鍏夊亾闁逞屽墴閸┾偓妞ゆ帊绀侀崵顒勬煕閻樺磭澧崇憸棰佺椤啴濡堕崱姗嗘⒖婵犳鍠撻崐婵嗙暦?
                 max_token_size=8192,
-                func=get_hyperrag_embedding_func
+                func=cache_embedding if existing_cache else get_hyperrag_embedding_func
             ),
-                    "domain": current_domain,
+            # Archived caches must never refresh provenance or write response
+            # caches while being queried.
+            "enable_llm_cache": not archived_cache,
+            "read_only": archived_cache,
+            "domain": current_domain,
             "experiment_mode": experiment_config.get("experiment_mode", "hyper_final"),
             "query_mode": experiment_config.get("query_mode", "hyper"),
             "prompt_profile": experiment_config.get("prompt_profile", "chemistry"),
@@ -3692,7 +3804,8 @@ def get_or_create_hyperrag(database: str = None, chunk_size: int = None, chunk_o
     
     instance = hyperrag_instances[database]
     try:
-        settings = load_effective_settings()
+        cache_config = load_existing_cache_config(directory=instance.working_dir)
+        settings = cache_runtime_settings(load_effective_settings(), cache_config)
         requested_domain = settings.get("hyperrag_domain", getattr(instance, "domain", "default"))
         experiment_mode = settings.get("experimentMode", settings.get("experiment_mode", getattr(instance, "experiment_mode", "hyper_final")))
         try:
@@ -3831,7 +3944,10 @@ def normalize_query_result(result: Any) -> dict:
     return {"response": safe_str(result), "entities": [], "themes": [], "hyperedges": [], "text_units": []}
 
 
-def query_model_status(*, final: bool, user_id: str | None = None) -> dict:
+def query_model_status(*, final: bool, user_id: str | None = None,
+                       cache_config: dict | None = None,
+                       cache_model: str | None = None,
+                       cache_dim: int | None = None) -> dict:
     """Inspect configured channels without issuing preflight model requests."""
     settings = load_effective_settings() if user_id else {}
     if not settings:
@@ -3846,6 +3962,18 @@ def query_model_status(*, final: bool, user_id: str | None = None) -> dict:
     status_reason = "ready"
     if not embedding_ready:
         status_reason = "missing_embedding_channel"
+    cache_meta = cache_config_metadata(cache_config)
+    required_cache_model = cache_model or cache_meta.get("embedding_model")
+    required_cache_dim = cache_dim or cache_meta.get("embedding_dim")
+    if cache_meta.get("mixed_embedding_signature"):
+        embedding_ready = False
+        status_reason = "unsupported_mixed_embedding_cache"
+    elif required_cache_model and model != required_cache_model:
+        embedding_ready = False
+        status_reason = "embedding_model_mismatch"
+    elif required_cache_dim and dimension != required_cache_dim:
+        embedding_ready = False
+        status_reason = "embedding_dimension_mismatch"
     elif final and model != FINAL_MODEL:
         # The published final cache is coupled to this exact embedding model.
         # A configured embedding service is therefore not sufficient when it
@@ -3868,9 +3996,15 @@ def query_model_status(*, final: bool, user_id: str | None = None) -> dict:
         status_reason = "missing_answer_channel"
     return {"embedding_ready": bool(embedding_ready), "answer_ready": bool(answer_ready),
             "models_ready": bool(embedding_ready and answer_ready),
-            "required_embedding_model": FINAL_MODEL if final else None,
-            "required_embedding_dim": FINAL_DIMENSION if final else None,
+            "required_embedding_model": FINAL_MODEL if final else required_cache_model,
+            "required_embedding_dim": FINAL_DIMENSION if final else required_cache_dim,
             "configured_embedding_model": model, "configured_embedding_dim": dimension,
+            "cache_embedding_model": required_cache_model,
+            "cache_embedding_dim": required_cache_dim,
+            "cache_experiment_mode": cache_meta.get("experiment_mode"),
+            "cache_prompt_profile": cache_meta.get("prompt_profile"),
+            "cache_index_profile": cache_meta.get("index_profile"),
+            "cache_mixed_embedding_signature": bool(cache_meta.get("mixed_embedding_signature")),
             "configured_answer_models": list(dict.fromkeys(str(item.get("modelName"))
                 for item in answer_providers if item.get("modelName"))),
             "configuration_required": not (embedding_ready and answer_ready),
@@ -3946,7 +4080,18 @@ def _check_query_ready(query: QueryModel, database: str, user_id: str | None) ->
         raise HTTPException(status_code=400, detail="当前知识库没有最终缓存签名，使用自动或原版检索。")
     elif query.mode not in ("hyper", "hyper-lite", "graph", "naive", "llm"):
         raise HTTPException(status_code=400, detail="Unsupported query mode")
-    models = query_model_status(final=is_final, user_id=user_id)
+    cache_config = load_existing_cache_config(database=database) if directory is None else {}
+    cache_meta = cache_config_metadata(cache_config)
+    models = query_model_status(
+        final=is_final,
+        user_id=user_id,
+        cache_config=cache_config,
+        cache_model=cache_meta.get("embedding_model"),
+        cache_dim=cache_meta.get("embedding_dim"),
+    )
+    if models.get("configuration_reason") == "unsupported_mixed_embedding_cache":
+        raise HTTPException(status_code=503,
+                            detail="该历史缓存包含不一致的 embedding 模型签名，暂不支持在线查询；请使用与缓存完全匹配的向量模型重建或重新发布。")
     need_answer = not query.only_need_context or (not is_final and query.mode in ("hyper", "hyper-lite", "graph"))
     need_embedding = query.mode != "llm"
     if (need_embedding and not models["embedding_ready"]) or (need_answer and not models["answer_ready"]):
@@ -3957,16 +4102,26 @@ def _check_query_ready(query: QueryModel, database: str, user_id: str | None) ->
 async def _prepare_query(query: QueryModel, database: str) -> dict:
     directory = _query_cache_directory(database)
     if directory is not None:
-        return await retrieve_final(query.question, directory, get_hyperrag_embedding_func,
-                                    evidence_top_k=query.evidence_top_k,
-                                    enable_rerank=query.retrieval_profile != "f0")
+        result = await retrieve_final(query.question, directory, get_hyperrag_embedding_func,
+                                      evidence_top_k=query.evidence_top_k,
+                                      enable_rerank=query.retrieval_profile != "f0")
+        cache_meta = cache_config_metadata(load_existing_cache_config(directory=directory))
+        result.setdefault("retrieval_meta", {}).update({
+            "cache_database": database,
+            "cache_experiment_mode": cache_meta.get("experiment_mode"),
+            "cache_prompt_profile": cache_meta.get("prompt_profile"),
+            "cache_index_profile": cache_meta.get("index_profile"),
+            "cache_embedding_model": cache_meta.get("embedding_model") or result.get("retrieval_meta", {}).get("embedding_model"),
+            "cache_embedding_dim": cache_meta.get("embedding_dim") or result.get("retrieval_meta", {}).get("embedding_dim"),
+        })
+        return result
     if not HYPERRAG_AVAILABLE:
         raise HTTPException(status_code=503, detail="HyperRAG is not available")
     from hyperrag.prompt import PROMPTS
     if query.mode == "llm":
         result = {"response": "", "entities": [], "hyperedges": [], "text_units": []}
     else:
-        rag = get_or_create_hyperrag(database)
+        rag = get_or_create_hyperrag(database, for_query=True)
         param = QueryParam(mode=query.mode, top_k=query.top_k,
             max_token_for_text_unit=query.max_token_for_text_unit,
             max_token_for_entity_context=query.max_token_for_entity_context,
@@ -3984,10 +4139,21 @@ async def _prepare_query(query: QueryModel, database: str) -> dict:
         system = PROMPTS["naive_rag_response"].format(content_data=context, response_type=query.response_type)
     else:
         system = PROMPTS["rag_response"].format(context_data=context, response_type=query.response_type)
+    cache_config = load_existing_cache_config(database=database)
+    cache_meta = cache_config_metadata(cache_config)
     result.update(context=context, has_context=has_context or query.mode == "llm",
                   answer_prompt=query.question + define, answer_system_prompt=system,
                   retrieval_meta={"profile": "legacy", "method": "upstream_" + query.mode,
-                                  "top_k": query.top_k, "read_only": False,
+                                  "top_k": query.top_k, "read_only": is_archived_cache(database),
+                                  "cache_config": cache_meta,
+                                  "experiment_mode": cache_meta.get("experiment_mode"),
+                                  "embedding_model": cache_meta.get("embedding_model"),
+                                  "cache_database": database,
+                                  "cache_experiment_mode": cache_meta.get("experiment_mode"),
+                                  "cache_prompt_profile": cache_meta.get("prompt_profile"),
+                                  "cache_index_profile": cache_meta.get("index_profile"),
+                                  "cache_embedding_model": cache_meta.get("embedding_model"),
+                                  "cache_embedding_dim": cache_meta.get("embedding_dim"),
                                   "generation_matches_paper_protocol": False})
     return result
 
@@ -4641,6 +4807,8 @@ async def get_database_status(database: str = "default", user: dict = Depends(re
         # 濠电姷鏁告慨鐑姐€傞挊澹╋綁宕ㄩ弶鎴狅紱闂侀€炲苯澧撮柡灞剧〒閳ь剨缍嗛崑鍛暦瀹€鍕厸鐎光偓鐎ｎ剛锛熸繛瀵稿婵″洭骞忛悩璇茬闁圭儤鍩堝銉╂⒒閸屾瑧顦﹂柟纰卞亜铻炴繛鎴欏灩缁愭鏌″搴″箻鐎规挷绶氶弻鐔衡偓鐢殿焾闉嬫繝娈垮枟婵炲﹤顫忓ú顏嶆晢闁逞屽墰缁棃骞橀鑲╃厬婵犵數濮村ú锕傛偂濞嗘劑浜滈柡宥冨妿閹冲棝鏌涜箛鎾剁劯闁哄苯绉烽¨渚€鏌涢幘瀛樼殤缂侇喗鐟╅獮鎺懳旀担瑙勭彣婵犵數濮烽弫鍛婃叏椤撱垹纾?
         db_path = Path(hyperrag_working_dir) / database
         db_exists = db_path.exists()
+        cache_config = load_existing_cache_config(directory=db_path) if db_exists else {}
+        cache_meta = cache_config_metadata(cache_config)
 
         # 闂傚倸鍊搁崐椋庣矆娓氣偓瀹曘儳鈧綆鍠栫壕鍧楁煙閹増顥夐幖鏉戯躬閺屻倝鎳濋幍顔肩墯婵炲瓨绮岀紞濠囧蓟濞戙垹唯妞ゆ梻鍘ч～鈺呮⒑閸濆嫷鍎庣紒鑸靛哺瀵鏁愰崨鍌涙閸┾偓妞ゆ帒瀚崑瀣煕閳╁啰鎳呴柣顓炵墦閺屻劑寮撮悙娴嬪亾閸濄儳涓嶇憸鐗堝笚閸婂灚绻涢幋鐑嗕紗闁瑰濮抽悞濠冦亜閹惧崬鐏柣鎾崇箻閺屾盯濡烽幋婵嗩仼缂佹劖绋掔换?
         db_size = 0
@@ -4651,6 +4819,14 @@ async def get_database_status(database: str = "default", user: dict = Depends(re
 
         # 闂傚倸鍊搁崐椋庣矆娓氣偓瀹曘儳鈧綆鍠栫壕鍧楁煙閹増顥夐幖鏉戯躬閺屻倝鎳濋幍顔肩墯婵炲瓨绮岀紞濠囧蓟濞戙垹唯闁靛繆鍓濆鎺楁⒑缁嬫鍎愰柟鐟版搐閻ｇ兘鎮滅粵瀣櫍闂佺粯鍔栨竟鍡涙煢閻㈢數纾介柛灞剧懄缁佹壆绱撻崼婊冨祮鐎规洘娲熼幃鐣岀矙鐠恒劎鏆梻浣稿暱閹碱偊骞婅箛娑樺惞閻庯綆鍓涘Λ顖炴煟濡も偓閻擃偊顢旈崨顖ｆ锤?
         has_instance = database in hyperrag_instances
+        models = query_model_status(
+            final=False,
+            user_id=user.get("id"),
+            cache_config=cache_config,
+            cache_model=cache_meta.get("embedding_model"),
+            cache_dim=cache_meta.get("embedding_dim"),
+        )
+        cache_ready = db_exists and not cache_meta.get("mixed_embedding_signature")
 
         return {
             "database": database,
@@ -4658,7 +4834,15 @@ async def get_database_status(database: str = "default", user: dict = Depends(re
             "has_instance": has_instance,
             "size_bytes": db_size,
             "size_mb": round(db_size / (1024 * 1024), 2),
-            "path": str(db_path)
+            "path": str(db_path),
+            **models,
+            "cache_config": cache_meta,
+            "cache_ready": cache_ready,
+            "ready": bool(cache_ready and models["models_ready"]),
+            "retrieval_profile": "legacy", "read_only": is_archived_cache(database),
+            "supports_modes": (["hyper", "hyper-lite", "graph", "naive", "llm"]
+                               if cache_ready and models["models_ready"] else []),
+            "final_cache_valid": False,
         }
     except Exception as e:
         main_logger.error("Log message")

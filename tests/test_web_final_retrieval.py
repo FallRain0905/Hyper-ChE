@@ -156,6 +156,63 @@ def backend(monkeypatch, tmp_path):
     return module
 
 
+def test_archived_baseline_keeps_config_and_checks_embedding(backend, monkeypatch, tmp_path):
+    directory = tmp_path / "hyper_base"
+    directory.mkdir()
+    config = {"experiment_mode": "hyper_base", "prompt_profile": "default",
+              "domain": "flow_battery", "effective_domain": "default",
+              "enable_entity_normalization": False, "enable_measurement_instances": False,
+              "enable_efu_repair": False, "enable_hybrid_rerank": False,
+              "index_profile": "canonical_only",
+              "embedding": {"model": FINAL_MODEL, "embedding_dim": FINAL_DIMENSION}}
+    dump(directory / "run_config.json", config)
+    dump(directory / "web_cache_profile.json", {"read_only": True})
+    before = (directory / "run_config.json").read_bytes()
+    monkeypatch.setattr(backend, "hyperrag_working_dir", str(tmp_path))
+    monkeypatch.setattr(backend, "HYPERRAG_AVAILABLE", True)
+    monkeypatch.setattr(backend, "hyperrag_instances", {})
+    monkeypatch.setattr(backend, "load_effective_settings", lambda: {
+        "experimentMode": "hyper_final", "enable_efu_repair": True,
+        "enableHybridRerank": True, "promptProfile": "chemistry"})
+    monkeypatch.setattr(backend, "HyperRAG", lambda **kwargs: SimpleNamespace(
+        chunk_token_size=1000, chunk_overlap_token_size=100, embedding_batch_num=8, **kwargs))
+    rag = backend.get_or_create_hyperrag("hyper_base", for_query=True)
+    assert rag.read_only and not rag.enable_llm_cache
+    assert rag.domain == "default" and rag.prompt_profile == "default"
+    assert not rag.enable_efu_repair and not rag.enable_hybrid_rerank
+    assert (directory / "run_config.json").read_bytes() == before
+    with pytest.raises(Exception) as failure:
+        backend.require_writable_database("hyper_base")
+    assert failure.value.status_code == 403
+    captured = []
+    async def embed(texts, **kwargs):
+        captured.append(kwargs)
+        return np.zeros((len(texts), FINAL_DIMENSION))
+    monkeypatch.setattr(backend, "get_hyperrag_embedding_func", embed)
+    asyncio.run(rag.embedding_func(["energy efficiency"]))
+    assert captured == [{"expected_model": FINAL_MODEL, "dimensions": FINAL_DIMENSION}]
+
+
+def test_mixed_historical_embedding_cache_cannot_query(backend, monkeypatch, tmp_path):
+    directory = tmp_path / "historical_norm"
+    directory.mkdir()
+    config = {"embedding_model": "qwen3.7-text-embedding", "embedding_dim": FINAL_DIMENSION,
+              "embedding": {"model": FINAL_MODEL, "embedding_dim": FINAL_DIMENSION},
+              "normalization_version": "posthoc-v1"}
+    dump(directory / "run_config.json", config)
+    monkeypatch.setattr(backend, "hyperrag_working_dir", str(tmp_path))
+    monkeypatch.setattr(backend, "load_effective_settings", lambda: {})
+    monkeypatch.setattr(backend, "resolve_embedding_target", lambda *args: (FINAL_MODEL, "test", "https://test", "platform"))
+    monkeypatch.setattr(backend, "configured_embedding_dim", lambda *args: FINAL_DIMENSION)
+    monkeypatch.setattr(backend.providers, "resolve_role_providers", lambda *args, **kwargs: [{"modelName": "test", "baseUrl": "https://test", "apiKeys": ["test"]}])
+    status = backend.query_model_status(final=False, user_id="test", cache_config=config)
+    assert status["configuration_reason"] == "unsupported_mixed_embedding_cache"
+    assert not status["models_ready"]
+    with pytest.raises(Exception) as failure:
+        backend._check_query_ready(backend.QueryModel(question="energy efficiency"), "historical_norm", "test")
+    assert failure.value.status_code == 503
+
+
 def test_public_json_and_stream_share_one_retrieval_and_release_slot(backend, final_cache, monkeypatch):
     from fastapi.testclient import TestClient
     monkeypatch.setenv("HYPERCHE_FINAL_CACHE_DIR", str(final_cache))

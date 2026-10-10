@@ -5,6 +5,9 @@ export type QueryResult = {
   success?: boolean
   response?: string
   message?: string
+  error?: string
+  database?: string
+  mode?: string
   entities?: any[]
   hyperedges?: any[]
   text_units?: any[]

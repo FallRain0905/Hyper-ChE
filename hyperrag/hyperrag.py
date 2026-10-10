@@ -120,53 +120,64 @@ class HyperRAG:
     query_mode: str = "hyper"
     index_profile: str = "dual_concat"
     corpus_manifest_path: str = ""
+    # Read-only cache mode is used when serving a published/archived cache.
+    # It loads the normal query indexes but must never refresh provenance,
+    # create cache log files, populate the response cache, or accept writes.
+    read_only: bool = False
     # Extra provenance written into run_config.json; the web platform records
     # the prompt pack version that a knowledge base was built with.
     extra_run_config: dict = field(default_factory=dict)
 
     def __post_init__(self):
+        if self.read_only and not os.path.isdir(self.working_dir):
+            raise FileNotFoundError(
+                f"Read-only HyperRAG cache does not exist: {self.working_dir}"
+            )
         if not os.path.exists(self.working_dir):
             os.makedirs(self.working_dir, exist_ok=True)
 
-        log_file = os.path.join(self.working_dir, "HyperRAG.log")
-        set_logger(log_file)
-        logger.setLevel(self.log_level)
+        if not self.read_only:
+            log_file = os.path.join(self.working_dir, "HyperRAG.log")
+            set_logger(log_file)
+            logger.setLevel(self.log_level)
 
-        logger.info(f"Logger initialized for working directory: {self.working_dir}")
+            logger.info(f"Logger initialized for working directory: {self.working_dir}")
 
         _print_config = ",\n  ".join([f"{k} = {v}" for k, v in asdict(self).items()])
         logger.debug(f"HyperRAG init with param:\n  {_print_config}\n")
 
-        logger.info(f"Working directory ready: {self.working_dir}")
+        if not self.read_only:
+            logger.info(f"Working directory ready: {self.working_dir}")
 
-        try:
-            from .experiment import write_run_config
+        if not self.read_only:
+            try:
+                from .experiment import write_run_config
 
-            write_run_config(
-                self.working_dir,
-                {
-                    "experiment_mode": self.experiment_mode,
-                    "query_mode": self.query_mode,
-                    "prompt_profile": self.prompt_profile,
-                    "domain": self.domain,
-                    "effective_domain": self.domain,
-                    "enable_one_pass_extraction": self.enable_one_pass_extraction,
-                    "enable_entity_normalization": self.enable_entity_normalization,
-                    "enable_measurement_instances": self.enable_measurement_instances,
-                    "enable_efu_repair": self.enable_efu_repair,
-                    "enable_hybrid_rerank": self.enable_hybrid_rerank,
-                    "index_profile": self.index_profile,
-                    "chunk_token_size": self.chunk_token_size,
-                    "chunk_overlap_token_size": self.chunk_overlap_token_size,
-                    "max_entities_per_chunk": self.max_entities_per_chunk,
-                    "tiktoken_model_name": self.tiktoken_model_name,
-                    "corpus_manifest_path": self.corpus_manifest_path,
-                    "corpus_id": os.path.basename(os.path.normpath(self.working_dir)),
-                },
-                extra=dict(self.extra_run_config or {}),
-            )
-        except Exception as exc:
-            logger.warning(f"Failed to write run_config.json: {exc}")
+                write_run_config(
+                    self.working_dir,
+                    {
+                        "experiment_mode": self.experiment_mode,
+                        "query_mode": self.query_mode,
+                        "prompt_profile": self.prompt_profile,
+                        "domain": self.domain,
+                        "effective_domain": self.domain,
+                        "enable_one_pass_extraction": self.enable_one_pass_extraction,
+                        "enable_entity_normalization": self.enable_entity_normalization,
+                        "enable_measurement_instances": self.enable_measurement_instances,
+                        "enable_efu_repair": self.enable_efu_repair,
+                        "enable_hybrid_rerank": self.enable_hybrid_rerank,
+                        "index_profile": self.index_profile,
+                        "chunk_token_size": self.chunk_token_size,
+                        "chunk_overlap_token_size": self.chunk_overlap_token_size,
+                        "max_entities_per_chunk": self.max_entities_per_chunk,
+                        "tiktoken_model_name": self.tiktoken_model_name,
+                        "corpus_manifest_path": self.corpus_manifest_path,
+                        "corpus_id": os.path.basename(os.path.normpath(self.working_dir)),
+                    },
+                    extra=dict(self.extra_run_config or {}),
+                )
+            except Exception as exc:
+                logger.warning(f"Failed to write run_config.json: {exc}")
 
         self.full_docs = self.key_string_value_json_storage_cls(
             namespace="full_docs", global_config=asdict(self)
@@ -180,7 +191,7 @@ class HyperRAG:
             self.key_string_value_json_storage_cls(
                 namespace="llm_response_cache", global_config=asdict(self)
             )
-            if self.enable_llm_cache
+            if self.enable_llm_cache and not self.read_only
             else None
         )
         """
@@ -278,6 +289,8 @@ class HyperRAG:
             )
 
     def insert(self, string_or_strings):
+        if self.read_only:
+            raise PermissionError("Read-only HyperRAG cache does not accept inserts")
         loop = always_get_an_event_loop()
         return loop.run_until_complete(self.ainsert(string_or_strings))
 
@@ -329,6 +342,8 @@ class HyperRAG:
         return doc_id, doc_data
 
     async def ainsert(self, string_or_strings):
+        if self.read_only:
+            raise PermissionError("Read-only HyperRAG cache does not accept inserts")
         try:
             if isinstance(string_or_strings, (str, dict)):
                 string_or_strings = [string_or_strings]
